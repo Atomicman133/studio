@@ -123,6 +123,53 @@ type StaffGroup = {
   staffMembers: StaffMember[];
 };
 
+// Helper function to parse MemberName into rank, firstName, and lastName
+function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
+  let rank: typeof RANKS[number] | null = null;
+  let namePart = memberNameInput.trim();
+
+  for (const r of RANKS) {
+    if (namePart.toUpperCase().startsWith(r + " ")) {
+      rank = r;
+      namePart = namePart.substring(r.length).trim();
+      break;
+    }
+  }
+
+  if (!namePart) return { rank, firstName: null, lastName: null };
+
+  // Try "LastName, FirstName"
+  const commaIndex = namePart.indexOf(',');
+  if (commaIndex > 0 && commaIndex < namePart.length - 1) { // Ensure comma is not at start or end
+    const lastName = namePart.substring(0, commaIndex).trim();
+    const firstName = namePart.substring(commaIndex + 1).trim();
+    if (lastName && firstName) {
+      return { rank, firstName, lastName };
+    }
+  }
+
+  // Try "FirstName LastName" or "FirstName MiddleName LastName"
+  const parts = namePart.split(' ').filter(p => p); // Filter out empty strings from multiple spaces
+  if (parts.length >= 2) {
+    const lastName = parts[parts.length - 1];
+    const firstName = parts.slice(0, -1).join(' ');
+    if (firstName && lastName) {
+      return { rank, firstName, lastName };
+    }
+  }
+  
+  // If only one name part left (e.g. "Smith")
+  if (parts.length === 1 && parts[0]) {
+     // Cannot reliably determine if it's first or last.
+     // Let's assume it's a last name for now, user might need to correct.
+    return { rank, firstName: null, lastName: parts[0] };
+  }
+  
+  // Fallback: if namePart is not empty but couldn't be parsed into first/last
+  return { rank, firstName: null, lastName: namePart }; // lastName will hold the unparsed part
+}
+
+
 export default function StaffPage() {
   const [staffList, setStaffList] = React.useState<StaffMember[]>(initialStaff);
   const [isFormOpen, setIsFormOpen] = React.useState(false);
@@ -231,8 +278,10 @@ export default function StaffPage() {
       if (lines.length < 2) {
         errors.push("CSV must have a header and at least one data row.");
       } else {
-        const header = lines[0].split(',').map(h => h.trim());
-        const expectedHeader = ["serviceNumber", "rank", "firstName", "lastName", "email", "phone", "role", "joinDate", "squadron"];
+        const headerLine = lines[0].trim();
+        const header = headerLine.split(',').map(h => h.trim());
+        const expectedHeader = ["MemberUID", "MemberName", "PrimaryUnit", "Appointment", "EmailAddress", "PhoneNumber", "Address"];
+        
         if (JSON.stringify(header) !== JSON.stringify(expectedHeader)) {
             errors.push(`Invalid CSV header. Expected: ${expectedHeader.join(',')}. Got: ${header.join(',')}`);
         } else {
@@ -245,53 +294,58 @@ export default function StaffPage() {
                     errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}.`);
                     continue;
                 }
-
-                const staffData: any = {};
+                
+                const csvData: Record<string, string> = {};
                 header.forEach((col, index) => {
-                    staffData[col] = values[index];
+                    csvData[col] = values[index];
                 });
 
-                const rank = staffData.rank as typeof RANKS[number];
-                if (!RANKS.includes(rank)) {
-                    errors.push(`Row ${i + 1}: Invalid rank "${rank}". Valid ranks are: ${RANKS.join(", ")}.`);
+                const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
+
+                if (!rank) {
+                  errors.push(`Row ${i + 1}: Could not parse rank from MemberName "${csvData.MemberName}". Ensure it starts with a valid rank (e.g., FLTLT).`);
+                  continue;
+                }
+                if (!firstName || !lastName) {
+                  errors.push(`Row ${i + 1}: Could not parse first and last name from MemberName "${csvData.MemberName}". Expected format like "RANK LastName, FirstName" or "RANK FirstName LastName".`);
+                  continue;
+                }
+
+                const serviceNumber = csvData.MemberUID;
+                const email = csvData.EmailAddress;
+                const role = csvData.Appointment;
+                const squadron = csvData.PrimaryUnit || undefined; // Optional
+                const phone = csvData.PhoneNumber || undefined; // Optional
+                // Address (csvData.Address) is ignored as per current spec.
+
+                if (!serviceNumber || !email || !role) {
+                    errors.push(`Row ${i + 1}: Missing required fields (MemberUID, EmailAddress, Appointment).`);
+                    continue;
+                }
+                                
+                if (!/^\S+@\S+\.\S+$/.test(email)) {
+                    errors.push(`Row ${i+1}: Invalid email format for "${email}".`);
                     continue;
                 }
 
-                const joinDate = staffData.joinDate ? new Date(staffData.joinDate) : undefined;
-                if (staffData.joinDate && isNaN(joinDate?.getTime())) {
-                    errors.push(`Row ${i + 1}: Invalid joinDate format for "${staffData.joinDate}". Please use YYYY-MM-DD.`);
-                    continue;
-                }
-                
-                if (!staffData.serviceNumber || !staffData.firstName || !staffData.lastName || !staffData.email || !staffData.role || !staffData.squadron) {
-                    errors.push(`Row ${i + 1}: Missing one or more required fields (serviceNumber, rank, firstName, lastName, email, role, squadron).`);
-                    continue;
-                }
-                
-                if (!/^\S+@\S+\.\S+$/.test(staffData.email)) {
-                    errors.push(`Row ${i+1}: Invalid email format for "${staffData.email}".`);
-                    continue;
-                }
-
-                const isDuplicate = staffList.some(s => s.serviceNumber === staffData.serviceNumber || s.email === staffData.email) ||
-                                    importedMembers.some(s => s.serviceNumber === staffData.serviceNumber || s.email === staffData.email);
+                const isDuplicate = staffList.some(s => s.serviceNumber === serviceNumber || s.email === email) ||
+                                    importedMembers.some(s => s.serviceNumber === serviceNumber || s.email === email);
                 if (isDuplicate) {
-                    errors.push(`Row ${i + 1}: Duplicate service number or email for "${staffData.serviceNumber}/${staffData.email}". Skipped.`);
+                    errors.push(`Row ${i + 1}: Duplicate MemberUID or EmailAddress for "${serviceNumber}/${email}". Skipped.`);
                     continue;
                 }
-
 
                 importedMembers.push({
                     id: crypto.randomUUID(),
-                    serviceNumber: staffData.serviceNumber,
+                    serviceNumber: serviceNumber,
                     rank: rank,
-                    firstName: staffData.firstName,
-                    lastName: staffData.lastName,
-                    email: staffData.email,
-                    phone: staffData.phone || undefined,
-                    role: staffData.role,
-                    joinDate: joinDate,
-                    squadron: staffData.squadron,
+                    firstName: firstName,
+                    lastName: lastName,
+                    email: email,
+                    phone: phone,
+                    role: role,
+                    squadron: squadron,
+                    joinDate: undefined, // joinDate is not in this CSV format
                 });
             }
         }
@@ -333,32 +387,35 @@ export default function StaffPage() {
 
   const filteredTrainingLogs = React.useMemo(() => {
     if (!viewingStaffMember) return [];
+    // Match more reliably using service number if it were available in TrainingLog.
+    // For now, using name and rank.
     return initialTrainingLogs.filter(log => 
-      log.staffName === staffNameForTrainingLog && log.rank === viewingStaffMember.rank
-      // Ideally, match by serviceNumber if available in TrainingLog
+      log.staffName.toLowerCase() === staffNameForTrainingLog.toLowerCase() && 
+      log.rank === viewingStaffMember.rank &&
+      log.squadron === viewingStaffMember.squadron // Assuming training logs should also match squadron for relevance to *this* staff profile view.
     );
   }, [viewingStaffMember, staffNameForTrainingLog]);
 
   const filteredMeetings = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    return initialMeetings.filter(meeting => meeting.attendees.includes(currentStaffFullName));
+    return initialMeetings.filter(meeting => meeting.attendees.toLowerCase().includes(currentStaffFullName.toLowerCase()));
   }, [viewingStaffMember, currentStaffFullName]);
 
   const filteredPdps = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    return initialPdps.filter(pdp => pdp.staffName === currentStaffFullName);
+    return initialPdps.filter(pdp => pdp.staffName.toLowerCase() === currentStaffFullName.toLowerCase());
   }, [viewingStaffMember, currentStaffFullName]);
 
   const filteredDisciplineActions = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    return initialDisciplineActions.filter(action => action.staffName === currentStaffFullName);
+    return initialDisciplineActions.filter(action => action.staffName.toLowerCase() === currentStaffFullName.toLowerCase());
   }, [viewingStaffMember, currentStaffFullName]);
   
   const filteredAudits = React.useMemo(() => {
     if (!viewingStaffMember) return [];
     return initialAudits.filter(audit => 
-      audit.auditorName === currentStaffFullName || 
-      (audit.findings && audit.findings.some(f => f.assignedTo === currentStaffFullName))
+      audit.auditorName.toLowerCase() === currentStaffFullName.toLowerCase() || 
+      (audit.findings && audit.findings.some(f => f.assignedTo?.toLowerCase() === currentStaffFullName.toLowerCase()))
     );
   }, [viewingStaffMember, currentStaffFullName]);
 
@@ -484,17 +541,16 @@ export default function StaffPage() {
         <AlertDescription>
           To bulk import staff members, upload a CSV file with the following columns in order:
           <ul className="list-disc pl-5 mt-2 text-xs">
-            <li><code>serviceNumber</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
-            <li><code>rank</code> (Text, Required, e.g., &quot;FLTLT&quot;. Must be one of: {RANKS.join(", ")})</li>
-            <li><code>firstName</code> (Text, Required, e.g., &quot;Jane&quot;)</li>
-            <li><code>lastName</code> (Text, Required, e.g., &quot;Smith&quot;)</li>
-            <li><code>email</code> (Text, Required, Valid email format, e.g., &quot;jane.smith@example.com&quot;)</li>
-            <li><code>phone</code> (Text, Optional, e.g., &quot;0412345678&quot;)</li>
-            <li><code>role</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
-            <li><code>joinDate</code> (Date, Optional, Format: YYYY-MM-DD, e.g., &quot;2018-05-15&quot;)</li>
-            <li><code>squadron</code> (Text, Required, e.g., &quot;123 Squadron&quot;)</li>
+            <li><code>MemberUID</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
+            <li><code>MemberName</code> (Text, Required. Format: &quot;RANK LastName, FirstName&quot; e.g., &quot;FLTLT Smith, Jane&quot; or &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")})</li>
+            <li><code>PrimaryUnit</code> (Text, Optional, e.g., &quot;123 Squadron&quot;)</li>
+            <li><code>Appointment</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
+            <li><code>EmailAddress</code> (Text, Required, Valid email format, e.g., &quot;jane.smith@example.com&quot;)</li>
+            <li><code>PhoneNumber</code> (Text, Optional, e.g., &quot;0412345678&quot;)</li>
+            <li><code>Address</code> (Text, Optional. This column is currently ignored by the import process.)</li>
           </ul>
-          The first row must be a header row with these exact names. Service Number and Email must be unique per staff member.
+          The first row must be a header row with these exact names. MemberUID and EmailAddress must be unique per staff member.
+          Join Date is not part of this import format and will be unassigned.
         </AlertDescription>
       </Alert>
 
@@ -552,7 +608,7 @@ export default function StaffPage() {
                             </div>
                         </div>
                         
-                        <Accordion type="multiple" className="w-full">
+                        <Accordion type="multiple" className="w-full" collapsible>
                           <AccordionItem value="training">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
