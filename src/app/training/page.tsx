@@ -86,13 +86,38 @@ const initialTrainingLogs: TrainingLog[] = [
     qualificationAchieved: "HLTAID011",
     achievementDetails: "Instructor recommendation."
   },
+   {
+    id: "t4",
+    rank: "PLTOFF",
+    staffName: "Williams, Alice",
+    squadron: "123 Squadron",
+    currentRole: "Admin Officer",
+    courseName: "Introduction to AAFC Systems",
+    completionDate: new Date("2024-01-15"),
+    qualificationAchieved: "System Access Granted",
+  },
+  {
+    id: "t5",
+    rank: "SQNLDR",
+    staffName: "Brown, Robert",
+    squadron: "721 Wing HQ", // Example of a different "squadron" like entity
+    currentRole: "Wing Training Coordinator",
+    courseName: "Senior Leadership Seminar",
+    completionDate: new Date("2023-09-05"),
+    qualificationAchieved: "SLS Attendance",
+  },
 ];
 
-type GroupedTrainingLogEntry = {
+type StaffMemberLogGroup = {
   identifier: string; 
   rank: typeof RANKS[number];
   staffName: string;
   logs: TrainingLog[];
+};
+
+type SquadronGroup = {
+  squadronName: string;
+  staffMembers: StaffMemberLogGroup[];
 };
 
 
@@ -113,29 +138,52 @@ export default function TrainingPage() {
   const [logToDelete, setLogToDelete] = React.useState<TrainingLog | null>(null);
   const [viewingLog, setViewingLog] = React.useState<TrainingLog | null>(null);
 
-  const staffGroups = React.useMemo(() => {
-    const groups: Record<string, { rank: typeof RANKS[number]; staffName: string; logs: TrainingLog[] }> = {};
+  const squadronStaffGroups = React.useMemo(() => {
+    const logsBySquadron: Record<string, TrainingLog[]> = {};
     trainingLogsList.forEach(log => {
-        const key = `${log.rank} ${log.staffName}`;
-        if (!groups[key]) {
-            groups[key] = { rank: log.rank, staffName: log.staffName, logs: [] };
-        }
-        groups[key].logs.push(log);
+      if (!logsBySquadron[log.squadron]) {
+        logsBySquadron[log.squadron] = [];
+      }
+      logsBySquadron[log.squadron].push(log);
     });
-    
-    return Object.values(groups)
-      .map(group => ({
-        ...group,
-        logs: group.logs.sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime())
-      }))
-      .sort((a, b) => {
-        const rankOrder = RANKS;
-        const rankComparison = rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank);
-        if (rankComparison !== 0) {
-            return rankComparison;
-        }
-        return a.staffName.localeCompare(b.staffName);
-    });
+
+    const processedSquadrons: SquadronGroup[] = Object.entries(logsBySquadron)
+      .map(([squadronName, squadronLogs]) => {
+        const staffGroupsInSquadron: Record<string, { rank: typeof RANKS[number]; staffName: string; logs: TrainingLog[] }> = {};
+        squadronLogs.forEach(log => {
+          const staffKey = `${log.rank} ${log.staffName}`;
+          if (!staffGroupsInSquadron[staffKey]) {
+            staffGroupsInSquadron[staffKey] = { rank: log.rank, staffName: log.staffName, logs: [] };
+          }
+          staffGroupsInSquadron[staffKey].logs.push(log);
+        });
+
+        const staffMembers = Object.values(staffGroupsInSquadron)
+          .map(staffGroup => ({
+            ...staffGroup,
+            identifier: `${staffGroup.rank} ${staffGroup.staffName}`,
+            logs: staffGroup.logs.sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()),
+          }))
+          .sort((a, b) => {
+            const rankOrder = RANKS;
+            const rankAIndex = rankOrder.indexOf(a.rank);
+            const rankBIndex = rankOrder.indexOf(b.rank);
+            
+            // Handle cases where rank might not be in RANKS (e.g. data error) by pushing them to the end
+            if (rankAIndex === -1 && rankBIndex === -1) return a.staffName.localeCompare(b.staffName);
+            if (rankAIndex === -1) return 1;
+            if (rankBIndex === -1) return -1;
+            
+            const rankComparison = rankAIndex - rankBIndex;
+            if (rankComparison !== 0) return rankComparison;
+            return a.staffName.localeCompare(b.staffName);
+          });
+
+        return { squadronName, staffMembers };
+      })
+      .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
+
+    return processedSquadrons;
   }, [trainingLogsList]);
 
 
@@ -181,7 +229,7 @@ export default function TrainingPage() {
     content += `Rank: ${log.rank}\n`;
     content += `Staff Name: ${log.staffName}\n`;
     content += `Squadron: ${log.squadron}\n`;
-    content += `Current Role: ${log.currentRole}\n`;
+    content += `Role at time of training: ${log.currentRole}\n`;
     content += `Course Name: ${log.courseName}\n`;
     content += `Completion Date: ${format(log.completionDate, "PPP")}\n\n`;
     
@@ -198,18 +246,19 @@ export default function TrainingPage() {
     downloadTextFile(filename, content);
   };
   
-  const handleExportAllTrainingRecordsForMember = (group: { rank: typeof RANKS[number]; staffName: string; logs: TrainingLog[] }) => {
-    const staffIdentifier = `${group.rank}_${group.staffName.replace(/\s*,\s*|\s+/g, '_')}`;
+  const handleExportAllTrainingRecordsForMember = (staffMemberGroup: StaffMemberLogGroup) => {
+    const staffIdentifier = `${staffMemberGroup.rank}_${staffMemberGroup.staffName.replace(/\s*,\s*|\s+/g, '_')}`;
     const filename = `all_training_records_${staffIdentifier}.txt`;
 
-    let content = `All Training Records for ${group.rank} ${group.staffName}\n`;
+    let content = `All Training Records for ${staffMemberGroup.rank} ${staffMemberGroup.staffName}\n`;
+    content += `Associated with Squadron(s): ${Array.from(new Set(staffMemberGroup.logs.map(l => l.squadron))).join(', ')}\n`
     content += `====================================================\n\n`;
 
-    group.logs.forEach((log, index) => {
-      content += `Record ${index + 1} of ${group.logs.length}\n`;
+    staffMemberGroup.logs.forEach((log, index) => {
+      content += `Record ${index + 1} of ${staffMemberGroup.logs.length}\n`;
       content += `------------------------------------\n`;
       content += `Course Name: ${log.courseName}\n`;
-      content += `Squadron: ${log.squadron}\n`;
+      content += `Squadron at time of training: ${log.squadron}\n`;
       content += `Role at time of training: ${log.currentRole}\n`;
       content += `Completion Date: ${format(log.completionDate, "PPP")}\n`;
       if (log.qualificationAchieved) {
@@ -262,95 +311,110 @@ export default function TrainingPage() {
         </CardHeader>
       </Card>
 
-        {staffGroups.length === 0 && (
-             <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                    <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
-                    <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Training Records Yet</h3>
-                    <p className="text-muted-foreground mb-4">Click &quot;Log Training Record&quot; to get started.</p>
-                </CardContent>
-             </Card>
-        )}
+      {squadronStaffGroups.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
+            <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Training Records Yet</h3>
+            <p className="text-muted-foreground mb-4">Click &quot;Log Training Record&quot; to get started.</p>
+          </CardContent>
+        </Card>
+      )}
 
-        {staffGroups.map((group) => (
-            <Card key={group.identifier || `${group.rank}-${group.staffName}`} className="shadow-md mb-6">
-                <CardHeader className="border-b">
-                    <div className="flex justify-between items-center">
+      {squadronStaffGroups.map((squadronGroup) => (
+        <Card key={squadronGroup.squadronName} className="shadow-xl mb-8">
+          <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b rounded-t-lg">
+            <CardTitle className="text-2xl">Squadron: {squadronGroup.squadronName}</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 px-2 sm:px-4 md:px-6">
+            {squadronGroup.staffMembers.length === 0 ? (
+              <p className="text-muted-foreground text-center py-6">No training records for this squadron.</p>
+            ) : (
+              <div className="space-y-6 py-6">
+                {squadronGroup.staffMembers.map((staffMemberGroup) => (
+                  <Card key={staffMemberGroup.identifier} className="shadow-md">
+                    <CardHeader className="border-b bg-background">
+                      <div className="flex justify-between items-center flex-wrap gap-2">
                         <div>
-                            <CardTitle className="text-xl">{group.rank} {group.staffName}</CardTitle>
-                            <CardDescription>{group.logs.length} training record(s)</CardDescription>
+                          <CardTitle className="text-xl">{staffMemberGroup.rank} {staffMemberGroup.staffName}</CardTitle>
+                          <CardDescription>{staffMemberGroup.logs.length} training record(s)</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(group)}>
-                            <Archive className="mr-2 h-4 w-4" /> Export All for Member
+                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)}>
+                          <Archive className="mr-2 h-4 w-4" /> Export All for Member
                         </Button>
-                    </div>
-                </CardHeader>
-                <CardContent className="pt-4">
-                    <Table>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <Table>
                         <TableHeader>
-                            <TableRow>
-                                <TableHead>Course/Training</TableHead>
-                                <TableHead className="hidden sm:table-cell">Squadron</TableHead>
-                                <TableHead className="hidden md:table-cell">Role</TableHead>
-                                <TableHead>Completion</TableHead>
-                                <TableHead className="hidden lg:table-cell">Qualification</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
+                          <TableRow>
+                            <TableHead>Course/Training</TableHead>
+                            <TableHead className="hidden md:table-cell">Role at Training</TableHead>
+                            <TableHead>Completion</TableHead>
+                            <TableHead className="hidden lg:table-cell">Qualification</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {group.logs.map((log) => (
-                                <TableRow key={log.id}>
-                                    <TableCell className="font-medium">{log.courseName}</TableCell>
-                                    <TableCell className="hidden sm:table-cell">{log.squadron}</TableCell>
-                                    <TableCell className="hidden md:table-cell">{log.currentRole}</TableCell>
-                                    <TableCell>{format(log.completionDate, "PP")}</TableCell>
-                                    <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
-                                    <TableCell className="text-right">
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" className="h-8 w-8 p-0">
-                                            <span className="sr-only">Open menu</span>
-                                            <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                        <DropdownMenuItem onClick={() => handleViewDetails(log)}>
-                                            <Info className="mr-2 h-4 w-4" />
-                                            View Details
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleEdit(log)}>
-                                            <Pencil className="mr-2 h-4 w-4" />
-                                            Edit
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)}>
-                                            <Download className="mr-2 h-4 w-4" />
-                                            Export Record
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                            onClick={() => setLogToDelete(log)}
-                                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                        >
-                                            <Trash2 className="mr-2 h-4 w-4" />
-                                            Delete
-                                        </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
+                          {staffMemberGroup.logs.map((log) => (
+                            <TableRow key={log.id}>
+                              <TableCell className="font-medium">{log.courseName}</TableCell>
+                              <TableCell className="hidden md:table-cell">{log.currentRole}</TableCell>
+                              <TableCell>{format(log.completionDate, "PP")}</TableCell>
+                              <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                              <TableCell className="text-right">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" className="h-8 w-8 p-0">
+                                      <span className="sr-only">Open menu</span>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                    <DropdownMenuItem onClick={() => handleViewDetails(log)}>
+                                      <Info className="mr-2 h-4 w-4" />
+                                      View Details
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEdit(log)}>
+                                      <Pencil className="mr-2 h-4 w-4" />
+                                      Edit
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)}>
+                                      <Download className="mr-2 h-4 w-4" />
+                                      Export Record
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => setLogToDelete(log)}
+                                      className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          ))}
                         </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
-        ))}
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
         
-        {staffGroups.length > 0 && (
-            <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
-                Displaying records for {staffGroups.length} staff member(s). Total individual logs: {trainingLogsList.length}.
+      {squadronStaffGroups.length > 0 && (
+          <Card>
+            <CardFooter className="text-xs text-muted-foreground pt-4 justify-center">
+                 Displaying records for {squadronStaffGroups.reduce((acc, sq) => acc + sq.staffMembers.length, 0)} staff member(s) across {squadronStaffGroups.length} squadron(s). Total individual logs: {trainingLogsList.length}.
             </CardFooter>
-        )}
+          </Card>
+      )}
 
 
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
@@ -400,7 +464,7 @@ export default function TrainingPage() {
                             <p className="text-sm text-muted-foreground">{viewingLog.squadron}</p>
                         </div>
                         <div>
-                            <h3 className="font-semibold text-sm mb-1">Current Role</h3>
+                            <h3 className="font-semibold text-sm mb-1">Role at time of training</h3>
                             <p className="text-sm text-muted-foreground">{viewingLog.currentRole}</p>
                         </div>
                          {viewingLog.qualificationAchieved && (
@@ -483,7 +547,7 @@ export default function TrainingPage() {
             </li>
              <li className="flex items-center">
               <Archive className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Group records by staff member and export all records for a member. (Implemented)
+              Group records by squadron and staff member, export records. (Implemented)
             </li>
             <li className="flex items-center">
               <UserCog className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
