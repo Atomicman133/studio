@@ -2,11 +2,21 @@
 import { z } from 'zod';
 
 export const RANKS = [
-  "OFFCDT", // Officer Cadet
-  "PLTOFF", // Pilot Officer
-  "FLGOFF", // Flying Officer
-  "FLTLT",  // Flight Lieutenant
-  "SQNLDR", // Squadron Leader
+  "CIV",
+  "AC(AAFC)",
+  "ACW(AAFC)",
+  "LAC(AAFC)",
+  "LACW(AAFC)",
+  "CPL(AAFC)",
+  "SGT(AAFC)",
+  "FSGT(AAFC)",
+  "WOFF(AAFC)",
+  "PLTOFF(AAFC)",
+  "FLGOFF(AAFC)",
+  "FLTLT(AAFC)",
+  "SQNLDR(AAFC)",
+  "WGCDR(AAFC)",
+  "GPCAPT(AAFC)",
 ] as const;
 
 export const staffMemberSchema = z.object({

@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import * as React from "react";
@@ -57,7 +56,7 @@ import { RANKS } from "@/app/staff/staff-schema";
 export const initialTrainingLogs: TrainingLog[] = [
   {
     id: "t1",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane",
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -67,7 +66,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t2",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     staffName: "Doe, John",
     squadron: "456 Squadron",
     currentRole: "Safety Officer",
@@ -78,7 +77,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t3",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane",
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -89,7 +88,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
    {
     id: "t4",
-    rank: "PLTOFF",
+    rank: "PLTOFF(AAFC)",
     staffName: "Williams, Alice",
     squadron: "123 Squadron",
     currentRole: "Admin Officer",
@@ -99,7 +98,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t5",
-    rank: "SQNLDR",
+    rank: "SQNLDR(AAFC)",
     staffName: "Brown, Robert",
     squadron: "721 Wing HQ", 
     currentRole: "Wing Training Coordinator",
@@ -110,7 +109,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   // Adding more diverse logs for better compliance testing
   {
     id: "t6",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     staffName: "Doe, John", // John Doe from 456 SQN
     squadron: "456 Squadron",
     currentRole: "Safety Officer",
@@ -120,7 +119,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t7",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane", // Jane Smith from 123 SQN
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -129,7 +128,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t8",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     staffName: "Doe, John",
     squadron: "456 Squadron",
     currentRole: "Safety Officer",
@@ -138,7 +137,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t9",
-    rank: "PLTOFF",
+    rank: "PLTOFF(AAFC)",
     staffName: "Williams, Alice",
     squadron: "123 Squadron",
     currentRole: "Admin Officer",
@@ -147,7 +146,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   {
     id: "t10",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane",
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -156,7 +155,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
    { // Jane Smith gets her WWCC
     id: "t11",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane",
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -166,7 +165,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   { // Jane Smith gets her Police Check (recent)
     id: "t12",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane",
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -175,7 +174,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   { // Jane Smith gets her DYSAT (recent)
     id: "t13",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     staffName: "Smith, Jane",
     squadron: "123 Squadron",
     currentRole: "Training Officer",
@@ -184,7 +183,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
    { // John Doe gets Code of Conduct
     id: "t14",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     staffName: "Doe, John",
     squadron: "456 Squadron",
     currentRole: "Safety Officer",
@@ -193,7 +192,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
   { // John Doe gets Psych Assessment
     id: "t15",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     staffName: "Doe, John",
     squadron: "456 Squadron",
     currentRole: "Safety Officer",
@@ -202,7 +201,7 @@ export const initialTrainingLogs: TrainingLog[] = [
   },
    { // John Doe gets DYSAT (old, will be expired)
     id: "t16",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     staffName: "Doe, John",
     squadron: "456 Squadron",
     currentRole: "Safety Officer",
@@ -278,16 +277,20 @@ export default function TrainingPage() {
             logs: staffGroup.logs.sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()),
           }))
           .sort((a, b) => {
-            const rankOrder = RANKS;
-            const rankAIndex = rankOrder.indexOf(a.rank);
-            const rankBIndex = rankOrder.indexOf(b.rank);
+            // Use the imported RANKS array for correct sorting order
+            const rankAIndex = RANKS.indexOf(a.rank);
+            const rankBIndex = RANKS.indexOf(b.rank);
             
+            // Handle cases where rank might not be in RANKS (though schema should prevent this)
             if (rankAIndex === -1 && rankBIndex === -1) return a.staffName.localeCompare(b.staffName);
-            if (rankAIndex === -1) return 1;
-            if (rankBIndex === -1) return -1;
+            if (rankAIndex === -1) return 1; // Ranks not in the list go last
+            if (rankBIndex === -1) return -1; // Ranks not in the list go last
             
-            const rankComparison = rankBIndex - rankAIndex; // Higher rank first
+            // Sort by rank index (higher rank first, as per typical military hierarchy if RANKS is ordered lowest to highest)
+            const rankComparison = rankBIndex - rankAIndex; 
             if (rankComparison !== 0) return rankComparison;
+            
+            // If ranks are the same, sort by staff name
             return a.staffName.localeCompare(b.staffName);
           });
 
@@ -769,4 +772,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-

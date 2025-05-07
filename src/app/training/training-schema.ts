@@ -27,4 +27,3 @@ export const trainingLogFormSchema = trainingLogSchema.extend({
 });
 
 export type TrainingLogFormData = z.infer<typeof trainingLogFormSchema>;
-

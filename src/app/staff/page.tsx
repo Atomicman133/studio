@@ -62,18 +62,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 
 // Import initial data from other modules
-import { initialTrainingLogs, type TrainingLog } from "../training/page";
-import { initialMeetings, type Meeting } from "../meetings/page";
-import { initialDisciplineActions, type DisciplineAction } from "../discipline/page";
-import { initialPdps, type Pdp } from "../pdps/page";
-import { initialAudits, type SafetyAudit } from "../audits/page";
+import { initialTrainingLogs } from "../training/page"; // Removed type TrainingLog import as it's not directly used here
+import { initialMeetings } from "../meetings/page"; // Removed type Meeting
+import { initialDisciplineActions } from "../discipline/page"; // Removed type DisciplineAction
+import { initialPdps } from "../pdps/page"; // Removed type Pdp
+import { initialAudits } from "../audits/page"; // Removed type SafetyAudit
 
 
 export const initialStaff: StaffMember[] = [
   {
     id: "1f7b3c2a-8e1d-4f9a-8b7c-6d5e4f3a2b1c",
     serviceNumber: "8001234",
-    rank: "FLTLT",
+    rank: "FLTLT(AAFC)",
     firstName: "Jane",
     lastName: "Smith",
     email: "jane.smith@example.com",
@@ -85,7 +85,7 @@ export const initialStaff: StaffMember[] = [
   {
     id: "2g8c4d3b-9f2e-5g0b-9c8d-7e6f5g4b3c2d",
     serviceNumber: "8005678",
-    rank: "FLGOFF",
+    rank: "FLGOFF(AAFC)",
     firstName: "John",
     lastName: "Doe",
     email: "john.doe@example.com",
@@ -97,7 +97,7 @@ export const initialStaff: StaffMember[] = [
   {
     id: "3h9d5e4c-0g3f-6h1c-0d9e-8f7g6h5c4d3e",
     serviceNumber: "8009012",
-    rank: "PLTOFF",
+    rank: "PLTOFF(AAFC)",
     firstName: "Alice",
     lastName: "Williams",
     email: "alice.williams@example.com",
@@ -108,7 +108,7 @@ export const initialStaff: StaffMember[] = [
   { 
     id: "4i0e6f5d-1h4g-7i2d-1e0f-9g8h7i6d5e4f",
     serviceNumber: "8012345",
-    rank: "SQNLDR",
+    rank: "SQNLDR(AAFC)",
     firstName: "Robert",
     lastName: "Brown",
     email: "robert.brown@example.com",
@@ -128,9 +128,15 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   let rank: typeof RANKS[number] | null = null;
   let namePart = memberNameInput.trim();
 
-  for (const r of RANKS) {
+  // Iterate in reverse order of rank string length to match longer ranks first (e.g. "PLTOFF(AAFC)" before "CIV")
+  // Or ensure ranks like "AC(AAFC)" are checked before just "AC" if "AC" was a valid rank.
+  // The current RANKS order is fine as specific ranks are checked.
+  const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
+
+
+  for (const r of sortedRanksForParsing) {
     if (namePart.toUpperCase().startsWith(r + " ")) {
-      rank = r;
+      rank = r as typeof RANKS[number]; // Ensure r is treated as a valid rank type
       namePart = namePart.substring(r.length).trim();
       break;
     }
@@ -160,8 +166,8 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   
   // If only one name part left (e.g. "Smith")
   if (parts.length === 1 && parts[0]) {
-     // Cannot reliably determine if it's first or last.
-     // Let's assume it's a last name for now, user might need to correct.
+    // Cannot reliably determine if it's first or last.
+    // Let's assume it's a last name for now, user might need to correct.
     return { rank, firstName: null, lastName: parts[0] };
   }
   
@@ -196,7 +202,8 @@ export default function StaffPage() {
           const rankAIndex = RANKS.indexOf(a.rank);
           const rankBIndex = RANKS.indexOf(b.rank);
           if (rankAIndex !== rankBIndex) {
-            return rankBIndex - rankAIndex; // Higher rank first
+            // If RANKS is sorted lowest to highest, rankBIndex - rankAIndex sorts higher rank first
+            return rankBIndex - rankAIndex; 
           }
           return a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName);
         }),
@@ -303,7 +310,7 @@ export default function StaffPage() {
                 const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
 
                 if (!rank) {
-                  errors.push(`Row ${i + 1}: Could not parse rank from MemberName "${csvData.MemberName}". Ensure it starts with a valid rank (e.g., FLTLT).`);
+                  errors.push(`Row ${i + 1}: Could not parse rank from MemberName "${csvData.MemberName}". Ensure it starts with a valid rank (e.g., ${RANKS[RANKS.length-1]}). Valid ranks: ${RANKS.join(", ")}`);
                   continue;
                 }
                 if (!firstName || !lastName) {
@@ -314,9 +321,8 @@ export default function StaffPage() {
                 const serviceNumber = csvData.MemberUID;
                 const email = csvData.EmailAddress;
                 const role = csvData.Appointment;
-                const squadron = csvData.PrimaryUnit || undefined; // Optional
-                const phone = csvData.PhoneNumber || undefined; // Optional
-                // Address (csvData.Address) is ignored as per current spec.
+                const squadron = csvData.PrimaryUnit || undefined; 
+                const phone = csvData.PhoneNumber || undefined; 
 
                 if (!serviceNumber || !email || !role) {
                     errors.push(`Row ${i + 1}: Missing required fields (MemberUID, EmailAddress, Appointment).`);
@@ -345,7 +351,7 @@ export default function StaffPage() {
                     phone: phone,
                     role: role,
                     squadron: squadron,
-                    joinDate: undefined, // joinDate is not in this CSV format
+                    joinDate: undefined, 
                 });
             }
         }
@@ -387,12 +393,10 @@ export default function StaffPage() {
 
   const filteredTrainingLogs = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    // Match more reliably using service number if it were available in TrainingLog.
-    // For now, using name and rank.
     return initialTrainingLogs.filter(log => 
       log.staffName.toLowerCase() === staffNameForTrainingLog.toLowerCase() && 
       log.rank === viewingStaffMember.rank &&
-      log.squadron === viewingStaffMember.squadron // Assuming training logs should also match squadron for relevance to *this* staff profile view.
+      log.squadron === viewingStaffMember.squadron 
     );
   }, [viewingStaffMember, staffNameForTrainingLog]);
 
@@ -542,7 +546,7 @@ export default function StaffPage() {
           To bulk import staff members, upload a CSV file with the following columns in order:
           <ul className="list-disc pl-5 mt-2 text-xs">
             <li><code>MemberUID</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
-            <li><code>MemberName</code> (Text, Required. Format: &quot;RANK LastName, FirstName&quot; e.g., &quot;FLTLT Smith, Jane&quot; or &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")})</li>
+            <li><code>MemberName</code> (Text, Required. Format: &quot;RANK LastName, FirstName&quot; e.g., &quot;FLTLT(AAFC) Smith, Jane&quot; or &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")})</li>
             <li><code>PrimaryUnit</code> (Text, Optional, e.g., &quot;123 Squadron&quot;)</li>
             <li><code>Appointment</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
             <li><code>EmailAddress</code> (Text, Required, Valid email format, e.g., &quot;jane.smith@example.com&quot;)</li>
@@ -608,7 +612,7 @@ export default function StaffPage() {
                             </div>
                         </div>
                         
-                        <Accordion type="multiple" className="w-full" collapsible>
+                        <Accordion type="multiple" collapsible className="w-full">
                           <AccordionItem value="training">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">

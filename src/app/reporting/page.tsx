@@ -31,28 +31,21 @@ import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reportin
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
-import { initialTrainingLogs } from "../training/page"; // Using example data
-import { initialStaff } from "../staff/page"; // Using example data
-import { addYears, isBefore, format, differenceInDays, subDays } from "date-fns";
+import { initialTrainingLogs } from "../training/page"; 
+import { initialStaff } from "../staff/page"; 
+import { addYears, isBefore, format, differenceInDays } from "date-fns"; // Removed subDays as it's not used
+import { RANKS } from "../staff/staff-schema"; // Import new RANKS
 
-// Helper to normalize staff name from TrainingLog ("Smith, Jane") to match StaffMember ("Jane Smith") for easier comparison
-// This is a simplified approach. Ideally, a unique staff ID would be used.
+
 const getStaffIdentifier = (staffMember: StaffMember): string => {
   return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
 };
 
 const getTrainingLogStaffIdentifier = (log: TrainingLog): string => {
-  // Assuming log.staffName is "LastName, FirstName"
-  // This will require training logs to have a service number, or a less reliable match.
-  // For now, let's assume we can fetch staff by name and rank from logs if service number isn't in TrainingLog.
-  // The provided initialTrainingLogs don't have serviceNumber, so we'll match on rank and name for now.
-  // This part is tricky without a consistent ID.
-  // Let's find the StaffMember that matches the log's rank and name.
   const matchedStaff = initialStaff.find(sm => sm.rank === log.rank && `${sm.lastName}, ${sm.firstName}` === log.staffName);
   if (matchedStaff) {
     return getStaffIdentifier(matchedStaff);
   }
-  // Fallback if no direct match by service number (if it were available)
   return `${log.staffName}_${log.rank}_UNKNOWN_SN`;
 };
 
@@ -69,14 +62,14 @@ const processComplianceReports = (
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
       const relevantLogs = memberLogs
         .filter(log => criterion.identifier(log))
-        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()); // Most recent first
+        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()); 
 
       let isMet = false;
       let details = "Missing";
       let selectedLog: TrainingLog | undefined = undefined;
 
       if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0]; // Consider the most recent relevant log
+        selectedLog = relevantLogs[0]; 
         const completionDate = new Date(selectedLog.completionDate);
         if (criterion.yearsToExpire) {
           const expiryDate = addYears(completionDate, criterion.yearsToExpire);
@@ -87,7 +80,6 @@ const processComplianceReports = (
             details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
           }
         } else {
-          // For items without explicit expiry, existence of a log means it's met
           isMet = true;
           details = `Completed: ${format(completionDate, "PP")}`;
         }
@@ -105,23 +97,29 @@ const processComplianceReports = (
     const isCompliant = criteriaChecks.every(c => c.isMet);
 
     return {
-      staffMemberId: staff.id || staffId, // Use staff.id if available
+      staffMemberId: staff.id || staffId, 
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
-      squadron: (staff as any).squadron || memberLogs[0]?.squadron || "N/A", // staff.squadron if available from StaffMember
+      squadron: (staff as any).squadron || memberLogs[0]?.squadron || "N/A", 
       isCompliant,
       criteriaChecks,
     };
   })
-  .sort((a,b) => { // Sort by squadron, then rank, then name
+  .sort((a,b) => { 
     if (a.squadron.localeCompare(b.squadron) !== 0) {
         return a.squadron.localeCompare(b.squadron);
     }
-    const rankOrder = ["OFFCDT", "PLTOFF", "FLGOFF", "FLTLT", "SQNLDR"]; // Assuming RANKS constant
-    const rankAIndex = rankOrder.indexOf(a.staffMemberRank);
-    const rankBIndex = rankOrder.indexOf(b.staffMemberRank);
+    const rankOrder = RANKS; 
+    const rankAIndex = rankOrder.indexOf(a.staffMemberRank as typeof RANKS[number]); // Cast for type safety
+    const rankBIndex = rankOrder.indexOf(b.staffMemberRank as typeof RANKS[number]); // Cast for type safety
+    
+    // Handle cases where rank might not be in RANKS (though schema should prevent this)
+    if (rankAIndex === -1 && rankBIndex === -1) return a.staffMemberName.localeCompare(b.staffMemberName);
+    if (rankAIndex === -1) return 1; // Ranks not in the list go last
+    if (rankBIndex === -1) return -1; // Ranks not in the list go last
+
     if (rankAIndex !== rankBIndex) {
-        return rankBIndex - rankAIndex; // Higher rank first
+        return rankBIndex - rankAIndex; // Higher rank first (assuming RANKS is sorted lowest to highest)
     }
     return a.staffMemberName.localeCompare(b.staffMemberName);
   });
@@ -133,7 +131,6 @@ export default function ReportingPage() {
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    // In a real app, staffList and trainingLogsList would be fetched from a backend
     const reports = processComplianceReports(initialStaff, initialTrainingLogs);
     setComplianceReports(reports);
   }, []);
@@ -151,7 +148,7 @@ export default function ReportingPage() {
     if (isBefore(new Date(), expiryDate)) {
       return differenceInDays(expiryDate, new Date());
     }
-    return null; // Expired or not applicable
+    return null; 
   };
   
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -162,9 +159,9 @@ export default function ReportingPage() {
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire!);
 
     if (daysLeft !== null) {
-      if (daysLeft <= 30) { // Expiring within 30 days
+      if (daysLeft <= 30) { 
         return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-      } else if (daysLeft <= 90) { // Expiring within 90 days
+      } else if (daysLeft <= 90) { 
         return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
       }
     }
@@ -198,7 +195,7 @@ export default function ReportingPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[50px]"></TableHead> {/* For expand icon */}
+                  <TableHead className="w-[50px]"></TableHead> {}
                   <TableHead>Squadron</TableHead>
                   <TableHead>Staff Member</TableHead>
                   <TableHead>Overall Status</TableHead>
@@ -230,7 +227,7 @@ export default function ReportingPage() {
                       </TableRow>
                       <CollapsibleContent asChild>
                         <TableRow>
-                          <TableCell /> {/* Empty cell for alignment under expand icon */}
+                          <TableCell /> {}
                           <TableCell colSpan={3} className="p-0">
                             <div className="p-4 bg-muted/30 dark:bg-muted/20">
                               <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
@@ -308,6 +305,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-
-
-    
