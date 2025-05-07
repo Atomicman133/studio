@@ -21,7 +21,7 @@ import type { SquadronVisit, VisitActionItem } from "./squadron-visits/squadron-
 import { initialSquadronVisits } from "./squadron-visits/page";
 
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ChartContainer, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"; // Assuming ChartConfig can be imported
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"; 
 
 
 // Helper function from reporting page (adapted)
@@ -351,3 +351,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
