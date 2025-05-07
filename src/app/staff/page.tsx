@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -58,7 +59,8 @@ import { RANKS } from "./staff-schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
+// Badge component is not used directly in this file after recent changes, can be removed if not needed by child components passed here.
+// import { Badge } from "@/components/ui/badge"; 
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData'; // Import hooks
 
 // Import types for related data (actual data will be fetched or passed)
@@ -246,6 +248,7 @@ export default function StaffPage() {
         const text = e.target?.result as string;
         if (!text) {
           toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+          setIsImportingCsv(false);
           return;
         }
 
@@ -257,11 +260,17 @@ export default function StaffPage() {
           errors.push("CSV must have a header and at least one data row.");
         } else {
           const headerLine = lines[0].trim();
-          const header = headerLine.split(',').map(h => h.trim());
+          const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Clean header
           const expectedHeader = ["MemberUID", "MemberName", "PrimaryUnit", "Appointment", "EmailAddress", "PhoneNumber", "Address"];
 
-          if (JSON.stringify(header) !== JSON.stringify(expectedHeader)) {
-              errors.push(`Invalid CSV header. Expected: ${expectedHeader.join(',')}. Got: ${header.join(',')}`);
+          // Check if all expected headers are present, order doesn't strictly matter for this check
+          // but we will enforce order for value extraction.
+          const allExpectedHeadersPresent = expectedHeader.every(eh => csvHeader.includes(eh));
+          const headersMatchOrder = JSON.stringify(csvHeader) === JSON.stringify(expectedHeader);
+
+
+          if (!headersMatchOrder) { // Strict check for order and content
+              errors.push(`Invalid CSV header or order. Expected: "${expectedHeader.join(',')}" (in this exact order). Got: "${csvHeader.join(',')}"`);
           } else {
               const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
               const existingEmails = new Set(staffList.map(s => s.email));
@@ -270,16 +279,38 @@ export default function StaffPage() {
                   const line = lines[i].trim();
                   if (!line) continue;
 
-                  const values = line.split(',').map(v => v.trim());
-                  if (values.length !== header.length) {
-                      errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}.`);
+                  // Robust CSV line parser
+                  const values = [];
+                  let currentVal = '';
+                  let inQuotes = false;
+                  for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                      const char = line[charIndex];
+                      if (char === '"' && (charIndex === 0 || line[charIndex-1] !== '"')) { // Handle " at start or non-escaped "
+                          if (inQuotes && charIndex + 1 < line.length && line[charIndex+1] === '"') { // Escaped double quote ""
+                              currentVal += '"';
+                              charIndex++; // Skip next quote
+                          } else {
+                              inQuotes = !inQuotes;
+                          }
+                      } else if (char === ',' && !inQuotes) {
+                          values.push(currentVal.trim());
+                          currentVal = '';
+                      } else {
+                          currentVal += char;
+                      }
+                  }
+                  values.push(currentVal.trim()); // Add last value
+
+                  if (values.length !== csvHeader.length) {
+                      errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
                       continue;
                   }
 
                   const csvData: Record<string, string> = {};
-                  header.forEach((col, index) => {
-                      csvData[col] = values[index];
+                  csvHeader.forEach((header, index) => {
+                      csvData[header] = values[index].replace(/^"|"$/g, ''); // Also remove quotes from values
                   });
+
 
                   const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
 
@@ -322,7 +353,7 @@ export default function StaffPage() {
                       phone: phone,
                       role: role,
                       squadron: squadron,
-                      joinDate: undefined,
+                      joinDate: undefined, // Join date not in CSV
                   });
               }
           }
@@ -338,24 +369,46 @@ export default function StaffPage() {
                  errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}): ${err.message}`);
              }
           }
-           if (importedCount > 0) {
-              toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported.` });
-           }
+        }
+        
+        if (importedCount > 0 && errors.length === 0) {
+            toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
+        } else if (importedCount > 0 && errors.length > 0) {
+            const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+            toast({
+                variant: "default", // Consider it partially successful
+                title: "CSV Import Partially Successful",
+                description: (
+                  <ScrollArea className="max-h-40">
+                    <pre className="whitespace-pre-wrap text-xs">
+                      {importedCount} records imported. Some rows had errors:
+                      <br />
+                      {errorMessages}
+                    </pre>
+                  </ScrollArea>
+                ),
+                duration: 10000,
+            });
+        } else if (errors.length > 0) { // No imports, only errors
+            const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+            toast({
+                variant: "destructive",
+                title: "CSV Import Failed",
+                description: (
+                  <ScrollArea className="max-h-40">
+                    <pre className="whitespace-pre-wrap text-xs">
+                        {errorMessages}
+                    </pre>
+                  </ScrollArea>
+                ),
+                duration: 10000,
+            });
+        } else if (importedCount === 0 && errors.length === 0 && lines.length > 1) {
+            // No members to add (e.g., all duplicates or empty data rows) but no parsing errors.
+            toast({ title: "Import Information", description: "No new staff members were imported. Data might be empty or all entries already exist." });
         }
 
-        if (errors.length > 0) {
-          const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
-          toast({
-              variant: "destructive",
-              title: `CSV Import ${importedCount > 0 ? "Partially Successful" : "Failed"}`,
-              description: (
-                <ScrollArea className="max-h-40">
-                  <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
-                </ScrollArea>
-              ),
-              duration: 10000,
-          });
-        }
+
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
         toast({ variant: "destructive", title: "Import Error", description: `An unexpected error occurred: ${error.message}` });
@@ -420,24 +473,22 @@ export default function StaffPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-3">
-               <User className="h-8 w-8 text-primary hidden sm:block" />
+              <UsersIconLucide className="h-8 w-8 text-primary hidden sm:block" />
               <div>
                 <CardTitle className="text-2xl">Staff Management</CardTitle>
-                <CardDescription>
-                  Manage staff member records and information, grouped by squadron.
-                </CardDescription>
+                <CardDescription>Manage staff profiles, qualifications, and assignments.</CardDescription>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-              <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addStaffMutation.isPending || isImportingCsv}>
-                 {(addStaffMutation.isPending && !isImportingCsv) ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addStaffMutation.isPending || isImportingCsv}>
+                 {(addStaffMutation.isPending && !isImportingCsv) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
                  Add New Staff
-              </Button>
-              <Button onClick={() => fileInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isImportingCsv || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending}>
-                {isImportingCsv ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />} 
-                Import CSV
-              </Button>
-              <input type="file" ref={fileInputRef} onChange={handleCsvImport} accept=".csv" style={{ display: 'none' }} />
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isImportingCsv || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending}>
+                   {isImportingCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
+                 Import CSV
+                </Button>
+                <input type="file" ref={fileInputRef} onChange={handleCsvImport} accept=".csv" style={{ display: 'none' }} />
             </div>
           </div>
         </CardHeader>
@@ -447,131 +498,135 @@ export default function StaffPage() {
       {isLoading && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
-            <p className="text-muted-foreground">Loading staff data...</p>
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading staff data...</p>
           </CardContent>
         </Card>
       )}
       {error && !isLoading && (
-         <Card className="border-destructive">
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-             <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
-             <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Staff</h3>
-            <p className="text-destructive mb-4">{error.message}</p>
-            {/* Optionally add a retry button here */}
+        <Card className="border-destructive">
+          <CardHeader>
+              <CardTitle className="text-destructive flex items-center gap-2"><AlertTriangle /> Error Loading Staff</CardTitle>
+          </CardHeader>
+          <CardContent>
+              <p className="text-destructive mb-4">{error.message}</p>
+              {/* Optionally add a retry button here */}
           </CardContent>
         </Card>
       )}
 
       {/* Staff List Display */}
       {!isLoading && !error && staffGroups.length === 0 && (
-          <Card>
+        <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Members Found</h3>
-              <p className="text-muted-foreground mb-4">Add staff members manually or import a CSV file.</p>
+                <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
+                <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Members Found</h3>
+                <p className="text-muted-foreground mb-4">Add staff members manually or import a CSV file.</p>
             </CardContent>
-          </Card>
+        </Card>
       )}
 
       {!isLoading && !error && staffGroups.length > 0 && staffGroups.map(group => (
         <Card key={group.squadronName} className="shadow-xl mb-8">
-          <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b rounded-t-lg">
-            <CardTitle className="text-xl">Squadron: {group.squadronName}</CardTitle>
+          <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b">
+            <CardTitle className="text-2xl">Squadron: {group.squadronName}</CardTitle>
             <CardDescription>{group.staffMembers.length} staff member(s)</CardDescription>
           </CardHeader>
-          <CardContent className="pt-0">
-             {group.staffMembers.length === 0 ? (
-                 <p className="text-muted-foreground text-center py-4">No staff members in this squadron.</p>
-             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Service No.</TableHead>
-                    <TableHead>Rank</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="hidden lg:table-cell">Role</TableHead>
-                    <TableHead className="hidden lg:table-cell">Join Date</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {group.staffMembers.map((staff) => (
-                    <TableRow key={staff.id}>
-                      <TableCell>{staff.serviceNumber}</TableCell>
-                      <TableCell>{staff.rank}</TableCell>
-                      <TableCell>{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                      <TableCell className="hidden lg:table-cell">{staff.role}</TableCell>
-                      <TableCell className="hidden lg:table-cell">
-                        {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0" disabled={deleteStaffMutation.isPending || updateStaffMutation.isPending || isImportingCsv}>
-                              <span className="sr-only">Open menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={deleteStaffMutation.isPending || updateStaffMutation.isPending || isImportingCsv}>
-                              <Info className="mr-2 h-4 w-4" />
-                              View Details
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={deleteStaffMutation.isPending || updateStaffMutation.isPending || isImportingCsv}>
-                              <Pencil className="mr-2 h-4 w-4" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => setStaffToDelete(staff)}
-                              className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                              disabled={deleteStaffMutation.isPending || updateStaffMutation.isPending || isImportingCsv}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
+          <CardContent className="pt-0 px-0 sm:px-0">
+            {group.staffMembers.length === 0 ? (
+              <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
+            ) : (
+              <ScrollArea className="max-h-[600px]"> {/* Add ScrollArea for long lists within a squadron */}
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Service No.</TableHead>
+                      <TableHead>Rank</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="hidden md:table-cell">Role</TableHead>
+                      <TableHead className="hidden lg:table-cell">Join Date</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-             )}
+                  </TableHeader>
+                  <TableBody>
+                    {group.staffMembers.map((staff) => (
+                      <TableRow key={staff.id}>
+                        <TableCell>{staff.serviceNumber}</TableCell>
+                        <TableCell>{staff.rank}</TableCell>
+                        <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
+                        <TableCell className="hidden md:table-cell">{staff.role}</TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                <span className="sr-only">Open menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                              <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                <Info className="mr-2 h-4 w-4" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                <Pencil className="mr-2 h-4 w-4" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setStaffToDelete(staff)}
+                                className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
           </CardContent>
         </Card>
       ))}
 
       {/* Total Count Footer */}
       {!isLoading && !error && staffList.length > 0 && (
-         <Card className="mt-4">
-            <CardFooter className="text-xs text-muted-foreground pt-4 justify-center">
-                Total staff members: {staffList.length} across {staffGroups.length} squadron(s).
-            </CardFooter>
-         </Card>
+        <Card>
+          <CardFooter className="text-xs text-muted-foreground pt-4 justify-center">
+              Total staff members: {staffList.length} across {staffGroups.length} squadron(s).
+          </CardFooter>
+        </Card>
       )}
 
       {/* CSV Import Instructions */}
-      <Alert className="mt-8">
+       <Alert className="mt-8">
         <UploadCloud className="h-4 w-4" />
         <AlertTitle>CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import staff members, upload a CSV file with the following columns in order:
-          <ul className="list-disc pl-5 mt-2 text-xs">
+          <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>MemberUID</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
             <li><code>MemberName</code> (Text, Required. Format: &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")}.)</li>
-            <li><code>PrimaryUnit</code> (Text, Optional, e.g., &quot;123 Squadron&quot;)</li>
-            <li><code>Appointment</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
-            <li><code>EmailAddress</code> (Text, Required, Valid email format, e.g., &quot;jane.smith@example.com&quot;)</li>
-            <li><code>PhoneNumber</code> (Text, Optional, e.g., &quot;0412345678&quot;)</li>
-            <li><code>Address</code> (Text, Optional. This column is currently ignored by the import process.)</li>
+            <li><code>PrimaryUnit</code> (Text, Optional, e.g., &quot;701 Squadron&quot;)</li>
+            <li><code>Appointment</code> (Text, Required, e.g., &quot;Squadron Training Officer&quot;)</li>
+            <li><code>EmailAddress</code> (Text, Required, e.g., &quot;jane.doe@example.com&quot;)</li>
+            <li><code>PhoneNumber</code> (Text, Optional, e.g., &quot;0400123456&quot;)</li>
+            <li><code>Address</code> (Text, Optional. Not currently stored but include column for future compatibility)</li>
           </ul>
           The first row must be a header row with these exact names. MemberUID and EmailAddress must be unique per staff member.
           Join Date is not part of this import format and will be unassigned.
         </AlertDescription>
       </Alert>
+
 
       {/* Add/Edit Dialog */}
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
@@ -590,13 +645,13 @@ export default function StaffPage() {
           </DialogHeader>
           <ScrollArea className="max-h-[70vh] p-1">
             <div className="py-4 pr-4">
-              <StaffForm
-                onSubmit={editingStaff ? handleUpdateStaff : handleAddStaff}
-                defaultValues={editingStaff || undefined}
-                onCancel={closeForm}
-                isEditing={!!editingStaff}
-                isSubmitting={editingStaff ? updateStaffMutation.isPending : addStaffMutation.isPending || isImportingCsv}
-              />
+                <StaffForm
+                  onSubmit={editingStaff ? handleUpdateStaff : handleAddStaff}
+                  defaultValues={editingStaff || undefined}
+                  onCancel={closeForm}
+                  isEditing={!!editingStaff}
+                  isSubmitting={editingStaff ? updateStaffMutation.isPending : addStaffMutation.isPending}
+                />
             </div>
           </ScrollArea>
         </DialogContent>
@@ -613,142 +668,137 @@ export default function StaffPage() {
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
-                    {/* Contact Info */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 border-b pb-4">
-                       <div>
-                            <h3 className="font-semibold text-sm mb-1 text-primary">Email</h3>
-                            <p className="text-sm text-muted-foreground truncate">{viewingStaffMember.email}</p>
-                        </div>
-                         <div>
-                            <h3 className="font-semibold text-sm mb-1 text-primary">Phone</h3>
-                            <p className="text-sm text-muted-foreground">{viewingStaffMember.phone || "N/A"}</p>
-                        </div>
-                         <div>
-                            <h3 className="font-semibold text-sm mb-1 text-primary">Join Date</h3>
-                            <p className="text-sm text-muted-foreground">{viewingStaffMember.joinDate ? format(viewingStaffMember.joinDate, "PPP") : "N/A"}</p>
-                        </div>
-                    </div>
+                    <div className="space-y-6 py-4">
+                      {/* Contact Info */}
+                      <Card>
+                          <CardHeader>
+                            <CardTitle className="text-lg flex items-center gap-2"><User className="h-5 w-5" /> Contact Information</CardTitle>
+                          </CardHeader>
+                          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p className="font-semibold">Email</p>
+                                <p className="text-muted-foreground">{viewingStaffMember.email}</p>
+                            </div>
+                            <div>
+                                <p className="font-semibold">Phone</p>
+                                <p className="text-muted-foreground">{viewingStaffMember.phone || "N/A"}</p>
+                            </div>
+                            <div>
+                                <p className="font-semibold">Join Date</p>
+                                <p className="text-muted-foreground">{viewingStaffMember.joinDate ? format(viewingStaffMember.joinDate, "PPP") : "N/A"}</p>
+                            </div>
+                          </CardContent>
+                      </Card>
 
                     {/* Accordion for related data */}
-                    <Accordion type="multiple" collapsible={true} className="w-full">
-                        {/* Training Records */}
-                        <AccordionItem value="training">
+                    <Accordion type="multiple" collapsible className="w-full">
+                      <AccordionItem value="training">
                         <AccordionTrigger>
-                            <div className="flex items-center gap-2">
-                            <GraduationCap className="h-5 w-5 text-primary" />
-                            Training Records ({filteredTrainingLogs.length}) {/* TODO: Implement dynamic count */}
+                          <div className="flex items-center gap-2 text-lg">
+                            <GraduationCap className="h-5 w-5" /> Training Records ({filteredTrainingLogs.length}) {/* TODO: Implement dynamic count */}
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          {/* TODO: Replace with fetched data based on viewingStaffMember.id */}
+                          {filteredTrainingLogs.length > 0 ? (
+                            <ul className="list-disc pl-5 space-y-1 text-sm">
+                              {filteredTrainingLogs.map(log => (
+                                <li key={log.id}>{log.courseName} - Completed: {format(log.completionDate, "PP")}
+                                  {log.qualificationAchieved && ` (Qual: ${log.qualificationAchieved})`}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : <p className="text-sm text-muted-foreground">No training records found.</p>}
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="meetings">
+                        <AccordionTrigger>
+                          <div className="flex items-center gap-2 text-lg">
+                           <FileText className="h-5 w-5" /> Meetings Attended ({filteredMeetings.length}) {/* TODO: Implement dynamic count */}
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                            {/* TODO: Fetch meeting data based on viewingStaffMember.id */}
+                            {filteredMeetings.length > 0 ? (
+                                <ul className="list-disc pl-5 space-y-1 text-sm">
+                                {filteredMeetings.map(meeting => (
+                                    <li key={meeting.id}>{meeting.title} - Date: {format(meeting.date, "PP")}
+                                    <br/>Attendees: {meeting.attendees}
+                                    </li>
+                                ))}
+                                </ul>
+                            ) : <p className="text-sm text-muted-foreground">No meeting records found.</p>}
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="pdps">
+                        <AccordionTrigger>
+                          <div className="flex items-center gap-2 text-lg">
+                            <Briefcase className="h-5 w-5" /> Professional Development ({filteredPdps.length}) {/* TODO: Implement dynamic count */}
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                            {/* TODO: Fetch PDP data based on viewingStaffMember.id */}
+                            {filteredPdps.length > 0 ? (
+                                <ul className="list-disc pl-5 space-y-1 text-sm">
+                                {filteredPdps.map(pdp => (
+                                    <li key={pdp.id}>
+                                    PDP Period: {pdp.pdpPeriod}
+                                    <br/>Goals: {pdp.goals.length}
+                                    {pdp.reviewDate && ` | Next Review: ${format(pdp.reviewDate, "PP")}`}
+                                    </li>
+                                ))}
+                                </ul>
+                            ) : <p className="text-sm text-muted-foreground">No PDPs found.</p>}
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="discipline">
+                        <AccordionTrigger>
+                            <div className="flex items-center gap-2 text-lg">
+                                <Gavel className="h-5 w-5" /> Discipline Actions ({filteredDisciplineActions.length}) {/* TODO: Implement dynamic count */}
                             </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                            {/* TODO: Replace with fetched data based on viewingStaffMember.id */}
-                            {filteredTrainingLogs.length > 0 ? (
-                            <ul className="space-y-2">
-                                {filteredTrainingLogs.map(log => (
-                                <li key={log.id} className="text-sm p-2 border rounded-md bg-muted/20">
-                                    <strong>{log.courseName}</strong> - Completed: {format(log.completionDate, "PP")}
-                                    {log.qualificationAchieved && <p className="text-xs text-muted-foreground">Qual: {log.qualificationAchieved}</p>}
-                                </li>
-                                ))}
-                            </ul>
-                            ) : <p className="text-sm text-muted-foreground p-2">No training records found.</p>}
-                        </AccordionContent>
-                        </AccordionItem>
-
-                        {/* Meetings Attended */}
-                         <AccordionItem value="meetings">
-                            <AccordionTrigger>
-                                <div className="flex items-center gap-2">
-                                <FileText className="h-5 w-5 text-primary" />
-                                Meetings Attended ({filteredMeetings.length}) {/* TODO: Implement dynamic count */}
-                                </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                {/* TODO: Fetch meeting data based on viewingStaffMember.id */}
-                                {filteredMeetings.length > 0 ? (
-                                <ul className="space-y-2">
-                                {filteredMeetings.map(meeting => (
-                                    <li key={meeting.id} className="text-sm p-2 border rounded-md bg-muted/20">
-                                    <strong>{meeting.title}</strong> - Date: {format(meeting.date, "PP")}
-                                    <p className="text-xs text-muted-foreground truncate">Attendees: {meeting.attendees}</p>
-                                    </li>
-                                ))}
-                                </ul>
-                            ) : <p className="text-sm text-muted-foreground p-2">No meeting records found.</p>}
-                            </AccordionContent>
-                        </AccordionItem>
-
-                        {/* Professional Development */}
-                        <AccordionItem value="pdps">
-                            <AccordionTrigger>
-                                <div className="flex items-center gap-2">
-                                <Briefcase className="h-5 w-5 text-primary" />
-                                Professional Development ({filteredPdps.length}) {/* TODO: Implement dynamic count */}
-                                </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                {/* TODO: Fetch PDP data based on viewingStaffMember.id */}
-                                {filteredPdps.length > 0 ? (
-                                <ul className="space-y-2">
-                                {filteredPdps.map(pdp => (
-                                    <li key={pdp.id} className="text-sm p-2 border rounded-md bg-muted/20">
-                                    <strong>PDP Period: {pdp.pdpPeriod}</strong>
-                                    <p className="text-xs text-muted-foreground">Goals: {pdp.goals.length}</p>
-                                    {pdp.reviewDate && <p className="text-xs text-muted-foreground">Next Review: {format(pdp.reviewDate, "PP")}</p>}
-                                    </li>
-                                ))}
-                                </ul>
-                            ) : <p className="text-sm text-muted-foreground p-2">No PDPs found.</p>}
-                            </AccordionContent>
-                        </AccordionItem>
-
-                        {/* Discipline Actions */}
-                        <AccordionItem value="discipline">
-                            <AccordionTrigger>
-                                <div className="flex items-center gap-2">
-                                <Gavel className="h-5 w-5 text-primary" />
-                                Discipline Actions ({filteredDisciplineActions.length}) {/* TODO: Implement dynamic count */}
-                                </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                {/* TODO: Fetch Discipline data based on viewingStaffMember.id */}
-                                {filteredDisciplineActions.length > 0 ? (
-                                <ul className="space-y-2">
+                            {/* TODO: Fetch Discipline data based on viewingStaffMember.id */}
+                             {filteredDisciplineActions.length > 0 ? (
+                                <ul className="list-disc pl-5 space-y-1 text-sm">
                                 {filteredDisciplineActions.map(action => (
-                                    <li key={action.id} className="text-sm p-2 border rounded-md bg-muted/20">
-                                    <strong>{action.typeOfAction}</strong> - Incident Date: {format(action.dateOfIncident, "PP")}
-                                    <p className="text-xs text-muted-foreground truncate">Description: {action.incidentDescription}</p>
+                                    <li key={action.id}>
+                                    {action.typeOfAction} - Incident Date: {format(action.dateOfIncident, "PP")}
+                                    <br/>Description: {action.incidentDescription}
                                     </li>
                                 ))}
                                 </ul>
-                            ) : <p className="text-sm text-muted-foreground p-2">No discipline actions found.</p>}
-                            </AccordionContent>
-                        </AccordionItem>
+                            ) : <p className="text-sm text-muted-foreground">No discipline actions found.</p>}
+                        </AccordionContent>
+                      </AccordionItem>
 
-                        {/* Safety Audits Involved In */}
-                        <AccordionItem value="audits">
-                            <AccordionTrigger>
-                                <div className="flex items-center gap-2">
-                                <ShieldCheck className="h-5 w-5 text-primary" />
-                                Safety Audits Involved In ({filteredAudits.length}) {/* TODO: Implement dynamic count */}
-                                </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                {/* TODO: Fetch Audit data based on viewingStaffMember.id (e.g., if auditorName matches) */}
-                                {filteredAudits.length > 0 ? (
-                                <ul className="space-y-2">
+                      <AccordionItem value="audits">
+                        <AccordionTrigger>
+                            <div className="flex items-center gap-2 text-lg">
+                                <ShieldCheck className="h-5 w-5" /> Safety Audits Involved In ({filteredAudits.length}) {/* TODO: Implement dynamic count */}
+                            </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                             {/* TODO: Fetch Audit data based on viewingStaffMember.id (e.g., if auditorName matches) */}
+                            {filteredAudits.length > 0 ? (
+                                <ul className="list-disc pl-5 space-y-1 text-sm">
                                 {filteredAudits.map(audit => (
-                                    <li key={audit.id} className="text-sm p-2 border rounded-md bg-muted/20">
-                                    <strong>{audit.auditTitle}</strong> - Date: {format(audit.auditDate, "PP")}
-                                    <p className="text-xs text-muted-foreground">Type: {audit.auditType}</p>
+                                    <li key={audit.id}>
+                                    {audit.auditTitle} - Date: {format(audit.auditDate, "PP")}
+                                    <br/>Type: {audit.auditType}
                                     </li>
                                 ))}
                                 </ul>
-                            ) : <p className="text-sm text-muted-foreground p-2">No safety audits found where this member was involved.</p>}
-                            </AccordionContent>
-                        </AccordionItem>
+                            ) : <p className="text-sm text-muted-foreground">No safety audits found where this member was involved.</p>}
+                        </AccordionContent>
+                      </AccordionItem>
                     </Accordion>
+                  </div>
                 </ScrollArea>
-                <DialogFooter className="pt-4 border-t mt-4">
+                <DialogFooter className="pt-4 border-t">
                     <Button variant="outline" onClick={() => {
                       if (viewingStaffMember) {
                         handleEdit(viewingStaffMember);
@@ -791,6 +841,7 @@ export default function StaffPage() {
           </AlertDialogContent>
         </AlertDialog>
       )}
+
     </div>
   );
 }
