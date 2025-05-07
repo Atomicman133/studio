@@ -1,8 +1,9 @@
 
+
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,7 +47,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { TrainingLog } from "./training-schema";
+import type { TrainingLog, TrainingLogFormData } from "./training-schema";
 import { TrainingLogForm } from "./components/training-log-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -100,7 +101,7 @@ const initialTrainingLogs: TrainingLog[] = [
     id: "t5",
     rank: "SQNLDR",
     staffName: "Brown, Robert",
-    squadron: "721 Wing HQ", // Example of a different "squadron" like entity
+    squadron: "721 Wing HQ", 
     currentRole: "Wing Training Coordinator",
     courseName: "Senior Leadership Seminar",
     completionDate: new Date("2023-09-05"),
@@ -130,6 +131,16 @@ function downloadTextFile(filename: string, text: string) {
   element.click();
   document.body.removeChild(element);
 }
+
+async function convertFileToDataUrl(file: File): Promise<{ name: string; dataUrl: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, dataUrl: reader.result as string });
+    reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
 
 export default function TrainingPage() {
   const [trainingLogsList, setTrainingLogsList] = React.useState<TrainingLog[]>(initialTrainingLogs);
@@ -169,12 +180,11 @@ export default function TrainingPage() {
             const rankAIndex = rankOrder.indexOf(a.rank);
             const rankBIndex = rankOrder.indexOf(b.rank);
             
-            // Handle cases where rank might not be in RANKS (e.g. data error) by pushing them to the end
             if (rankAIndex === -1 && rankBIndex === -1) return a.staffName.localeCompare(b.staffName);
             if (rankAIndex === -1) return 1;
             if (rankBIndex === -1) return -1;
             
-            const rankComparison = rankAIndex - rankBIndex;
+            const rankComparison = rankBIndex - rankAIndex; // Higher rank first
             if (rankComparison !== 0) return rankComparison;
             return a.staffName.localeCompare(b.staffName);
           });
@@ -187,15 +197,73 @@ export default function TrainingPage() {
   }, [trainingLogsList]);
 
 
-  const handleAddLog = (data: TrainingLog) => {
-    const newLog = { ...data, id: crypto.randomUUID() };
+  const handleAddLog = async (data: TrainingLogFormData) => {
+    let certificateInfo: Partial<TrainingLog> = {};
+    if (data.certificateFile) {
+      try {
+        const { name, dataUrl } = await convertFileToDataUrl(data.certificateFile);
+        certificateInfo = { certificateFileName: name, certificateDataUrl: dataUrl };
+      } catch (error) {
+        console.error("Error converting file:", error);
+        // Optionally show an error to the user
+      }
+    }
+
+    const newLog: TrainingLog = {
+      id: crypto.randomUUID(),
+      rank: data.rank,
+      staffName: data.staffName,
+      squadron: data.squadron,
+      currentRole: data.currentRole,
+      courseName: data.courseName,
+      completionDate: data.completionDate,
+      qualificationAchieved: data.qualificationAchieved,
+      instructorQualification: data.instructorQualification,
+      achievementDetails: data.achievementDetails,
+      ...certificateInfo,
+    };
     setTrainingLogsList((prev) => [newLog, ...prev]);
     setIsFormOpen(false);
   };
 
-  const handleUpdateLog = (data: TrainingLog) => {
+  const handleUpdateLog = async (data: TrainingLogFormData) => {
+    if (!editingLog) return;
+
+    let certificateUpdates: Partial<TrainingLog> = {};
+    if (data.certificateFile) {
+      try {
+        const { name, dataUrl } = await convertFileToDataUrl(data.certificateFile);
+        certificateUpdates = { certificateFileName: name, certificateDataUrl: dataUrl };
+      } catch (error) {
+        console.error("Error converting file:", error);
+      }
+    } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
+      // This means the "Remove Certificate" button was effectively used (form fields cleared)
+      certificateUpdates = { certificateFileName: undefined, certificateDataUrl: undefined };
+    } else {
+      // No new file, and no explicit removal, so keep existing
+      certificateUpdates = {
+        certificateFileName: editingLog.certificateFileName,
+        certificateDataUrl: editingLog.certificateDataUrl,
+      };
+    }
+
+    const updatedLog: TrainingLog = {
+      id: editingLog.id,
+      rank: data.rank,
+      staffName: data.staffName,
+      squadron: data.squadron,
+      currentRole: data.currentRole,
+      courseName: data.courseName,
+      completionDate: data.completionDate,
+      qualificationAchieved: data.qualificationAchieved,
+      instructorQualification: data.instructorQualification,
+      achievementDetails: data.achievementDetails,
+      ...certificateUpdates,
+    };
+
     setTrainingLogsList((prev) =>
-      prev.map((log) => (log.id === data.id ? data : log))
+      prev.map((log) => (log.id === updatedLog.id ? updatedLog : log))
     );
     setIsFormOpen(false);
     setEditingLog(null);
@@ -242,6 +310,9 @@ export default function TrainingPage() {
     if (log.achievementDetails) {
       content += `Achievements/Awards:\n${log.achievementDetails}\n`;
     }
+    if (log.certificateFileName) {
+      content += `Certificate Attached: ${log.certificateFileName}\n`;
+    }
     
     downloadTextFile(filename, content);
   };
@@ -269,6 +340,9 @@ export default function TrainingPage() {
       }
       if (log.achievementDetails) {
         content += `Achievements/Awards:\n${log.achievementDetails}\n`;
+      }
+      if (log.certificateFileName) {
+        content += `Certificate Attached: ${log.certificateFileName}\n`;
       }
       content += `------------------------------------\n\n`;
     });
@@ -352,6 +426,7 @@ export default function TrainingPage() {
                             <TableHead className="hidden md:table-cell">Role at Training</TableHead>
                             <TableHead>Completion</TableHead>
                             <TableHead className="hidden lg:table-cell">Qualification</TableHead>
+                            <TableHead className="hidden xl:table-cell">Certificate</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -362,6 +437,15 @@ export default function TrainingPage() {
                               <TableCell className="hidden md:table-cell">{log.currentRole}</TableCell>
                               <TableCell>{format(log.completionDate, "PP")}</TableCell>
                               <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                               <TableCell className="hidden xl:table-cell">
+                                {log.certificateFileName ? (
+                                  <a href={log.certificateDataUrl} download={log.certificateFileName} className="text-primary hover:underline flex items-center">
+                                    <Paperclip className="mr-1 h-4 w-4" /> {log.certificateFileName}
+                                  </a>
+                                ) : (
+                                  "None"
+                                )}
+                              </TableCell>
                               <TableCell className="text-right">
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
@@ -485,8 +569,16 @@ export default function TrainingPage() {
                                 <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingLog.achievementDetails}</p>
                             </div>
                         )}
-                         {(!viewingLog.qualificationAchieved && !viewingLog.instructorQualification && !viewingLog.achievementDetails) && (
-                            <p className="text-sm text-muted-foreground italic">No additional qualifications or achievements noted for this record.</p>
+                        {viewingLog.certificateFileName && viewingLog.certificateDataUrl && (
+                           <div>
+                                <h3 className="font-semibold text-sm mb-1">Certificate Attached</h3>
+                                <a href={viewingLog.certificateDataUrl} download={viewingLog.certificateFileName} className="text-primary hover:underline flex items-center text-sm">
+                                    <Paperclip className="mr-1 h-4 w-4 flex-shrink-0" /> {viewingLog.certificateFileName}
+                                </a>
+                            </div>
+                        )}
+                         {(!viewingLog.qualificationAchieved && !viewingLog.instructorQualification && !viewingLog.achievementDetails && !viewingLog.certificateFileName) && (
+                            <p className="text-sm text-muted-foreground italic">No additional qualifications, achievements or certificate noted for this record.</p>
                          )}
                     </div>
                 </ScrollArea>
@@ -559,7 +651,7 @@ export default function TrainingPage() {
             </li>
             <li className="flex items-center">
                <UploadCloud className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Upload and manage training certificates and supporting documentation.
+              Upload and manage training certificates and supporting documentation. (Implemented)
             </li>
             <li className="flex items-center">
               <BarChartHorizontalBig className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />

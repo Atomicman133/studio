@@ -3,7 +3,7 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { trainingLogSchema, type TrainingLog } from "../training-schema";
+import { trainingLogFormSchema, type TrainingLogFormData, type TrainingLog } from "../training-schema";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -30,34 +30,67 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Paperclip, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { RANKS } from "@/app/staff/staff-schema"; // Import RANKS
+import { RANKS } from "@/app/staff/staff-schema"; 
+import * as React from "react";
 
 interface TrainingLogFormProps {
-  onSubmit: (data: TrainingLog) => void;
-  defaultValues?: Partial<TrainingLog>;
+  onSubmit: (data: TrainingLogFormData) => void;
+  defaultValues?: Partial<TrainingLogFormData>; // Now includes potential certificateFile for initial display logic
   onCancel: () => void;
   isEditing: boolean;
 }
 
 export function TrainingLogForm({ onSubmit, defaultValues, onCancel, isEditing }: TrainingLogFormProps) {
-  const form = useForm<TrainingLog>({
-    resolver: zodResolver(trainingLogSchema),
-    defaultValues: defaultValues || {
-      rank: undefined,
-      staffName: "",
-      squadron: "",
-      currentRole: "",
-      courseName: "",
-      completionDate: undefined,
-      qualificationAchieved: "",
-      instructorQualification: "",
-      achievementDetails: "",
+  const [currentFileName, setCurrentFileName] = React.useState<string | undefined>(defaultValues?.certificateFileName);
+  
+  const form = useForm<TrainingLogFormData>({
+    resolver: zodResolver(trainingLogFormSchema),
+    defaultValues: {
+      rank: defaultValues?.rank || undefined,
+      staffName: defaultValues?.staffName || "",
+      squadron: defaultValues?.squadron || "",
+      currentRole: defaultValues?.currentRole || "",
+      courseName: defaultValues?.courseName || "",
+      completionDate: defaultValues?.completionDate || undefined,
+      qualificationAchieved: defaultValues?.qualificationAchieved || "",
+      instructorQualification: defaultValues?.instructorQualification || "",
+      achievementDetails: defaultValues?.achievementDetails || "",
+      certificateFileName: defaultValues?.certificateFileName || undefined,
+      certificateDataUrl: defaultValues?.certificateDataUrl || undefined,
+      certificateFile: undefined, // File input should always start empty
     },
   });
 
-  const handleSubmit = (data: TrainingLog) => {
+  React.useEffect(() => {
+    setCurrentFileName(defaultValues?.certificateFileName);
+  }, [defaultValues?.certificateFileName]);
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      form.setValue("certificateFile", file);
+      setCurrentFileName(file.name);
+    } else {
+      form.setValue("certificateFile", undefined);
+      // If editing and user clears file input, keep original default file name if no new file is picked.
+      // This logic is subtle: if they *remove* a file by clearing input, we don't want to lose the original unless they submit.
+      // For now, clearing the input means no file will be submitted. If they *had* an old file, it would be kept.
+      // The 'Remove Certificate' button is clearer for explicit removal.
+      // setCurrentFileName(defaultValues?.certificateFileName); // Revert to original if input cleared without new selection
+    }
+  };
+  
+  const handleRemoveCertificate = () => {
+    form.setValue("certificateFile", undefined, { shouldValidate: true }); // Clear the file input
+    form.setValue("certificateFileName", undefined); // Signal removal of existing
+    form.setValue("certificateDataUrl", undefined); // Signal removal of existing
+    setCurrentFileName(undefined);
+  };
+
+
+  const handleSubmit = (data: TrainingLogFormData) => {
     onSubmit(data);
      if (!isEditing) {
       form.reset({
@@ -70,7 +103,11 @@ export function TrainingLogForm({ onSubmit, defaultValues, onCancel, isEditing }
         qualificationAchieved: "",
         instructorQualification: "",
         achievementDetails: "",
+        certificateFile: undefined,
+        certificateFileName: undefined,
+        certificateDataUrl: undefined,
       });
+      setCurrentFileName(undefined);
     }
   };
 
@@ -110,7 +147,7 @@ export function TrainingLogForm({ onSubmit, defaultValues, onCancel, isEditing }
               <FormItem>
                 <FormLabel>Staff Member Name</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., John Doe (Surname, Firstname)" {...field} />
+                  <Input placeholder="e.g., Doe, John (Surname, Firstname)" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -244,6 +281,28 @@ export function TrainingLogForm({ onSubmit, defaultValues, onCancel, isEditing }
             </FormItem>
           )}
         />
+
+        <FormItem>
+          <FormLabel>Certificate/Document (Optional)</FormLabel>
+          {currentFileName && !form.watch("certificateFile") && (
+            <div className="text-sm text-muted-foreground mb-2 flex items-center justify-between p-2 border rounded-md">
+              <span>Current: {currentFileName}</span>
+              <Button type="button" variant="ghost" size="sm" onClick={handleRemoveCertificate} title="Remove current certificate">
+                <XCircle className="h-4 w-4 mr-1" /> Remove
+              </Button>
+            </div>
+          )}
+           <Input
+              id="certificateFile"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              onChange={handleFileChange}
+              className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+            />
+          <FormDescription>Upload PDF, JPG, PNG, or WEBP file (Max 5MB).</FormDescription>
+          <FormMessage>{form.formState.errors.certificateFile?.message}</FormMessage>
+        </FormItem>
+
 
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="outline" onClick={onCancel}>
