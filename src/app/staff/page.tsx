@@ -62,14 +62,13 @@ import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData'; // Import hooks
 
 // Import types for related data (actual data will be fetched or passed)
+// TODO: Fetch this data dynamically in the View Details dialog based on staff member ID
 import type { TrainingLog } from "../training/training-schema";
 import type { Meeting } from "../meetings/meeting-schema";
 import type { DisciplineAction } from "../discipline/discipline-schema";
 import type { Pdp } from "../pdps/pdp-schema";
 import type { SafetyAudit } from "../audits/audit-schema";
 
-// --- Remove initialStaff definition as data comes from backend ---
-// export const initialStaff: StaffMember[] = [ ... ];
 
 type StaffGroup = {
   squadronName: string;
@@ -209,8 +208,9 @@ export default function StaffPage() {
   };
 
   const handleViewDetails = (staffMember: StaffMember) => {
-    // TODO: Here you would ideally trigger fetching related data based on staffMember.id
-    // For now, we'll continue using the placeholder filtering logic below.
+    // TODO: Fetch related data (training, meetings, pdps, discipline, audits)
+    // based on staffMember.id and set it to respective states or pass to dialog.
+    // For now, the filtering logic below uses placeholder data.
     setViewingStaffMember(staffMember);
     setEditingStaff(null);
     setIsFormOpen(false);
@@ -381,35 +381,36 @@ export default function StaffPage() {
   const currentStaffFullName = viewingStaffMember ? `${viewingStaffMember.firstName} ${viewingStaffMember.lastName}` : "";
   const staffNameForTrainingLog = viewingStaffMember ? `${viewingStaffMember.lastName}, ${viewingStaffMember.firstName}` : "";
 
+  // TODO: Replace these with actual data fetching hooks or logic based on viewingStaffMember.id
   const filteredTrainingLogs: TrainingLog[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("Placeholder: Using initialTrainingLogs for details view. Implement backend fetch.");
+    console.warn("TODO: Implement backend fetch for training logs for staff member:", viewingStaffMember.id);
     return []; 
-  }, [viewingStaffMember, staffNameForTrainingLog]);
+  }, [viewingStaffMember]);
 
   const filteredMeetings: Meeting[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("Placeholder: Using initialMeetings for details view. Implement backend fetch.");
+    console.warn("TODO: Implement backend fetch for meetings for staff member:", viewingStaffMember.id);
     return [];
-  }, [viewingStaffMember, currentStaffFullName]);
+  }, [viewingStaffMember]);
 
   const filteredPdps: Pdp[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("Placeholder: Using initialPdps for details view. Implement backend fetch.");
+    console.warn("TODO: Implement backend fetch for PDPs for staff member:", viewingStaffMember.id);
     return [];
-  }, [viewingStaffMember, currentStaffFullName]);
+  }, [viewingStaffMember]);
 
   const filteredDisciplineActions: DisciplineAction[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("Placeholder: Using initialDisciplineActions for details view. Implement backend fetch.");
+    console.warn("TODO: Implement backend fetch for discipline actions for staff member:", viewingStaffMember.id);
     return [];
-  }, [viewingStaffMember, currentStaffFullName]);
+  }, [viewingStaffMember]);
 
   const filteredAudits: SafetyAudit[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("Placeholder: Using initialAudits for details view. Implement backend fetch.");
+    console.warn("TODO: Implement backend fetch for audits involving staff member:", viewingStaffMember.id);
     return [];
-  }, [viewingStaffMember, currentStaffFullName]);
+  }, [viewingStaffMember]);
 
 
   return (
@@ -635,7 +636,7 @@ export default function StaffPage() {
                         <AccordionTrigger>
                             <div className="flex items-center gap-2">
                             <GraduationCap className="h-5 w-5 text-primary" />
-                            Training Records ({filteredTrainingLogs.length}) {/* TODO: Show actual count */}
+                            Training Records ({filteredTrainingLogs.length}) {/* TODO: Implement dynamic count */}
                             </div>
                         </AccordionTrigger>
                         <AccordionContent>
@@ -658,11 +659,11 @@ export default function StaffPage() {
                             <AccordionTrigger>
                                 <div className="flex items-center gap-2">
                                 <FileText className="h-5 w-5 text-primary" />
-                                Meetings Attended ({filteredMeetings.length}) {/* TODO: Show actual count */}
+                                Meetings Attended ({filteredMeetings.length}) {/* TODO: Implement dynamic count */}
                                 </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {/* TODO: Fetch meeting data */}
+                                {/* TODO: Fetch meeting data based on viewingStaffMember.id */}
                                 {filteredMeetings.length > 0 ? (
                                 <ul className="space-y-2">
                                 {filteredMeetings.map(meeting => (
@@ -681,11 +682,11 @@ export default function StaffPage() {
                             <AccordionTrigger>
                                 <div className="flex items-center gap-2">
                                 <Briefcase className="h-5 w-5 text-primary" />
-                                Professional Development ({filteredPdps.length}) {/* TODO: Show actual count */}
+                                Professional Development ({filteredPdps.length}) {/* TODO: Implement dynamic count */}
                                 </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {/* TODO: Fetch PDP data */}
+                                {/* TODO: Fetch PDP data based on viewingStaffMember.id */}
                                 {filteredPdps.length > 0 ? (
                                 <ul className="space-y-2">
                                 {filteredPdps.map(pdp => (
@@ -705,11 +706,11 @@ export default function StaffPage() {
                             <AccordionTrigger>
                                 <div className="flex items-center gap-2">
                                 <Gavel className="h-5 w-5 text-primary" />
-                                Discipline Actions ({filteredDisciplineActions.length}) {/* TODO: Show actual count */}
+                                Discipline Actions ({filteredDisciplineActions.length}) {/* TODO: Implement dynamic count */}
                                 </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {/* TODO: Fetch Discipline data */}
+                                {/* TODO: Fetch Discipline data based on viewingStaffMember.id */}
                                 {filteredDisciplineActions.length > 0 ? (
                                 <ul className="space-y-2">
                                 {filteredDisciplineActions.map(action => (
@@ -728,11 +729,11 @@ export default function StaffPage() {
                             <AccordionTrigger>
                                 <div className="flex items-center gap-2">
                                 <ShieldCheck className="h-5 w-5 text-primary" />
-                                Safety Audits Involved In ({filteredAudits.length}) {/* TODO: Show actual count */}
+                                Safety Audits Involved In ({filteredAudits.length}) {/* TODO: Implement dynamic count */}
                                 </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {/* TODO: Fetch Audit data */}
+                                {/* TODO: Fetch Audit data based on viewingStaffMember.id (e.g., if auditorName matches) */}
                                 {filteredAudits.length > 0 ? (
                                 <ul className="space-y-2">
                                 {filteredAudits.map(audit => (

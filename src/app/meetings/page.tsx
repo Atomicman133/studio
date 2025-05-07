@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -173,24 +172,24 @@ export default function MeetingsPage() {
 
 
   const handleAddOrUpdateMeeting = async (formData: MeetingFormData) => {
-    let agendaDocumentInfo: Partial<Meeting> = {};
+    let processedAgendaDocumentInfo: Partial<Pick<Meeting, 'agendaDocumentFileName' | 'agendaDocumentDataUrl'>> = {};
+
     if (formData.agendaDocumentFile) {
         try {
             const { name, dataUrl } = await convertFileToDataUrl(formData.agendaDocumentFile);
-            agendaDocumentInfo = { agendaDocumentFileName: name, agendaDocumentDataUrl: dataUrl };
+            processedAgendaDocumentInfo = { agendaDocumentFileName: name, agendaDocumentDataUrl: dataUrl };
         } catch (err) {
             console.error("Error converting agenda document file:", err);
             toast({ variant: "destructive", title: "File Error", description: "Could not process agenda document." });
-            // Optionally prevent submission or handle error state
-            return; // Or throw an error to be caught by mutation's onError
+            return; 
         }
-    } else if (formData.agendaDocumentFileName === undefined && formData.agendaDocumentDataUrl === undefined && editingMeeting) {
-        // File was explicitly removed during edit
-        agendaDocumentInfo = { agendaDocumentFileName: undefined, agendaDocumentDataUrl: undefined };
+    } else if (formData.agendaDocumentFileName === undefined && editingMeeting) {
+        // This case signifies explicit removal of an existing document during edit
+        processedAgendaDocumentInfo = { agendaDocumentFileName: undefined, agendaDocumentDataUrl: undefined };
     }
 
-
-    const meetingData: Omit<Meeting, 'id'> = {
+    const meetingDataPayload: Meeting = {
+      // Base fields from form
       title: formData.title,
       date: formData.date,
       attendees: formData.attendees,
@@ -198,26 +197,21 @@ export default function MeetingsPage() {
       discussionPoints: formData.discussionPoints,
       decisionsMade: formData.decisionsMade,
       actionItemsText: formData.actionItemsText,
-      agendaDocumentFileName: agendaDocumentInfo.agendaDocumentFileName !== undefined ? agendaDocumentInfo.agendaDocumentFileName : (editingMeeting ? editingMeeting.agendaDocumentFileName : undefined),
-      agendaDocumentDataUrl: agendaDocumentInfo.agendaDocumentDataUrl !== undefined ? agendaDocumentInfo.agendaDocumentDataUrl : (editingMeeting ? editingMeeting.agendaDocumentDataUrl : undefined),
+      // Initialize agenda fields, prioritizing new/removed info, then existing, then undefined
+      agendaDocumentFileName: processedAgendaDocumentInfo.hasOwnProperty('agendaDocumentFileName')
+        ? processedAgendaDocumentInfo.agendaDocumentFileName
+        : (editingMeeting ? editingMeeting.agendaDocumentFileName : undefined),
+      agendaDocumentDataUrl: processedAgendaDocumentInfo.hasOwnProperty('agendaDocumentDataUrl')
+        ? processedAgendaDocumentInfo.agendaDocumentDataUrl
+        : (editingMeeting ? editingMeeting.agendaDocumentDataUrl : undefined),
+      id: editingMeeting ? editingMeeting.id : undefined, // Include ID if editing
     };
     
-    if (formData.agendaDocumentFile) { // If new file uploaded, it overrides
-        meetingData.agendaDocumentFileName = agendaDocumentInfo.agendaDocumentFileName;
-        meetingData.agendaDocumentDataUrl = agendaDocumentInfo.agendaDocumentDataUrl;
-    } else if (formData.agendaDocumentFileName === undefined && editingMeeting) { // If file was explicitly removed (filename on form is undefined)
-        meetingData.agendaDocumentFileName = undefined;
-        meetingData.agendaDocumentDataUrl = undefined;
-    } else if (editingMeeting && editingMeeting.agendaDocumentFileName && !formData.agendaDocumentFile) { // Keep existing if not removed and no new file
-        meetingData.agendaDocumentFileName = editingMeeting.agendaDocumentFileName;
-        meetingData.agendaDocumentDataUrl = editingMeeting.agendaDocumentDataUrl;
-    }
-
-
     if (editingMeeting && editingMeeting.id) {
-        updateMeetingMutation.mutate({ ...meetingData, id: editingMeeting.id });
+        updateMeetingMutation.mutate(meetingDataPayload as Meeting); // Cast because ID is now included
     } else {
-        addMeetingMutation.mutate(meetingData);
+        const { id, ...newMeetingData } = meetingDataPayload; // Exclude ID for new meeting
+        addMeetingMutation.mutate(newMeetingData);
     }
   };
 
@@ -567,3 +561,4 @@ export default function MeetingsPage() {
     </div>
   );
 }
+
