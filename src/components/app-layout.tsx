@@ -15,7 +15,8 @@ import {
   Moon,
   LayoutDashboard,
   Plane,
-  FileSearch, // Added for Reporting
+  FileSearch,
+  ClipboardList, // Added for Squadron Visits
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -42,7 +43,7 @@ import {
 import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import * as React from "react"; // Ensure React is imported for useEffect & useState
+import * as React from "react"; 
 
 interface NavItem {
   href: string;
@@ -62,7 +63,8 @@ const navItems: NavItem[] = [
   },
   { href: "/discipline", label: "Discipline Actions", icon: Gavel },
   { href: "/audits", label: "Safety Audits", icon: ShieldCheck },
-  { href: "/reporting", label: "Compliance Reporting", icon: FileSearch }, // Changed from UserCheck and updated label/href
+  { href: "/squadron-visits", label: "Squadron Visits", icon: ClipboardList }, // Added Squadron Visits
+  { href: "/reporting", label: "Compliance Reporting", icon: FileSearch }, 
   { href: "/staff", label: "Staff Management", icon: Users },
 ];
 
@@ -73,8 +75,7 @@ function ThemeToggle() {
   React.useEffect(() => setMounted(true), []);
 
   if (!mounted) {
-    // Render a placeholder or null during server rendering and initial client mount
-    return <div style={{ width: '2.5rem', height: '2.5rem' }} />; // Matches Button size="icon"
+    return <div style={{ width: '2.5rem', height: '2.5rem' }} />; 
   }
 
   return (
@@ -95,7 +96,6 @@ function UserNav() {
    React.useEffect(() => setMounted(true), []);
 
    if (!mounted) {
-    // Placeholder to avoid hydration mismatch for Avatar, which might rely on client-side rendering or random data
     return <div className="h-10 w-10 rounded-full bg-muted" />;
    }
   return (
@@ -131,7 +131,7 @@ function NavMenuItemContent({
     <Link href={item.href} className="w-full">
       <SidebarMenuButton
         className={cn(
-          "w-full justify-start", // Ensure button takes full width
+          "w-full justify-start", 
           isActive && "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 dark:bg-sidebar-primary dark:text-sidebar-primary-foreground dark:hover:bg-sidebar-primary/90"
         )}
         tooltip={isCollapsed ? item.label : undefined}
@@ -144,8 +144,9 @@ function NavMenuItemContent({
   );
 }
 
+
 function AppLayoutInternal({ children }: { children: React.ReactNode }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const { isMobile, state, openMobile, setOpenMobile } = useSidebar(); // Removed setOpen as it was causing an error.
   const isCollapsed = !isMobile && state === "collapsed";
 
 
@@ -176,7 +177,6 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
 
-      {/* Mobile Sidebar */}
        {isMobile && (
         <Sidebar
             collapsible="offcanvas"
@@ -204,7 +204,7 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
       )}
 
 
-      <div className="flex-1 flex flex-col min-w-0"> {/* Added min-w-0 here */}
+      <div className="flex-1 flex flex-col min-w-0">
         <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 sm:px-6 shadow-sm">
           <SidebarTrigger className="md:hidden" />
           <div className="flex-1">
@@ -216,7 +216,6 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <SidebarInset className="p-4 sm:p-6 lg:p-8 bg-muted/20 dark:bg-muted/10 overflow-y-auto flex-1">
-           {/* Added flex-1 to allow content to grow and scroll */}
           <main className="flex-1">
             {children}
           </main>
@@ -227,6 +226,17 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const [isMounted, setIsMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  if (!isMounted) {
+    // You can render a static layout or null here to avoid hydration mismatch
+    return null; 
+  }
+
   return (
     <SidebarProvider defaultOpen={true}>
       <AppLayoutInternal>{children}</AppLayoutInternal>
