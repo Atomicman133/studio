@@ -11,12 +11,12 @@ export interface ComplianceCriterionCheck {
 }
 
 export interface StaffComplianceReport {
-  staffMemberId: string; // Assuming StaffMember has an ID
+  staffMemberId: string; // Assuming StaffMember has an ID or use generated identifier
   staffMemberName: string; // Full name for display
   staffMemberRank: string;
   isCompliant: boolean;
   criteriaChecks: ComplianceCriterionCheck[];
-  squadron: string; // Store squadron for grouping/sorting
+  squadron: string; // Use squadron from StaffMember profile for consistency
 }
 
 // Configuration for compliance criteria
@@ -74,3 +74,4 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
 ] as const;
 
 export type ComplianceCriterionKey = typeof COMPLIANCE_CRITERIA_CONFIG[number]['key'];
+

@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2 } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -31,22 +31,63 @@ import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reportin
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
-import { initialTrainingLogs } from "../training/page"; 
-import { initialStaff } from "../staff/page"; 
-import { addYears, isBefore, format, differenceInDays } from "date-fns"; // Removed subDays as it's not used
-import { RANKS } from "../staff/staff-schema"; // Import new RANKS
+// import { initialTrainingLogs } from "../training/page"; // Removed static import
+// import { initialStaff } from "../staff/page"; // Removed static import, causes the error
+import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff data
+import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
+import { db } from '@/lib/firebase/config'; // Import db config
+import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
+import { addYears, isBefore, format, differenceInDays } from "date-fns";
+import { RANKS } from "../staff/staff-schema";
+
+
+// --- Fetch Training Logs (copied from training page for this component's scope) ---
+const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; // Use a unique key if needed
+const convertLogTimestamps = (data: any): TrainingLog => {
+  return {
+    ...data,
+    completionDate: (data.completionDate as Timestamp).toDate(),
+  };
+};
+async function fetchTrainingLogs(): Promise<TrainingLog[]> {
+  const collectionRef = collection(db, 'trainingLogs');
+  const q = query(collectionRef, orderBy('completionDate', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...convertLogTimestamps(doc.data()),
+  })) as TrainingLog[];
+}
+// --- End Fetch Training Logs ---
 
 
 const getStaffIdentifier = (staffMember: StaffMember): string => {
+  // Ensure serviceNumber exists, fallback if necessary but log a warning.
+  if (!staffMember.serviceNumber) {
+    console.warn(`Staff member ${staffMember.firstName} ${staffMember.lastName} is missing a service number.`);
+    // Fallback identifier - less reliable
+    return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_MISSING_SN`;
+  }
   return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
 };
 
-const getTrainingLogStaffIdentifier = (log: TrainingLog): string => {
-  const matchedStaff = initialStaff.find(sm => sm.rank === log.rank && `${sm.lastName}, ${sm.firstName}` === log.staffName);
+const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[]): string => {
+  // Prioritize matching based on available StaffMember data
+  const matchedStaff = staffList.find(sm =>
+    sm.rank === log.rank &&
+    `${sm.lastName}, ${sm.firstName}` === log.staffName &&
+    sm.squadron === log.squadron // Add squadron match for robustness if available
+  );
+
   if (matchedStaff) {
     return getStaffIdentifier(matchedStaff);
   }
-  return `${log.staffName}_${log.rank}_UNKNOWN_SN`;
+
+  // Fallback if no exact match found in the current staff list
+  // This might happen if the training log is for a staff member not yet in the main list
+  // or if details slightly differ.
+  console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}. Using log details as fallback identifier.`);
+  return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
 };
 
 
@@ -54,22 +95,23 @@ const processComplianceReports = (
   staffList: StaffMember[],
   trainingLogs: TrainingLog[]
 ): StaffComplianceReport[] => {
-  
+
   return staffList.map((staff) => {
     const staffId = getStaffIdentifier(staff);
-    const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log) === staffId);
+    // Filter logs associated with this specific staff member
+    const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log, staffList) === staffId);
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
       const relevantLogs = memberLogs
         .filter(log => criterion.identifier(log))
-        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()); 
+        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
       let isMet = false;
       let details = "Missing";
       let selectedLog: TrainingLog | undefined = undefined;
 
       if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0]; 
+        selectedLog = relevantLogs[0];
         const completionDate = new Date(selectedLog.completionDate);
         if (criterion.yearsToExpire) {
           const expiryDate = addYears(completionDate, criterion.yearsToExpire);
@@ -84,7 +126,7 @@ const processComplianceReports = (
           details = `Completed: ${format(completionDate, "PP")}`;
         }
       }
-      
+
       return {
         key: criterion.key,
         name: criterion.name,
@@ -97,29 +139,28 @@ const processComplianceReports = (
     const isCompliant = criteriaChecks.every(c => c.isMet);
 
     return {
-      staffMemberId: staff.id || staffId, 
+      staffMemberId: staff.id || staffId,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
-      squadron: (staff as any).squadron || memberLogs[0]?.squadron || "N/A", 
+      squadron: staff.squadron || "N/A", // Use squadron from staff profile
       isCompliant,
       criteriaChecks,
     };
   })
-  .sort((a,b) => { 
+  .sort((a,b) => {
     if (a.squadron.localeCompare(b.squadron) !== 0) {
         return a.squadron.localeCompare(b.squadron);
     }
-    const rankOrder = RANKS; 
-    const rankAIndex = rankOrder.indexOf(a.staffMemberRank as typeof RANKS[number]); // Cast for type safety
-    const rankBIndex = rankOrder.indexOf(b.staffMemberRank as typeof RANKS[number]); // Cast for type safety
-    
-    // Handle cases where rank might not be in RANKS (though schema should prevent this)
+    const rankOrder = RANKS;
+    const rankAIndex = rankOrder.indexOf(a.staffMemberRank as typeof RANKS[number]);
+    const rankBIndex = rankOrder.indexOf(b.staffMemberRank as typeof RANKS[number]);
+
     if (rankAIndex === -1 && rankBIndex === -1) return a.staffMemberName.localeCompare(b.staffMemberName);
-    if (rankAIndex === -1) return 1; // Ranks not in the list go last
-    if (rankBIndex === -1) return -1; // Ranks not in the list go last
+    if (rankAIndex === -1) return 1;
+    if (rankBIndex === -1) return -1;
 
     if (rankAIndex !== rankBIndex) {
-        return rankBIndex - rankAIndex; // Higher rank first (assuming RANKS is sorted lowest to highest)
+        return rankBIndex - rankAIndex;
     }
     return a.staffMemberName.localeCompare(b.staffMemberName);
   });
@@ -127,18 +168,30 @@ const processComplianceReports = (
 
 
 export default function ReportingPage() {
+  const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
+  const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
+    queryKey: [TRAINING_LOGS_QUERY_KEY],
+    queryFn: fetchTrainingLogs,
+  });
+
   const [complianceReports, setComplianceReports] = React.useState<StaffComplianceReport[]>([]);
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    const reports = processComplianceReports(initialStaff, initialTrainingLogs);
-    setComplianceReports(reports);
-  }, []);
+    // Only process when both staff and logs data are available
+    if (staffList.length > 0 && trainingLogs.length > 0) {
+      const reports = processComplianceReports(staffList, trainingLogs);
+      setComplianceReports(reports);
+    } else if (!isLoadingStaff && !isLoadingLogs) {
+      // If loading is finished but data is empty, clear reports
+      setComplianceReports([]);
+    }
+  }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]); // Depend on fetched data and loading states
 
   const toggleCollapsible = (staffMemberId: string) => {
     setOpenCollapsible(prev => (prev === staffMemberId ? null : staffMemberId));
   };
-  
+
   const getOverallStatusIcon = (isCompliant: boolean) => {
     return isCompliant ? <CheckCircle2 className="h-5 w-5 text-green-500" /> : <XCircle className="h-5 w-5 text-destructive" />;
   };
@@ -148,9 +201,9 @@ export default function ReportingPage() {
     if (isBefore(new Date(), expiryDate)) {
       return differenceInDays(expiryDate, new Date());
     }
-    return null; 
+    return null;
   };
-  
+
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
     if (!criterion.isMet || !criterion.relevantLog || !COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === criterion.key)?.yearsToExpire) {
       return null;
@@ -159,15 +212,17 @@ export default function ReportingPage() {
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire!);
 
     if (daysLeft !== null) {
-      if (daysLeft <= 30) { 
+      if (daysLeft <= 30) {
         return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-      } else if (daysLeft <= 90) { 
+      } else if (daysLeft <= 90) {
         return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
       }
     }
     return null;
   };
 
+  const isLoadingAny = isLoadingStaff || isLoadingLogs;
+  const errorAny = errorStaff || errorLogs;
 
   return (
     <div className="space-y-6">
@@ -184,13 +239,35 @@ export default function ReportingPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {complianceReports.length === 0 ? (
+          {isLoadingAny && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading compliance data...</p>
+            </div>
+          )}
+          {errorAny && !isLoadingAny && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+              <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Data</h3>
+              {errorStaff && <p className="text-destructive mb-1 text-sm">Staff error: {errorStaff.message}</p>}
+              {errorLogs && <p className="text-destructive mb-1 text-sm">Training log error: {errorLogs.message}</p>}
+            </div>
+          )}
+          {!isLoadingAny && !errorAny && complianceReports.length === 0 && staffList.length === 0 && (
+             <div className="flex flex-col items-center justify-center py-12 text-center">
               <UserCheck className="h-16 w-16 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Data Available</h3>
-              <p className="text-muted-foreground">Ensure staff members and training logs are populated.</p>
+              <p className="text-muted-foreground">Add staff members in the Staff Management section.</p>
             </div>
-          ) : (
+          )}
+           {!isLoadingAny && !errorAny && complianceReports.length === 0 && staffList.length > 0 && (
+             <div className="flex flex-col items-center justify-center py-12 text-center">
+              <UserCheck className="h-16 w-16 text-muted-foreground mb-4" />
+              <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Compliance Data Processed</h3>
+              <p className="text-muted-foreground">Ensure training logs are available or check data processing logic.</p>
+            </div>
+          )}
+          {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
             <ScrollArea className="max-h-[75vh]">
             <Table>
               <TableHeader>
@@ -260,8 +337,8 @@ export default function ReportingPage() {
             </ScrollArea>
           )}
         </CardContent>
-        {complianceReports.length > 0 && (
-          <CardFooter className="text-xs text-muted-foreground">
+        {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
+          <CardFooter className="text-xs text-muted-foreground pt-4">
             Displaying compliance reports for {complianceReports.length} staff member(s).
           </CardFooter>
         )}
@@ -284,7 +361,7 @@ export default function ReportingPage() {
                 <strong>{criterion.name}</strong>
                 {criterion.yearsToExpire ? ` (valid for ${criterion.yearsToExpire} years from completion).` : ` (checked for existence).`}
                 <br />
-                <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like: 
+                <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
                 {
                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID..."' :
                  criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
@@ -298,10 +375,11 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log. Items without specified expiry are considered 'current' if any relevant log exists. This system relies on accurate and consistently named training log entries.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log. Items without specified expiry are considered 'current' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
           </p>
         </CardContent>
       </Card>
     </div>
   );
 }
+

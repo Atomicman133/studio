@@ -24,7 +24,10 @@ const STAFF_QUERY_KEY = 'staff';
 const convertTimestamps = (data: any): StaffMember => {
   const validatedData = staffMemberSchema.parse({
     ...data,
-    joinDate: data.joinDate instanceof Timestamp ? data.joinDate.toDate() : data.joinDate,
+    // Ensure null joinDate from Firestore is converted to undefined for Zod
+    joinDate: data.joinDate instanceof Timestamp 
+      ? data.joinDate.toDate() 
+      : (data.joinDate === null ? undefined : data.joinDate),
   });
   return validatedData;
 };
@@ -73,7 +76,7 @@ async function addStaff(newStaffData: Omit<StaffMember, 'id'>): Promise<string> 
    // Prepare data for Firestore (convert Dates to Timestamps if needed)
   const dataToSave = {
     ...newStaffData,
-    joinDate: newStaffData.joinDate ? Timestamp.fromDate(newStaffData.joinDate) : null,
+    joinDate: newStaffData.joinDate ? Timestamp.fromDate(newStaffData.joinDate) : null, // Firestore can store null
   };
   const docRef = await addDoc(staffCollectionRef, dataToSave);
   return docRef.id;
@@ -100,7 +103,7 @@ async function updateStaff(updatedStaff: StaffMember): Promise<void> {
   const { id, ...dataToUpdate } = updatedStaff; // Exclude ID from data payload
   const dataToSave = {
     ...dataToUpdate,
-    joinDate: dataToUpdate.joinDate ? Timestamp.fromDate(dataToUpdate.joinDate) : null,
+    joinDate: dataToUpdate.joinDate ? Timestamp.fromDate(dataToUpdate.joinDate) : null, // Firestore can store null
   };
   await updateDoc(staffDocRef, dataToSave);
 }
@@ -143,3 +146,4 @@ export function useDeleteStaff() {
     },
   });
 }
+
