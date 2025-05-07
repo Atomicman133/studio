@@ -1,25 +1,31 @@
 
+// Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getFirestore, Firestore } from "firebase/firestore";
 // import { getAuth } from "firebase/auth"; // If using Firebase Auth
 // import { getStorage } from "firebase/storage"; // If using Firebase Storage
 
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // Optional
+  apiKey: "AIzaSyCxGglrCkjQnEZZ1T4i79x6F0JC34kaNQo",
+  authDomain: "squadron-manager-ekm3y.firebaseapp.com",
+  projectId: "squadron-manager-ekm3y",
+  storageBucket: "squadron-manager-ekm3y.appspot.com", // Corrected domain for storage bucket
+  messagingSenderId: "108573147047",
+  appId: "1:108573147047:web:0fb238bfab1f516d338082"
+  // measurementId: "YOUR_MEASUREMENT_ID" // Measurement ID is optional
 };
+
 
 // Initialize Firebase
 let app: FirebaseApp;
 if (!getApps().length) {
   app = initializeApp(firebaseConfig);
+  console.log("Firebase initialized successfully.");
 } else {
   app = getApp();
+  console.log("Firebase app already exists.");
 }
 
 const db: Firestore = getFirestore(app);
@@ -30,5 +36,5 @@ export { app, db /*, auth, storage */ };
 
 // Basic check for required environment variables
 if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId) {
-  console.warn("Firebase environment variables might be missing. Ensure NEXT_PUBLIC_FIREBASE_* variables are set in your .env.local file.");
+  console.error("Firebase configuration values seem to be missing or incomplete!");
 }
