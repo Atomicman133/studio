@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -27,9 +28,9 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
-  SidebarMenuSubButton,
+  // SidebarMenuSub, // Not used
+  // SidebarMenuSubItem, // Not used
+  // SidebarMenuSubButton, // Not used
   SidebarInset,
   SidebarTrigger,
   useSidebar,
@@ -44,7 +45,7 @@ import {
 import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import Image from "next/image";
+// import Image from "next/image"; // Not used
 
 interface NavItem {
   href: string;
@@ -131,54 +132,61 @@ function NavMenuItemContent({
   );
 }
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+// This internal component now uses the useSidebar hook
+function AppLayoutInternal({ children }: { children: React.ReactNode }) {
   const { open, state } = useSidebar();
   const isCollapsed = state === "collapsed";
 
   return (
-    <SidebarProvider defaultOpen={true}>
-      <div className="flex min-h-screen">
-        <Sidebar
-          collapsible="icon"
-          className="border-r shadow-sm transition-all duration-300 ease-in-out"
-        >
-          <SidebarHeader className="p-4 flex items-center justify-between">
-             <Link href="/" className="flex items-center gap-2">
-              <Plane className="h-8 w-8 text-primary" />
-              {!isCollapsed && <h1 className="text-xl font-semibold text-primary">Squadron Manager</h1>}
-            </Link>
-          </SidebarHeader>
-          <SidebarContent className="p-2">
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.label}>
-                  <NavMenuItemContent item={item} isCollapsed={isCollapsed} />
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarContent>
-          <SidebarFooter className="p-4 border-t">
-            {!isCollapsed && <p className="text-xs text-muted-foreground">&copy; 2024 AAFC</p>}
-          </SidebarFooter>
-        </Sidebar>
-        <div className="flex-1 flex flex-col">
-          <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-6 shadow-sm">
-            <SidebarTrigger className="md:hidden" />
-            <div className="flex-1">
-              {/* Placeholder for breadcrumbs or page title */}
-            </div>
-            <div className="flex items-center gap-4">
-              <ThemeToggle />
-              <UserNav />
-            </div>
-          </header>
-          <SidebarInset className="p-4 sm:p-6 lg:p-8 bg-muted/40 overflow-y-auto">
-            <main className="flex-1 transition-all duration-300 ease-in-out">
-              {children}
-            </main>
-          </SidebarInset>
-        </div>
+    <div className="flex min-h-screen">
+      <Sidebar
+        collapsible="icon"
+        className="border-r shadow-sm transition-all duration-300 ease-in-out"
+      >
+        <SidebarHeader className="p-4 flex items-center justify-between">
+           <Link href="/" className="flex items-center gap-2">
+            <Plane className="h-8 w-8 text-primary" />
+            {!isCollapsed && <h1 className="text-xl font-semibold text-primary">Squadron Manager</h1>}
+          </Link>
+        </SidebarHeader>
+        <SidebarContent className="p-2">
+          <SidebarMenu>
+            {navItems.map((item) => (
+              <SidebarMenuItem key={item.label}>
+                <NavMenuItemContent item={item} isCollapsed={isCollapsed} />
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarContent>
+        <SidebarFooter className="p-4 border-t">
+          {!isCollapsed && <p className="text-xs text-muted-foreground">&copy; 2024 AAFC</p>}
+        </SidebarFooter>
+      </Sidebar>
+      <div className="flex-1 flex flex-col">
+        <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-6 shadow-sm">
+          <SidebarTrigger className="md:hidden" />
+          <div className="flex-1">
+            {/* Placeholder for breadcrumbs or page title */}
+          </div>
+          <div className="flex items-center gap-4">
+            <ThemeToggle />
+            <UserNav />
+          </div>
+        </header>
+        <SidebarInset className="p-4 sm:p-6 lg:p-8 bg-muted/40 overflow-y-auto">
+          <main className="flex-1 transition-all duration-300 ease-in-out">
+            {children}
+          </main>
+        </SidebarInset>
       </div>
+    </div>
+  );
+}
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <SidebarProvider defaultOpen={true}>
+      <AppLayoutInternal>{children}</AppLayoutInternal>
     </SidebarProvider>
   );
 }
