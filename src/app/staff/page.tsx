@@ -62,11 +62,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 
 // Import initial data from other modules
-import { initialTrainingLogs } from "../training/page"; // Removed type TrainingLog import as it's not directly used here
-import { initialMeetings } from "../meetings/page"; // Removed type Meeting
-import { initialDisciplineActions } from "../discipline/page"; // Removed type DisciplineAction
-import { initialPdps } from "../pdps/page"; // Removed type Pdp
-import { initialAudits } from "../audits/page"; // Removed type SafetyAudit
+import { initialTrainingLogs } from "../training/page"; 
+import { initialMeetings } from "../meetings/page"; 
+import { initialDisciplineActions } from "../discipline/page"; 
+import { initialPdps } from "../pdps/page"; 
+import { initialAudits } from "../audits/page"; 
 
 
 export const initialStaff: StaffMember[] = [
@@ -128,15 +128,11 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   let rank: typeof RANKS[number] | null = null;
   let namePart = memberNameInput.trim();
 
-  // Iterate in reverse order of rank string length to match longer ranks first (e.g. "PLTOFF(AAFC)" before "CIV")
-  // Or ensure ranks like "AC(AAFC)" are checked before just "AC" if "AC" was a valid rank.
-  // The current RANKS order is fine as specific ranks are checked.
   const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
-
 
   for (const r of sortedRanksForParsing) {
     if (namePart.toUpperCase().startsWith(r + " ")) {
-      rank = r as typeof RANKS[number]; // Ensure r is treated as a valid rank type
+      rank = r as typeof RANKS[number]; 
       namePart = namePart.substring(r.length).trim();
       break;
     }
@@ -144,18 +140,8 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
 
   if (!namePart) return { rank, firstName: null, lastName: null };
 
-  // Try "LastName, FirstName"
-  const commaIndex = namePart.indexOf(',');
-  if (commaIndex > 0 && commaIndex < namePart.length - 1) { // Ensure comma is not at start or end
-    const lastName = namePart.substring(0, commaIndex).trim();
-    const firstName = namePart.substring(commaIndex + 1).trim();
-    if (lastName && firstName) {
-      return { rank, firstName, lastName };
-    }
-  }
-
-  // Try "FirstName LastName" or "FirstName MiddleName LastName"
-  const parts = namePart.split(' ').filter(p => p); // Filter out empty strings from multiple spaces
+  // Expect "FirstName LastName" or "FirstName MiddleName LastName"
+  const parts = namePart.split(' ').filter(p => p); 
   if (parts.length >= 2) {
     const lastName = parts[parts.length - 1];
     const firstName = parts.slice(0, -1).join(' ');
@@ -164,14 +150,14 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
     }
   }
   
-  // If only one name part left (e.g. "Smith")
+  // Fallback: if only one name part left (e.g. "Smith" after Rank) or namePart couldn't be parsed into first/last.
+  // This is less ideal as it can't distinguish between first/last name.
+  // For a single remaining part, we'll assign it to lastName as a best guess.
   if (parts.length === 1 && parts[0]) {
-    // Cannot reliably determine if it's first or last.
-    // Let's assume it's a last name for now, user might need to correct.
     return { rank, firstName: null, lastName: parts[0] };
   }
   
-  // Fallback: if namePart is not empty but couldn't be parsed into first/last
+  // If namePart is not empty but couldn't be parsed into first/last according to new rules
   return { rank, firstName: null, lastName: namePart }; // lastName will hold the unparsed part
 }
 
@@ -314,7 +300,7 @@ export default function StaffPage() {
                   continue;
                 }
                 if (!firstName || !lastName) {
-                  errors.push(`Row ${i + 1}: Could not parse first and last name from MemberName "${csvData.MemberName}". Expected format like "RANK LastName, FirstName" or "RANK FirstName LastName".`);
+                  errors.push(`Row ${i + 1}: Could not parse first and last name from MemberName "${csvData.MemberName}". Expected format "RANK FirstName LastName". Received: "${csvData.MemberName}". Parsed Name Part: "${csvData.MemberName.substring(rank.length).trim()}"`);
                   continue;
                 }
 
@@ -546,7 +532,7 @@ export default function StaffPage() {
           To bulk import staff members, upload a CSV file with the following columns in order:
           <ul className="list-disc pl-5 mt-2 text-xs">
             <li><code>MemberUID</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
-            <li><code>MemberName</code> (Text, Required. Format: &quot;RANK LastName, FirstName&quot; e.g., &quot;FLTLT(AAFC) Smith, Jane&quot; or &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")})</li>
+            <li><code>MemberName</code> (Text, Required. Format: &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")})</li>
             <li><code>PrimaryUnit</code> (Text, Optional, e.g., &quot;123 Squadron&quot;)</li>
             <li><code>Appointment</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
             <li><code>EmailAddress</code> (Text, Required, Valid email format, e.g., &quot;jane.smith@example.com&quot;)</li>
