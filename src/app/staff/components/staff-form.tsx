@@ -52,12 +52,15 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
       phone: "",
       role: "",
       joinDate: undefined,
+      squadron: "", // Added squadron
     },
   });
 
   const handleSubmit = (data: StaffMember) => {
     onSubmit(data);
-    form.reset(); 
+    if (!isEditing) { // Only reset if not editing
+      form.reset(); 
+    }
   };
 
   return (
@@ -153,6 +156,19 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               </FormItem>
             )}
           />
+           <FormField
+            control={form.control}
+            name="squadron"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Squadron</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g., 123 Squadron" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           <FormField
             control={form.control}
             name="role"
@@ -170,7 +186,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
             control={form.control}
             name="joinDate"
             render={({ field }) => (
-              <FormItem className="flex flex-col">
+              <FormItem className="flex flex-col md:col-span-2"> {/* Allow join date to span if needed or place strategically */}
                 <FormLabel>Join Date (Optional)</FormLabel>
                 <Popover>
                   <PopoverTrigger asChild>

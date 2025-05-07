@@ -8,7 +8,6 @@ import {
   GraduationCap,
   Gavel,
   ShieldCheck,
-  UserCheck,
   Settings,
   Users,
   ChevronDown,
@@ -16,6 +15,7 @@ import {
   Moon,
   LayoutDashboard,
   Plane,
+  FileSearch, // Added for Reporting
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -28,9 +28,6 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  // SidebarMenuSub, // Not used
-  // SidebarMenuSubItem, // Not used
-  // SidebarMenuSubButton, // Not used
   SidebarInset,
   SidebarTrigger,
   useSidebar,
@@ -45,7 +42,7 @@ import {
 import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-// import Image from "next/image"; // Not used
+import * as React from "react"; // Ensure React is imported for useEffect & useState
 
 interface NavItem {
   href: string;
@@ -65,12 +62,20 @@ const navItems: NavItem[] = [
   },
   { href: "/discipline", label: "Discipline Actions", icon: Gavel },
   { href: "/audits", label: "Safety Audits", icon: ShieldCheck },
-  { href: "/compliance", label: "Staff Compliance", icon: UserCheck },
+  { href: "/reporting", label: "Compliance Reporting", icon: FileSearch }, // Changed from UserCheck and updated label/href
   { href: "/staff", label: "Staff Management", icon: Users },
 ];
 
 function ThemeToggle() {
   const { setTheme, theme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => setMounted(true), []);
+
+  if (!mounted) {
+    // Render a placeholder or null during server rendering and initial client mount
+    return <div style={{ width: '2.5rem', height: '2.5rem' }} />; // Matches Button size="icon"
+  }
 
   return (
     <Button
@@ -86,6 +91,13 @@ function ThemeToggle() {
 }
 
 function UserNav() {
+   const [mounted, setMounted] = React.useState(false);
+   React.useEffect(() => setMounted(true), []);
+
+   if (!mounted) {
+    // Placeholder to avoid hydration mismatch for Avatar, which might rely on client-side rendering or random data
+    return <div className="h-10 w-10 rounded-full bg-muted" />;
+   }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -119,34 +131,34 @@ function NavMenuItemContent({
     <Link href={item.href} className="w-full">
       <SidebarMenuButton
         className={cn(
-          "w-full justify-start",
-          isActive && "bg-primary/10 text-primary hover:bg-primary/15 dark:bg-primary/20 dark:text-primary-foreground dark:hover:bg-primary/25"
+          "w-full justify-start", // Ensure button takes full width
+          isActive && "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 dark:bg-sidebar-primary dark:text-sidebar-primary-foreground dark:hover:bg-sidebar-primary/90"
         )}
         tooltip={isCollapsed ? item.label : undefined}
         isActive={isActive}
       >
         <item.icon className="h-5 w-5 shrink-0" />
-        <span className={cn(isCollapsed && "hidden")}>{item.label}</span>
+        <span className={cn("truncate", isCollapsed && "hidden")}>{item.label}</span>
       </SidebarMenuButton>
     </Link>
   );
 }
 
-// This internal component now uses the useSidebar hook
 function AppLayoutInternal({ children }: { children: React.ReactNode }) {
-  const { open, state } = useSidebar();
-  const isCollapsed = state === "collapsed";
+  const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const isCollapsed = !isMobile && state === "collapsed";
+
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen w-full">
       <Sidebar
         collapsible="icon"
-        className="border-r shadow-sm transition-all duration-300 ease-in-out"
+        className="border-r shadow-sm transition-all duration-300 ease-in-out hidden md:flex"
       >
-        <SidebarHeader className="p-4 flex items-center justify-between">
-           <Link href="/" className="flex items-center gap-2">
-            <Plane className="h-8 w-8 text-primary" />
-            {!isCollapsed && <h1 className="text-xl font-semibold text-primary">Squadron Manager</h1>}
+        <SidebarHeader className="p-3 flex items-center justify-between border-b">
+           <Link href="/" className={cn("flex items-center gap-2", isCollapsed && "justify-center")}>
+            <Plane className="h-7 w-7 text-primary" />
+            {!isCollapsed && <h1 className="text-lg font-semibold text-primary truncate">Squadron Manager</h1>}
           </Link>
         </SidebarHeader>
         <SidebarContent className="p-2">
@@ -158,23 +170,54 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
             ))}
           </SidebarMenu>
         </SidebarContent>
-        <SidebarFooter className="p-4 border-t">
-          {!isCollapsed && <p className="text-xs text-muted-foreground">&copy; 2024 AAFC</p>}
+        <SidebarFooter className="p-3 border-t">
+          {!isCollapsed && <p className="text-xs text-muted-foreground truncate">&copy; 2024 AAFC</p>}
+           {isCollapsed && <Settings className="h-5 w-5 mx-auto text-muted-foreground" />}
         </SidebarFooter>
       </Sidebar>
-      <div className="flex-1 flex flex-col">
-        <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-6 shadow-sm">
+
+      {/* Mobile Sidebar */}
+       {isMobile && (
+        <Sidebar
+            collapsible="offcanvas"
+            className="md:hidden"
+        >
+            <SidebarHeader className="p-3 flex items-center justify-between border-b">
+                <Link href="/" className="flex items-center gap-2">
+                    <Plane className="h-7 w-7 text-primary" />
+                    <h1 className="text-lg font-semibold text-primary truncate">Squadron Manager</h1>
+                </Link>
+            </SidebarHeader>
+            <SidebarContent className="p-2">
+                <SidebarMenu>
+                    {navItems.map((item) => (
+                    <SidebarMenuItem key={item.label}>
+                        <NavMenuItemContent item={item} isCollapsed={false} />
+                    </SidebarMenuItem>
+                    ))}
+                </SidebarMenu>
+            </SidebarContent>
+             <SidebarFooter className="p-3 border-t">
+                <p className="text-xs text-muted-foreground truncate">&copy; 2024 AAFC</p>
+            </SidebarFooter>
+        </Sidebar>
+      )}
+
+
+      <div className="flex-1 flex flex-col min-w-0"> {/* Added min-w-0 here */}
+        <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 sm:px-6 shadow-sm">
           <SidebarTrigger className="md:hidden" />
           <div className="flex-1">
             {/* Placeholder for breadcrumbs or page title */}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <ThemeToggle />
             <UserNav />
           </div>
         </header>
-        <SidebarInset className="p-4 sm:p-6 lg:p-8 bg-muted/40 overflow-y-auto">
-          <main className="flex-1 transition-all duration-300 ease-in-out">
+        <SidebarInset className="p-4 sm:p-6 lg:p-8 bg-muted/20 dark:bg-muted/10 overflow-y-auto flex-1">
+           {/* Added flex-1 to allow content to grow and scroll */}
+          <main className="flex-1">
             {children}
           </main>
         </SidebarInset>

@@ -54,7 +54,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { RANKS } from "@/app/staff/staff-schema";
 
-const initialTrainingLogs: TrainingLog[] = [
+export const initialTrainingLogs: TrainingLog[] = [
   {
     id: "t1",
     rank: "FLTLT",
@@ -84,7 +84,7 @@ const initialTrainingLogs: TrainingLog[] = [
     currentRole: "Training Officer",
     courseName: "Advanced First Aid",
     completionDate: new Date("2024-03-15"),
-    qualificationAchieved: "HLTAID011",
+    qualificationAchieved: "HLTAID011", // Example of a First Aid cert
     achievementDetails: "Instructor recommendation."
   },
    {
@@ -106,6 +106,108 @@ const initialTrainingLogs: TrainingLog[] = [
     courseName: "Senior Leadership Seminar",
     completionDate: new Date("2023-09-05"),
     qualificationAchieved: "SLS Attendance",
+  },
+  // Adding more diverse logs for better compliance testing
+  {
+    id: "t6",
+    rank: "FLGOFF",
+    staffName: "Doe, John", // John Doe from 456 SQN
+    squadron: "456 Squadron",
+    currentRole: "Safety Officer",
+    courseName: "Working With Children Check Application",
+    completionDate: new Date("2023-01-10"), // Assume this is when it was processed/granted
+    qualificationAchieved: "WWCC Cleared",
+  },
+  {
+    id: "t7",
+    rank: "FLTLT",
+    staffName: "Smith, Jane", // Jane Smith from 123 SQN
+    squadron: "123 Squadron",
+    currentRole: "Training Officer",
+    courseName: "Code of Conduct Acceptance",
+    completionDate: new Date("2023-02-01"),
+  },
+  {
+    id: "t8",
+    rank: "FLGOFF",
+    staffName: "Doe, John",
+    squadron: "456 Squadron",
+    currentRole: "Safety Officer",
+    courseName: "National Police Clearance",
+    completionDate: new Date("2020-07-01"), // This will be expired for a 5-year rule
+  },
+  {
+    id: "t9",
+    rank: "PLTOFF",
+    staffName: "Williams, Alice",
+    squadron: "123 Squadron",
+    currentRole: "Admin Officer",
+    courseName: "Defence Youth Safety Training (DYSAT)",
+    completionDate: new Date("2024-06-01"), // Current for 1-year rule
+  },
+  {
+    id: "t10",
+    rank: "FLTLT",
+    staffName: "Smith, Jane",
+    squadron: "123 Squadron",
+    currentRole: "Training Officer",
+    courseName: "Psychological Assessment",
+    completionDate: new Date("2022-05-01"),
+  },
+   { // Jane Smith gets her WWCC
+    id: "t11",
+    rank: "FLTLT",
+    staffName: "Smith, Jane",
+    squadron: "123 Squadron",
+    currentRole: "Training Officer",
+    courseName: "Working With Children Check (Vic)",
+    completionDate: new Date("2023-03-15"),
+    qualificationAchieved: "WWCC Card Holder"
+  },
+  { // Jane Smith gets her Police Check (recent)
+    id: "t12",
+    rank: "FLTLT",
+    staffName: "Smith, Jane",
+    squadron: "123 Squadron",
+    currentRole: "Training Officer",
+    courseName: "National Police Clearance (NPC)",
+    completionDate: new Date("2023-08-20"),
+  },
+  { // Jane Smith gets her DYSAT (recent)
+    id: "t13",
+    rank: "FLTLT",
+    staffName: "Smith, Jane",
+    squadron: "123 Squadron",
+    currentRole: "Training Officer",
+    courseName: "Defence Youth Safety Awareness Training",
+    completionDate: new Date("2024-05-10"),
+  },
+   { // John Doe gets Code of Conduct
+    id: "t14",
+    rank: "FLGOFF",
+    staffName: "Doe, John",
+    squadron: "456 Squadron",
+    currentRole: "Safety Officer",
+    courseName: "Code of Conduct and Behavioural Policy Acceptance",
+    completionDate: new Date("2024-01-15"),
+  },
+  { // John Doe gets Psych Assessment
+    id: "t15",
+    rank: "FLGOFF",
+    staffName: "Doe, John",
+    squadron: "456 Squadron",
+    currentRole: "Safety Officer",
+    courseName: "Mandatory Psychological Assessment",
+    completionDate: new Date("2024-02-20"),
+  },
+   { // John Doe gets DYSAT (old, will be expired)
+    id: "t16",
+    rank: "FLGOFF",
+    staffName: "Doe, John",
+    squadron: "456 Squadron",
+    currentRole: "Safety Officer",
+    courseName: "DYSAT Refresher",
+    completionDate: new Date("2023-01-05"), // Will be expired
   },
 ];
 

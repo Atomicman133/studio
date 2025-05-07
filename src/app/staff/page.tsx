@@ -54,7 +54,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const initialStaff: StaffMember[] = [
+export const initialStaff: StaffMember[] = [
   {
     id: "1f7b3c2a-8e1d-4f9a-8b7c-6d5e4f3a2b1c",
     serviceNumber: "8001234",
@@ -65,6 +65,8 @@ const initialStaff: StaffMember[] = [
     phone: "0412345678",
     role: "Commanding Officer",
     joinDate: new Date("2018-05-15"),
+    // squadron attribute for use in reporting: (Not in original schema but useful for example)
+    squadron: "123 Squadron" 
   },
   {
     id: "2g8c4d3b-9f2e-5g0b-9c8d-7e6f5g4b3c2d",
@@ -74,8 +76,9 @@ const initialStaff: StaffMember[] = [
     lastName: "Doe",
     email: "john.doe@example.com",
     phone: "0423456789",
-    role: "Training Officer",
+    role: "Safety Officer", // Changed from Training Officer for diversity
     joinDate: new Date("2020-01-20"),
+    squadron: "456 Squadron"
   },
   {
     id: "3h9d5e4c-0g3f-6h1c-0d9e-8f7g6h5c4d3e",
@@ -86,7 +89,19 @@ const initialStaff: StaffMember[] = [
     email: "alice.williams@example.com",
     role: "Admin Officer",
     joinDate: new Date("2021-07-10"),
+    squadron: "123 Squadron"
   },
+  { // Adding another member for more comprehensive testing if needed
+    id: "4i0e6f5d-1h4g-7i2d-1e0f-9g8h7i6d5e4f",
+    serviceNumber: "8012345",
+    rank: "SQNLDR",
+    firstName: "Robert",
+    lastName: "Brown",
+    email: "robert.brown@example.com",
+    role: "Wing Training Coordinator",
+    joinDate: new Date("2015-03-01"),
+    squadron: "721 Wing HQ"
+  }
 ];
 
 
@@ -174,7 +189,7 @@ export default function StaffPage() {
         errors.push("CSV must have a header and at least one data row.");
       } else {
         const header = lines[0].split(',').map(h => h.trim());
-        const expectedHeader = ["serviceNumber", "rank", "firstName", "lastName", "email", "phone", "role", "joinDate"];
+        const expectedHeader = ["serviceNumber", "rank", "firstName", "lastName", "email", "phone", "role", "joinDate", "squadron"]; // Added squadron
         if (JSON.stringify(header) !== JSON.stringify(expectedHeader)) {
             errors.push(`Invalid CSV header. Expected: ${expectedHeader.join(',')}. Got: ${header.join(',')}`);
         } else {
@@ -205,18 +220,16 @@ export default function StaffPage() {
                     continue;
                 }
                 
-                if (!staffData.serviceNumber || !staffData.firstName || !staffData.lastName || !staffData.email || !staffData.role) {
-                    errors.push(`Row ${i + 1}: Missing one or more required fields (serviceNumber, firstName, lastName, email, role).`);
+                if (!staffData.serviceNumber || !staffData.firstName || !staffData.lastName || !staffData.email || !staffData.role || !staffData.squadron) { // Added squadron check
+                    errors.push(`Row ${i + 1}: Missing one or more required fields (serviceNumber, rank, firstName, lastName, email, role, squadron).`);
                     continue;
                 }
                 
-                // Basic email validation
                 if (!/^\S+@\S+\.\S+$/.test(staffData.email)) {
                     errors.push(`Row ${i+1}: Invalid email format for "${staffData.email}".`);
                     continue;
                 }
 
-                // Check for duplicates based on service number or email before adding
                 const isDuplicate = staffList.some(s => s.serviceNumber === staffData.serviceNumber || s.email === staffData.email) ||
                                     importedMembers.some(s => s.serviceNumber === staffData.serviceNumber || s.email === staffData.email);
                 if (isDuplicate) {
@@ -235,6 +248,7 @@ export default function StaffPage() {
                     phone: staffData.phone || undefined,
                     role: staffData.role,
                     joinDate: joinDate,
+                    squadron: staffData.squadron, // Added squadron
                 });
             }
         }
@@ -254,17 +268,17 @@ export default function StaffPage() {
                 <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
               </ScrollArea>
             ),
-            duration: 10000, // Longer duration for errors
+            duration: 10000, 
         });
       }
       if (fileInputRef.current) {
-        fileInputRef.current.value = ""; // Reset file input
+        fileInputRef.current.value = ""; 
       }
     };
     reader.onerror = () => {
       toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
       if (fileInputRef.current) {
-        fileInputRef.current.value = ""; // Reset file input
+        fileInputRef.current.value = ""; 
       }
     };
     reader.readAsText(file);
@@ -306,7 +320,7 @@ export default function StaffPage() {
                   <TableHead>Service No.</TableHead>
                   <TableHead>Rank</TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead className="hidden md:table-cell">Email</TableHead>
+                  <TableHead className="hidden md:table-cell">Squadron</TableHead> {/* Added Squadron column */}
                   <TableHead className="hidden lg:table-cell">Role</TableHead>
                   <TableHead className="hidden lg:table-cell">Join Date</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -318,7 +332,7 @@ export default function StaffPage() {
                     <TableCell>{staff.serviceNumber}</TableCell>
                     <TableCell>{staff.rank}</TableCell>
                     <TableCell>{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                    <TableCell className="hidden md:table-cell">{staff.email}</TableCell>
+                    <TableCell className="hidden md:table-cell">{(staff as any).squadron || 'N/A'}</TableCell> {/* Display Squadron */}
                     <TableCell className="hidden lg:table-cell">{staff.role}</TableCell>
                     <TableCell className="hidden lg:table-cell">
                       {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
@@ -379,6 +393,7 @@ export default function StaffPage() {
             <li><code>phone</code> (Text, Optional, e.g., &quot;0412345678&quot;)</li>
             <li><code>role</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
             <li><code>joinDate</code> (Date, Optional, Format: YYYY-MM-DD, e.g., &quot;2018-05-15&quot;)</li>
+            <li><code>squadron</code> (Text, Required, e.g., &quot;123 Squadron&quot;)</li> {/* Added squadron instruction */}
           </ul>
           The first row must be a header row with these exact names. Service Number and Email must be unique per staff member.
         </AlertDescription>
@@ -418,7 +433,7 @@ export default function StaffPage() {
                 <DialogHeader>
                     <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
                     <DialogDescription>
-                       Service Number: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role}
+                       Service Number: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role} | Squadron: {(viewingStaffMember as any).squadron || 'N/A'}
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
@@ -440,19 +455,18 @@ export default function StaffPage() {
                         <Card className="mt-4">
                             <CardHeader>
                                 <CardTitle className="text-lg">Related Records</CardTitle>
-                                <CardDescription>Professional development, training, compliance, and discipline records.</CardDescription>
+                                <CardDescription>Compliance status, professional development, training, and discipline records.</CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <p className="text-sm text-muted-foreground">
-                                    Integration with other modules to display related records for this staff member is planned for a future update.
+                                    Current compliance status and links to other relevant records for this staff member will be displayed here in a future update.
                                 </p>
                                 {/* 
                                 TODO: In the future, fetch and display:
+                                - Compliance status from Reporting module (use staff identifier)
                                 - PDPs for this staff member
                                 - Training logs
-                                - Compliance items
                                 - Discipline actions
-                                This will likely require matching by staff name or ideally a unique staff ID propagated to other schemas.
                                 */}
                             </CardContent>
                         </Card>
@@ -523,5 +537,4 @@ function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
-
     
