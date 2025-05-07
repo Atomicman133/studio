@@ -1,8 +1,7 @@
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,12 +45,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { TrainingLog, TrainingLogFormData } from "./training-schema";
 import { TrainingLogForm } from "./components/training-log-form";
-import { format } from "date-fns";
+import { format, parse as parseDateFns, isValid as isValidDate } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { RANKS } from "@/app/staff/staff-schema";
+import { RANKS, type StaffMember } from "@/app/staff/staff-schema";
+import { initialStaff } from "@/app/staff/page"; // Import initialStaff
+import { useToast } from "@/hooks/use-toast";
+
 
 export const initialTrainingLogs: TrainingLog[] = [
   {
@@ -249,14 +252,18 @@ export default function TrainingPage() {
   const [editingLog, setEditingLog] = React.useState<TrainingLog | null>(null);
   const [logToDelete, setLogToDelete] = React.useState<TrainingLog | null>(null);
   const [viewingLog, setViewingLog] = React.useState<TrainingLog | null>(null);
+  const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
 
   const squadronStaffGroups = React.useMemo(() => {
     const logsBySquadron: Record<string, TrainingLog[]> = {};
     trainingLogsList.forEach(log => {
-      if (!logsBySquadron[log.squadron]) {
-        logsBySquadron[log.squadron] = [];
+      const sqn = log.squadron || "Unassigned"; // Handle undefined squadron
+      if (!logsBySquadron[sqn]) {
+        logsBySquadron[sqn] = [];
       }
-      logsBySquadron[log.squadron].push(log);
+      logsBySquadron[sqn].push(log);
     });
 
     const processedSquadrons: SquadronGroup[] = Object.entries(logsBySquadron)
@@ -277,20 +284,16 @@ export default function TrainingPage() {
             logs: staffGroup.logs.sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()),
           }))
           .sort((a, b) => {
-            // Use the imported RANKS array for correct sorting order
             const rankAIndex = RANKS.indexOf(a.rank);
             const rankBIndex = RANKS.indexOf(b.rank);
             
-            // Handle cases where rank might not be in RANKS (though schema should prevent this)
             if (rankAIndex === -1 && rankBIndex === -1) return a.staffName.localeCompare(b.staffName);
-            if (rankAIndex === -1) return 1; // Ranks not in the list go last
-            if (rankBIndex === -1) return -1; // Ranks not in the list go last
+            if (rankAIndex === -1) return 1; 
+            if (rankBIndex === -1) return -1; 
             
-            // Sort by rank index (higher rank first, as per typical military hierarchy if RANKS is ordered lowest to highest)
             const rankComparison = rankBIndex - rankAIndex; 
             if (rankComparison !== 0) return rankComparison;
             
-            // If ranks are the same, sort by staff name
             return a.staffName.localeCompare(b.staffName);
           });
 
@@ -310,7 +313,7 @@ export default function TrainingPage() {
         certificateInfo = { certificateFileName: name, certificateDataUrl: dataUrl };
       } catch (error) {
         console.error("Error converting file:", error);
-        // Optionally show an error to the user
+        toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
       }
     }
 
@@ -329,6 +332,7 @@ export default function TrainingPage() {
     };
     setTrainingLogsList((prev) => [newLog, ...prev]);
     setIsFormOpen(false);
+    toast({ title: "Success", description: "Training record added." });
   };
 
   const handleUpdateLog = async (data: TrainingLogFormData) => {
@@ -341,12 +345,11 @@ export default function TrainingPage() {
         certificateUpdates = { certificateFileName: name, certificateDataUrl: dataUrl };
       } catch (error) {
         console.error("Error converting file:", error);
+        toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
       }
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
-      // This means the "Remove Certificate" button was effectively used (form fields cleared)
       certificateUpdates = { certificateFileName: undefined, certificateDataUrl: undefined };
     } else {
-      // No new file, and no explicit removal, so keep existing
       certificateUpdates = {
         certificateFileName: editingLog.certificateFileName,
         certificateDataUrl: editingLog.certificateDataUrl,
@@ -354,7 +357,7 @@ export default function TrainingPage() {
     }
 
     const updatedLog: TrainingLog = {
-      id: editingLog.id,
+      ...editingLog, // Preserve existing fields like ID
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -372,6 +375,7 @@ export default function TrainingPage() {
     );
     setIsFormOpen(false);
     setEditingLog(null);
+    toast({ title: "Success", description: "Training record updated." });
   };
 
   const handleEdit = (log: TrainingLog) => {
@@ -390,6 +394,7 @@ export default function TrainingPage() {
     if (logToDelete) {
       setTrainingLogsList((prev) => prev.filter((log) => log.id !== logToDelete.id));
       setLogToDelete(null);
+      toast({ title: "Success", description: "Training record deleted." });
     }
   };
 
@@ -471,11 +476,213 @@ export default function TrainingPage() {
     setViewingLog(null);
   };
 
+  // Function to parse "LastName, FirstName-RANK-ServiceID"
+  const parseMemberRankId = (input: string): { name: string, rank: string, serviceId: string, firstName: string, lastName: string } | null => {
+    const parts = input.split('-');
+    if (parts.length < 3) return null; // Expect at least Name, Rank, ID
+
+    const serviceId = parts.pop()!;
+    const rank = parts.pop()!;
+    const nameWithComma = parts.join('-'); // Rejoin if name had hyphens
+
+    const nameParts = nameWithComma.split(',');
+    if (nameParts.length !== 2) return null; // Expect "LastName, FirstName"
+
+    const lastName = nameParts[0].trim();
+    const firstName = nameParts[1].trim();
+    
+    if (!RANKS.includes(rank as typeof RANKS[number])) return null; // Validate rank
+
+    return { name: `${lastName}, ${firstName}`, rank, serviceId, firstName, lastName };
+  };
+
+  const parseDate = (dateString: string): Date | null => {
+    // Try common formats. Date-fns parse is more reliable.
+    const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd"];
+    for (const fmt of formatsToTry) {
+      const parsed = parseDateFns(dateString, fmt, new Date());
+      if (isValidDate(parsed)) return parsed;
+    }
+    // Fallback to new Date() for ISO-like or other standard JS parsable formats
+    const directParsed = new Date(dateString);
+    if (isValidDate(directParsed)) return directParsed;
+    
+    return null;
+  };
+
+
+  const handleAccomplishmentCsvImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      toast({ variant: "destructive", title: "Import Error", description: "No file selected." });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) {
+        toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+        return;
+      }
+      
+      const newLogs: TrainingLog[] = [];
+      const errors: string[] = [];
+      const lines = text.split(/\r\n|\n/);
+
+      if (lines.length < 2) {
+        errors.push("CSV must have a header and at least one data row.");
+      } else {
+        const headerLine = lines[0].trim();
+        const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Remove surrounding quotes if any
+        const expectedHeader = ["Member Name-Rank-ID", "EffectiveDate", "EndDate", "Accomplishment"];
+        
+        // Looser header check (contains all expected, order doesn't matter for this simplified check)
+        const allHeadersPresent = expectedHeader.every(eh => header.includes(eh));
+
+        if (!allHeadersPresent) {
+            errors.push(`Invalid CSV header. Expected columns (any order): ${expectedHeader.join(', ')}. Got: ${header.join(',')}`);
+        } else {
+            // Find actual indices of headers
+            const headerIndices: Record<string, number> = {};
+            expectedHeader.forEach(eh => {
+                headerIndices[eh] = header.indexOf(eh);
+            });
+            
+            // First pass: check if all members exist
+            const membersToProcess: Array<{ staffMember: StaffMember, csvRow: Record<string, string>, rowIndex: number }> = [];
+            let allMembersFound = true;
+
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+
+                const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                if (values.length !== header.length) {
+                    errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}.`);
+                    allMembersFound = false; // Consider this a fatal error for the row
+                    continue;
+                }
+                
+                const csvData: Record<string, string> = {};
+                expectedHeader.forEach(eh => {
+                    csvData[eh] = values[headerIndices[eh]];
+                });
+
+                const memberRankIdStr = csvData["Member Name-Rank-ID"];
+                const parsedMemberInfo = parseMemberRankId(memberRankIdStr);
+
+                if (!parsedMemberInfo) {
+                    errors.push(`Row ${i + 1}: Could not parse "Member Name-Rank-ID": "${memberRankIdStr}". Expected format: LastName, FirstName-RANK-ServiceID.`);
+                    allMembersFound = false;
+                    continue;
+                }
+
+                const matchedStaff = initialStaff.find(
+                    (sm) => sm.serviceNumber === parsedMemberInfo.serviceId &&
+                           sm.rank === parsedMemberInfo.rank &&
+                           sm.firstName.toLowerCase() === parsedMemberInfo.firstName.toLowerCase() &&
+                           sm.lastName.toLowerCase() === parsedMemberInfo.lastName.toLowerCase()
+                );
+
+                if (!matchedStaff) {
+                    errors.push(`Row ${i + 1}: Staff member "${parsedMemberInfo.lastName}, ${parsedMemberInfo.firstName} (${parsedMemberInfo.rank}, ${parsedMemberInfo.serviceId})" not found. Please ensure staff profile exists in Staff Management.`);
+                    allMembersFound = false;
+                } else {
+                    membersToProcess.push({ staffMember: matchedStaff, csvRow: csvData, rowIndex: i + 1 });
+                }
+            }
+
+            if (!allMembersFound) {
+                // Do not proceed with adding logs if any member was not found
+                toast({
+                    variant: "destructive",
+                    title: "CSV Import Failed",
+                    description: (
+                        <ScrollArea className="max-h-40">
+                            <pre className="whitespace-pre-wrap text-xs">
+                                One or more staff members in the CSV could not be found in the system. Please create or import their profiles first in Staff Management. Details:\n{errors.join("\n")}
+                            </pre>
+                        </ScrollArea>
+                    ),
+                    duration: 15000,
+                });
+                if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                return;
+            }
+
+            // Second pass: process members if all were found
+            membersToProcess.forEach(({ staffMember, csvRow, rowIndex }) => {
+                const accomplishment = csvRow["Accomplishment"];
+                const effectiveDateStr = csvRow["EffectiveDate"];
+                // EndDate is not directly used in TrainingLog but could be stored in achievementDetails if needed
+                // const endDateStr = csvData["EndDate"]; 
+
+                if (!accomplishment) {
+                    errors.push(`Row ${rowIndex}: Missing "Accomplishment".`);
+                    return; // Skip this log entry
+                }
+                if (!effectiveDateStr) {
+                    errors.push(`Row ${rowIndex}: Missing "EffectiveDate".`);
+                    return;
+                }
+
+                const completionDate = parseDate(effectiveDateStr);
+                if (!completionDate) {
+                    errors.push(`Row ${rowIndex}: Invalid "EffectiveDate" format for "${effectiveDateStr}". Please use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
+                    return;
+                }
+                
+                newLogs.push({
+                    id: crypto.randomUUID(),
+                    rank: staffMember.rank,
+                    staffName: `${staffMember.lastName}, ${staffMember.firstName}`,
+                    squadron: staffMember.squadron || "N/A", // Use staff member's squadron
+                    currentRole: staffMember.role, // Use staff member's role
+                    courseName: accomplishment,
+                    completionDate: completionDate,
+                    qualificationAchieved: accomplishment, // Also set as qualification
+                });
+            });
+        }
+      }
+
+      if (newLogs.length > 0) {
+        setTrainingLogsList(prev => [...prev, ...newLogs].sort((a,b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime() ));
+        toast({ title: "Import Successful", description: `${newLogs.length} accomplishment(s) imported.` });
+      }
+      if (errors.length > 0) { // These errors are from the second pass if any
+        const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+        toast({
+            variant: "destructive",
+            title: `CSV Import ${newLogs.length > 0 ? "Partially Successful" : "Failed"}`,
+            description: (
+              <ScrollArea className="max-h-40">
+                <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
+              </ScrollArea>
+            ),
+            duration: 10000, 
+        });
+      }
+      if (accomplishmentCsvInputRef.current) {
+        accomplishmentCsvInputRef.current.value = ""; 
+      }
+    };
+    reader.onerror = () => {
+      toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
+      if (accomplishmentCsvInputRef.current) {
+        accomplishmentCsvInputRef.current.value = ""; 
+      }
+    };
+    reader.readAsText(file);
+  };
+
+
   return (
     <div className="space-y-6">
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex justify-between items-start sm:items-center flex-col sm:flex-row gap-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-3">
               <GraduationCap className="h-8 w-8 text-primary hidden sm:block" />
               <div>
@@ -483,9 +690,15 @@ export default function TrainingPage() {
                 <CardDescription>Record staff training, qualifications, accomplishments, and generate reports.</CardDescription>
               </div>
             </div>
-            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-              <PlusCircle className="mr-2 h-5 w-5" /> Log Training Record
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
+                    <PlusCircle className="mr-2 h-5 w-5" /> Log Training Record
+                </Button>
+                <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto">
+                    <UploadCloud className="mr-2 h-5 w-5" /> Import Accomplishments
+                </Button>
+                <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
+            </div>
           </div>
         </CardHeader>
       </Card>
@@ -495,7 +708,7 @@ export default function TrainingPage() {
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
             <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Training Records Yet</h3>
-            <p className="text-muted-foreground mb-4">Click &quot;Log Training Record&quot; to get started.</p>
+            <p className="text-muted-foreground mb-4">Click &quot;Log Training Record&quot; or &quot;Import Accomplishments&quot; to get started.</p>
           </CardContent>
         </Card>
       )}
@@ -543,7 +756,7 @@ export default function TrainingPage() {
                               <TableCell>{format(log.completionDate, "PP")}</TableCell>
                               <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
                                <TableCell className="hidden xl:table-cell">
-                                {log.certificateFileName ? (
+                                {log.certificateFileName && log.certificateDataUrl ? (
                                   <a href={log.certificateDataUrl} download={log.certificateFileName} className="text-primary hover:underline flex items-center">
                                     <Paperclip className="mr-1 h-4 w-4" /> {log.certificateFileName}
                                   </a>
@@ -604,6 +817,23 @@ export default function TrainingPage() {
             </CardFooter>
           </Card>
       )}
+
+      <Alert className="mt-8">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
+        <AlertDescription>
+          To bulk import training accomplishments, upload a CSV file with the following columns (header row required):
+          <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
+            <li><code>Member Name-Rank-ID</code> (Text, Required. Format: &quot;LastName, FirstName-RANK-ServiceID&quot; e.g., &quot;Smith, Jane-FLTLT(AAFC)-8001234&quot;. RANK must be one of: {RANKS.join(", ")}. The ServiceID, Rank, and Name must match an existing staff profile.)</li>
+            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD. This will be the completion date of the training.)</li>
+            <li><code>EndDate</code> (Date, Optional. Currently not directly stored but can be included in CSV.)</li>
+            <li><code>Accomplishment</code> (Text, Required. This will be used as the Course Name and Qualification Achieved for the training log.)</li>
+          </ul>
+          <p className="mt-2 text-xs">
+            <strong>Important:</strong> All staff members identified in the CSV (via &quot;Member Name-Rank-ID&quot;) must already exist in the Staff Management section. If any member is not found, the entire CSV import will be rejected.
+          </p>
+        </AlertDescription>
+      </Alert>
 
 
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
@@ -731,8 +961,8 @@ export default function TrainingPage() {
              <div className="flex items-center gap-3">
                 <ListChecks className="h-6 w-6 text-primary/80" />
                 <div>
-                    <CardTitle className="text-xl">Planned Features</CardTitle>
-                    <CardDescription>Future enhancements for Training Overview.</CardDescription>
+                    <CardTitle className="text-xl">System Features & Usage Notes</CardTitle>
+                    <CardDescription>Overview of Training module capabilities and import guidelines.</CardDescription>
                 </div>
             </div>
         </CardHeader>
@@ -758,13 +988,17 @@ export default function TrainingPage() {
                <UploadCloud className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
               Upload and manage training certificates and supporting documentation. (Implemented)
             </li>
+             <li className="flex items-center">
+               <UploadCloud className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
+              Bulk import training accomplishments via CSV. (Implemented - See instructions below)
+            </li>
             <li className="flex items-center">
               <BarChartHorizontalBig className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
               Generate reports on training completion, qualification status, and skill gaps. (Export single record implemented, export all for member implemented)
             </li>
              <li className="flex items-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-              Integration with Staff Management module for selecting staff.
+              Integration with Staff Management module for selecting staff and ensuring data consistency.
             </li>
           </ul>
         </CardContent>
@@ -772,3 +1006,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+
