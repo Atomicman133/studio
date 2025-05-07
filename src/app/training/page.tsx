@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -476,12 +477,12 @@ export default function TrainingPage() {
 
         const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
         const errors: string[] = [];
-        const lines = text.split(/\r\n|\n/);
+        const csvLines = text.split(/\r\n|\n/);
 
-        if (lines.length < 2) {
+        if (csvLines.length < 2) {
           errors.push("CSV must have a header and at least one data row.");
         } else {
-          const headerLine = lines[0].trim();
+          const headerLine = csvLines[0].trim();
           const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
           const expectedHeader = ["MemberUID", "Member Rank - Name", "EffectiveDate", "Accomplishment"];
 
@@ -513,23 +514,23 @@ export default function TrainingPage() {
               const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
               let preliminaryParsingOk = true;
 
-              for (let i = 1; i < lines.length; i++) {
-                  const line = lines[i].trim();
+              for (let i = 1; i < csvLines.length; i++) {
+                  let line = csvLines[i].trim(); // Use let for line to allow modification if needed within the loop
                   if (!line) continue;
 
                   // Handle commas within quoted fields (basic CSV parsing)
                   const values = [];
                   let currentVal = '';
                   let inQuotes = false;
-                  for (let char of line) {
+                  for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                    let char = line[charIndex];
                       if (char === '"' && !inQuotes) {
                           inQuotes = true;
                       } else if (char === '"' && inQuotes) {
                           // Check for double quotes representing a single quote
-                          if (line.indexOf('""', line.indexOf(char)) === line.indexOf(char)) {
+                          if (charIndex + 1 < line.length && line[charIndex + 1] === '"') {
                               currentVal += '"';
-                              // Skip the next quote
-                              line = line.substring(0, line.indexOf(char)) + line.substring(line.indexOf(char) + 1);
+                              charIndex++; // Skip the next quote
                           } else {
                               inQuotes = false;
                           }
@@ -1045,3 +1046,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+
