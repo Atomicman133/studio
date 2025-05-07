@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -50,14 +51,14 @@ import type { Meeting } from "./meeting-schema";
 import { MeetingForm } from "./components/meeting-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge"; // Badge import was missing
+import { Badge } from "@/components/ui/badge"; 
 
-const initialMeetings: Meeting[] = [
+export const initialMeetings: Meeting[] = [
   {
     id: "m1",
     title: "Weekly Sync",
     date: new Date("2024-07-01T10:00:00Z"),
-    attendees: "John Doe, Jane Smith",
+    attendees: "John Doe, Jane Smith, Alice Williams",
     agenda: "1. Project Updates\n2. Blockers\n3. Next Steps",
     discussionPoints: "Discussed progress on Project Phoenix. Jane needs access to new API.",
     decisionsMade: "Grant Jane API access. John to follow up on deployment.",
@@ -67,7 +68,7 @@ const initialMeetings: Meeting[] = [
     id: "m2",
     title: "Q3 Planning",
     date: new Date("2024-06-15T14:00:00Z"),
-    attendees: "Alice Brown, Bob Green, Charlie Black",
+    attendees: "Alice Brown, Bob Green, Charlie Black, Jane Smith",
     agenda: "1. Review Q2 Performance\n2. Q3 Goals\n3. Resource Allocation",
     discussionPoints: "Q2 targets mostly met. Discussed new initiatives for Q3.",
     decisionsMade: "Finalize Q3 roadmap by end of week.",
@@ -392,3 +393,4 @@ export default function MeetingsPage() {
     </div>
   );
 }
+

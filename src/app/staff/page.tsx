@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3 } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -47,12 +47,27 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
 import { RANKS } from "./staff-schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+
+// Import initial data from other modules
+import { initialTrainingLogs, type TrainingLog } from "../training/page";
+import { initialMeetings, type Meeting } from "../meetings/page";
+import { initialDisciplineActions, type DisciplineAction } from "../discipline/page";
+import { initialPdps, type Pdp } from "../pdps/page";
+import { initialAudits, type SafetyAudit } from "../audits/page";
+
 
 export const initialStaff: StaffMember[] = [
   {
@@ -65,7 +80,6 @@ export const initialStaff: StaffMember[] = [
     phone: "0412345678",
     role: "Commanding Officer",
     joinDate: new Date("2018-05-15"),
-    // squadron attribute for use in reporting: (Not in original schema but useful for example)
     squadron: "123 Squadron" 
   },
   {
@@ -76,7 +90,7 @@ export const initialStaff: StaffMember[] = [
     lastName: "Doe",
     email: "john.doe@example.com",
     phone: "0423456789",
-    role: "Safety Officer", // Changed from Training Officer for diversity
+    role: "Safety Officer",
     joinDate: new Date("2020-01-20"),
     squadron: "456 Squadron"
   },
@@ -91,7 +105,7 @@ export const initialStaff: StaffMember[] = [
     joinDate: new Date("2021-07-10"),
     squadron: "123 Squadron"
   },
-  { // Adding another member for more comprehensive testing if needed
+  { 
     id: "4i0e6f5d-1h4g-7i2d-1e0f-9g8h7i6d5e4f",
     serviceNumber: "8012345",
     rank: "SQNLDR",
@@ -104,6 +118,10 @@ export const initialStaff: StaffMember[] = [
   }
 ];
 
+type StaffGroup = {
+  squadronName: string;
+  staffMembers: StaffMember[];
+};
 
 export default function StaffPage() {
   const [staffList, setStaffList] = React.useState<StaffMember[]>(initialStaff);
@@ -113,6 +131,31 @@ export default function StaffPage() {
   const [viewingStaffMember, setViewingStaffMember] = React.useState<StaffMember | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const staffGroups = React.useMemo(() => {
+    const groups: Record<string, StaffMember[]> = {};
+    staffList.forEach(staff => {
+      const sqn = staff.squadron || "Unassigned";
+      if (!groups[sqn]) {
+        groups[sqn] = [];
+      }
+      groups[sqn].push(staff);
+    });
+
+    return Object.entries(groups)
+      .map(([squadronName, staffMembers]) => ({
+        squadronName,
+        staffMembers: staffMembers.sort((a, b) => {
+          const rankAIndex = RANKS.indexOf(a.rank);
+          const rankBIndex = RANKS.indexOf(b.rank);
+          if (rankAIndex !== rankBIndex) {
+            return rankBIndex - rankAIndex; // Higher rank first
+          }
+          return a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName);
+        }),
+      }))
+      .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
+  }, [staffList]);
 
   const handleAddStaff = (data: StaffMember) => {
     const newStaffMember = { ...data, id: crypto.randomUUID() };
@@ -189,7 +232,7 @@ export default function StaffPage() {
         errors.push("CSV must have a header and at least one data row.");
       } else {
         const header = lines[0].split(',').map(h => h.trim());
-        const expectedHeader = ["serviceNumber", "rank", "firstName", "lastName", "email", "phone", "role", "joinDate", "squadron"]; // Added squadron
+        const expectedHeader = ["serviceNumber", "rank", "firstName", "lastName", "email", "phone", "role", "joinDate", "squadron"];
         if (JSON.stringify(header) !== JSON.stringify(expectedHeader)) {
             errors.push(`Invalid CSV header. Expected: ${expectedHeader.join(',')}. Got: ${header.join(',')}`);
         } else {
@@ -220,7 +263,7 @@ export default function StaffPage() {
                     continue;
                 }
                 
-                if (!staffData.serviceNumber || !staffData.firstName || !staffData.lastName || !staffData.email || !staffData.role || !staffData.squadron) { // Added squadron check
+                if (!staffData.serviceNumber || !staffData.firstName || !staffData.lastName || !staffData.email || !staffData.role || !staffData.squadron) {
                     errors.push(`Row ${i + 1}: Missing one or more required fields (serviceNumber, rank, firstName, lastName, email, role, squadron).`);
                     continue;
                 }
@@ -248,7 +291,7 @@ export default function StaffPage() {
                     phone: staffData.phone || undefined,
                     role: staffData.role,
                     joinDate: joinDate,
-                    squadron: staffData.squadron, // Added squadron
+                    squadron: staffData.squadron,
                 });
             }
         }
@@ -284,16 +327,55 @@ export default function StaffPage() {
     reader.readAsText(file);
   };
 
+  // Prepare data for the view details dialog
+  const currentStaffFullName = viewingStaffMember ? `${viewingStaffMember.firstName} ${viewingStaffMember.lastName}` : "";
+  const staffNameForTrainingLog = viewingStaffMember ? `${viewingStaffMember.lastName}, ${viewingStaffMember.firstName}` : "";
+
+  const filteredTrainingLogs = React.useMemo(() => {
+    if (!viewingStaffMember) return [];
+    return initialTrainingLogs.filter(log => 
+      log.staffName === staffNameForTrainingLog && log.rank === viewingStaffMember.rank
+      // Ideally, match by serviceNumber if available in TrainingLog
+    );
+  }, [viewingStaffMember, staffNameForTrainingLog]);
+
+  const filteredMeetings = React.useMemo(() => {
+    if (!viewingStaffMember) return [];
+    return initialMeetings.filter(meeting => meeting.attendees.includes(currentStaffFullName));
+  }, [viewingStaffMember, currentStaffFullName]);
+
+  const filteredPdps = React.useMemo(() => {
+    if (!viewingStaffMember) return [];
+    return initialPdps.filter(pdp => pdp.staffName === currentStaffFullName);
+  }, [viewingStaffMember, currentStaffFullName]);
+
+  const filteredDisciplineActions = React.useMemo(() => {
+    if (!viewingStaffMember) return [];
+    return initialDisciplineActions.filter(action => action.staffName === currentStaffFullName);
+  }, [viewingStaffMember, currentStaffFullName]);
+  
+  const filteredAudits = React.useMemo(() => {
+    if (!viewingStaffMember) return [];
+    return initialAudits.filter(audit => 
+      audit.auditorName === currentStaffFullName || 
+      (audit.findings && audit.findings.some(f => f.assignedTo === currentStaffFullName))
+    );
+  }, [viewingStaffMember, currentStaffFullName]);
+
+
   return (
     <div className="space-y-6">
       <Card className="shadow-lg">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <CardTitle className="text-2xl">Staff Management</CardTitle>
-              <CardDescription>
-                Manage staff member records and information.
-              </CardDescription>
+            <div className="flex items-center gap-3">
+               <User className="h-8 w-8 text-primary hidden sm:block" />
+              <div>
+                <CardTitle className="text-2xl">Staff Management</CardTitle>
+                <CardDescription>
+                  Manage staff member records and information, grouped by squadron.
+                </CardDescription>
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
@@ -306,80 +388,97 @@ export default function StaffPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          {staffList.length === 0 ? (
-             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
-                <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Members Yet</h3>
-                <p className="text-muted-foreground mb-4">Click &quot;Add New Staff&quot; or &quot;Import CSV&quot; to get started.</p>
-             </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Service No.</TableHead>
-                  <TableHead>Rank</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="hidden md:table-cell">Squadron</TableHead> {/* Added Squadron column */}
-                  <TableHead className="hidden lg:table-cell">Role</TableHead>
-                  <TableHead className="hidden lg:table-cell">Join Date</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {staffList.map((staff) => (
-                  <TableRow key={staff.id}>
-                    <TableCell>{staff.serviceNumber}</TableCell>
-                    <TableCell>{staff.rank}</TableCell>
-                    <TableCell>{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                    <TableCell className="hidden md:table-cell">{(staff as any).squadron || 'N/A'}</TableCell> {/* Display Squadron */}
-                    <TableCell className="hidden lg:table-cell">{staff.role}</TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          <DropdownMenuItem onClick={() => handleViewDetails(staff)}>
-                            <Info className="mr-2 h-4 w-4" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(staff)}>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => setStaffToDelete(staff)}
-                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-         {staffList.length > 0 && (
-          <CardFooter className="text-xs text-muted-foreground">
-            Showing {staffList.length} staff member(s).
-          </CardFooter>
-        )}
       </Card>
+
+      {staffGroups.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+              <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
+              <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Members Yet</h3>
+              <p className="text-muted-foreground mb-4">Click &quot;Add New Staff&quot; or &quot;Import CSV&quot; to get started.</p>
+            </CardContent>
+          </Card>
+      ) : (
+        staffGroups.map(group => (
+          <Card key={group.squadronName} className="shadow-xl mb-8">
+            <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b rounded-t-lg">
+              <CardTitle className="text-xl">Squadron: {group.squadronName}</CardTitle>
+              <CardDescription>{group.staffMembers.length} staff member(s)</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Service No.</TableHead>
+                    <TableHead>Rank</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="hidden lg:table-cell">Role</TableHead>
+                    <TableHead className="hidden lg:table-cell">Join Date</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.staffMembers.map((staff) => (
+                    <TableRow key={staff.id}>
+                      <TableCell>{staff.serviceNumber}</TableCell>
+                      <TableCell>{staff.rank}</TableCell>
+                      <TableCell>{`${staff.firstName} ${staff.lastName}`}</TableCell>
+                      <TableCell className="hidden lg:table-cell">{staff.role}</TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <span className="sr-only">Open menu</span>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={() => handleViewDetails(staff)}>
+                              <Info className="mr-2 h-4 w-4" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleEdit(staff)}>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => setStaffToDelete(staff)}
+                              className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+            {group.staffMembers.length === 0 && (
+                 <CardContent>
+                    <p className="text-muted-foreground text-center py-4">No staff members in this squadron.</p>
+                 </CardContent>
+            )}
+          </Card>
+        ))
+      )}
       
-      <Alert>
+      {staffList.length > 0 && (
+         <Card className="mt-4">
+            <CardFooter className="text-xs text-muted-foreground pt-4 justify-center">
+                Total staff members: {staffList.length} across {staffGroups.length} squadron(s).
+            </CardFooter>
+         </Card>
+      )}
+
+      <Alert className="mt-8">
         <UploadCloud className="h-4 w-4" />
         <AlertTitle>CSV Import Instructions</AlertTitle>
         <AlertDescription>
@@ -393,7 +492,7 @@ export default function StaffPage() {
             <li><code>phone</code> (Text, Optional, e.g., &quot;0412345678&quot;)</li>
             <li><code>role</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
             <li><code>joinDate</code> (Date, Optional, Format: YYYY-MM-DD, e.g., &quot;2018-05-15&quot;)</li>
-            <li><code>squadron</code> (Text, Required, e.g., &quot;123 Squadron&quot;)</li> {/* Added squadron instruction */}
+            <li><code>squadron</code> (Text, Required, e.g., &quot;123 Squadron&quot;)</li>
           </ul>
           The first row must be a header row with these exact names. Service Number and Email must be unique per staff member.
         </AlertDescription>
@@ -429,19 +528,19 @@ export default function StaffPage() {
 
       {viewingStaffMember && (
          <Dialog open={!!viewingStaffMember} onOpenChange={closeViewDialog}>
-            <DialogContent className="sm:max-w-2xl">
+            <DialogContent className="sm:max-w-4xl"> {/* Increased width for more content */}
                 <DialogHeader>
                     <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
                     <DialogDescription>
-                       Service Number: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role} | Squadron: {(viewingStaffMember as any).squadron || 'N/A'}
+                       Service No: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role} | Squadron: {viewingStaffMember.squadron || 'N/A'}
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
                     <div className="space-y-4 py-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             <div>
                                 <h3 className="font-semibold text-sm mb-1">Email</h3>
-                                <p className="text-sm text-muted-foreground">{viewingStaffMember.email}</p>
+                                <p className="text-sm text-muted-foreground truncate">{viewingStaffMember.email}</p>
                             </div>
                              <div>
                                 <h3 className="font-semibold text-sm mb-1">Phone</h3>
@@ -452,33 +551,123 @@ export default function StaffPage() {
                                 <p className="text-sm text-muted-foreground">{viewingStaffMember.joinDate ? format(viewingStaffMember.joinDate, "PPP") : "N/A"}</p>
                             </div>
                         </div>
-                        <Card className="mt-4">
-                            <CardHeader>
-                                <CardTitle className="text-lg">Related Records</CardTitle>
-                                <CardDescription>Compliance status, professional development, training, and discipline records.</CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-sm text-muted-foreground">
-                                    Current compliance status and links to other relevant records for this staff member will be displayed here in a future update.
-                                </p>
-                                {/* 
-                                TODO: In the future, fetch and display:
-                                - Compliance status from Reporting module (use staff identifier)
-                                - PDPs for this staff member
-                                - Training logs
-                                - Discipline actions
-                                */}
-                            </CardContent>
-                        </Card>
+                        
+                        <Accordion type="multiple" collapsible className="w-full">
+                          <AccordionItem value="training">
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                                <GraduationCap className="h-5 w-5 text-primary" />
+                                Training Records ({filteredTrainingLogs.length})
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              {filteredTrainingLogs.length > 0 ? (
+                                <ul className="space-y-2">
+                                  {filteredTrainingLogs.map(log => (
+                                    <li key={log.id} className="text-sm p-2 border rounded-md bg-muted/50">
+                                      <strong>{log.courseName}</strong> - Completed: {format(log.completionDate, "PP")}
+                                      {log.qualificationAchieved && <p className="text-xs text-muted-foreground">Qual: {log.qualificationAchieved}</p>}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p className="text-sm text-muted-foreground p-2">No training records found.</p>}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="meetings">
+                             <AccordionTrigger>
+                                <div className="flex items-center gap-2">
+                                   <FileText className="h-5 w-5 text-primary" />
+                                    Meetings Attended ({filteredMeetings.length})
+                                </div>
+                             </AccordionTrigger>
+                            <AccordionContent>
+                              {filteredMeetings.length > 0 ? (
+                                <ul className="space-y-2">
+                                  {filteredMeetings.map(meeting => (
+                                    <li key={meeting.id} className="text-sm p-2 border rounded-md bg-muted/50">
+                                      <strong>{meeting.title}</strong> - Date: {format(meeting.date, "PP")}
+                                      <p className="text-xs text-muted-foreground truncate">Agenda: {meeting.agenda.split('\n')[0]}</p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p className="text-sm text-muted-foreground p-2">No meeting records found.</p>}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                           <AccordionItem value="pdps">
+                             <AccordionTrigger>
+                                <div className="flex items-center gap-2">
+                                   <Briefcase className="h-5 w-5 text-primary" />
+                                   Professional Development ({filteredPdps.length})
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              {filteredPdps.length > 0 ? (
+                                <ul className="space-y-2">
+                                  {filteredPdps.map(pdp => (
+                                    <li key={pdp.id} className="text-sm p-2 border rounded-md bg-muted/50">
+                                      <strong>PDP Period: {pdp.pdpPeriod}</strong>
+                                      <p className="text-xs text-muted-foreground">Goals: {pdp.goals.length}</p>
+                                      {pdp.reviewDate && <p className="text-xs text-muted-foreground">Next Review: {format(pdp.reviewDate, "PP")}</p>}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p className="text-sm text-muted-foreground p-2">No PDPs found.</p>}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="discipline">
+                             <AccordionTrigger>
+                                <div className="flex items-center gap-2">
+                                    <Gavel className="h-5 w-5 text-primary" />
+                                    Discipline Actions ({filteredDisciplineActions.length})
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              {filteredDisciplineActions.length > 0 ? (
+                                <ul className="space-y-2">
+                                  {filteredDisciplineActions.map(action => (
+                                    <li key={action.id} className="text-sm p-2 border rounded-md bg-muted/50">
+                                      <strong>{action.typeOfAction}</strong> - Incident Date: {format(action.dateOfIncident, "PP")}
+                                      <p className="text-xs text-muted-foreground truncate">Description: {action.incidentDescription}</p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p className="text-sm text-muted-foreground p-2">No discipline actions found.</p>}
+                            </AccordionContent>
+                          </AccordionItem>
+                          
+                           <AccordionItem value="audits">
+                             <AccordionTrigger>
+                                <div className="flex items-center gap-2">
+                                    <ShieldCheck className="h-5 w-5 text-primary" />
+                                    Safety Audits Involved In ({filteredAudits.length})
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              {filteredAudits.length > 0 ? (
+                                <ul className="space-y-2">
+                                  {filteredAudits.map(audit => (
+                                    <li key={audit.id} className="text-sm p-2 border rounded-md bg-muted/50">
+                                      <strong>{audit.auditTitle}</strong> - Date: {format(audit.auditDate, "PP")}
+                                      <p className="text-xs text-muted-foreground">Type: {audit.auditType}</p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p className="text-sm text-muted-foreground p-2">No safety audits found where this member was involved.</p>}
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
                     </div>
                 </ScrollArea>
-                <DialogFooter className="pt-4 border-t">
+                <DialogFooter className="pt-4 border-t mt-4">
                     <Button variant="outline" onClick={() => {
                       if (viewingStaffMember) {
                         handleEdit(viewingStaffMember);
                       }
                     }}>
-                        <Edit3 className="mr-2 h-4 w-4" /> Edit
+                        <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
                     </Button>
                     <Button onClick={closeViewDialog}>Close</Button>
                 </DialogFooter>
@@ -514,27 +703,5 @@ export default function StaffPage() {
     </div>
   );
 }
-
-// Re-using existing icon component from the page if it was removed.
-function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  )
-}
     
+

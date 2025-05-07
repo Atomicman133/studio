@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -52,17 +53,17 @@ import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 
-const initialAudits: SafetyAudit[] = [
+export const initialAudits: SafetyAudit[] = [
   {
     id: "sa1",
     auditTitle: "Classroom Safety Check Q2",
     auditType: "Scheduled Work Area Inspection",
     auditDate: new Date("2024-04-15"),
-    auditorName: "FLGOFF J. Doe",
+    auditorName: "Jane Smith", // Updated to full name
     scope: "All classrooms in Training Wing",
     summary: "Generally good condition. Minor trip hazard identified in Classroom 3.",
     findings: [
-      { id:"f1", description: "Loose carpet tile near doorway in Classroom 3.", severity: "Medium", recommendedAction: "Secure or replace carpet tile.", assignedTo: "Admin Officer", dueDate: new Date("2024-04-22"), status: "Resolved" }
+      { id:"f1", description: "Loose carpet tile near doorway in Classroom 3.", severity: "Medium", recommendedAction: "Secure or replace carpet tile.", assignedTo: "Alice Williams", dueDate: new Date("2024-04-22"), status: "Resolved" }
     ]
   },
   {
@@ -70,7 +71,7 @@ const initialAudits: SafetyAudit[] = [
     auditTitle: "Pre-Exercise Vehicle Checks",
     auditType: "Equipment Safety Audit",
     auditDate: new Date("2024-06-01"),
-    auditorName: "SQNLDR A. Smith",
+    auditorName: "John Doe", // Updated to full name
     scope: "All Squadron Vehicles",
     summary: "All vehicles passed pre-use checks. One vehicle requires tire pressure adjustment.",
      findings: [
@@ -399,4 +400,5 @@ export default function AuditsPage() {
     </div>
   );
 }
+
 

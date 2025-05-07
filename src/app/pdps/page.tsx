@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -52,10 +53,10 @@ import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 
-const initialPdps: Pdp[] = [
+export const initialPdps: Pdp[] = [
   {
     id: "pdp1",
-    staffName: "FLGOFF John Doe",
+    staffName: "Jane Smith", // Changed to full name for consistency
     pdpPeriod: "2024 Annual",
     goals: [
       { id: "g1", specific: "Complete Advanced Leadership Course", measurable: "Certificate of Completion", achievable: "Course available in Q3", relevant: "To improve leadership skills for Training Officer role", timeBound: "End of Q3 2024", status: "In Progress" },
@@ -67,12 +68,22 @@ const initialPdps: Pdp[] = [
   },
   {
     id: "pdp2",
-    staffName: "PLTOFF Alice Williams",
+    staffName: "Alice Williams", // Changed to full name
     pdpPeriod: "2024-2025",
     goals: [
        { id: "g3", specific: "Obtain First Aid Instructor Qualification", measurable: "Instructor Certificate", achievable: "Course scheduled for October", relevant: "To enhance squadron's first aid training capability", timeBound: "November 2024", status: "Not Started" },
     ],
     developmentActivities: "Attend First Aid Instructor course, practice teaching sessions.",
+  },
+   {
+    id: "pdp3",
+    staffName: "John Doe", // Added for John Doe
+    pdpPeriod: "2024 Q3-Q4",
+    goals: [
+       { id: "g4", specific: "Improve Squadron Safety Briefing Delivery", measurable: "Positive feedback from CO and staff", achievable: "Practice sessions, review material", relevant: "To enhance effectiveness as Safety Officer", timeBound: "End of Q4 2024", status: "Not Started" },
+    ],
+    developmentActivities: "Observe other safety briefings, request feedback on delivery.",
+    reviewDate: new Date("2024-12-15"),
   }
 ];
 
@@ -316,7 +327,7 @@ export default function PdpsPage() {
                         )}
                     </div>
                 </ScrollArea>
-                <DialogFooter className="pt-4">
+                <DialogFooter className="pt-4 border-t">
                     <Button variant="outline" onClick={() => {
                       if (viewingPdp) {
                         handleEdit(viewingPdp);
@@ -396,4 +407,5 @@ export default function PdpsPage() {
     </div>
   );
 }
+
 

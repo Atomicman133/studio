@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -52,10 +53,10 @@ import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 
-const initialDisciplineActions: DisciplineAction[] = [
+export const initialDisciplineActions: DisciplineAction[] = [
   {
     id: "da1",
-    staffName: "CDTWOFF Example",
+    staffName: "John Doe", // Updated to full name
     dateOfIncident: new Date("2024-05-10"),
     typeOfAction: "Informal Discussion",
     incidentDescription: "Late arrival to parade night without prior notification.",
@@ -64,7 +65,7 @@ const initialDisciplineActions: DisciplineAction[] = [
   },
   {
     id: "da2",
-    staffName: "SGT Other Example",
+    staffName: "Jane Smith", // Updated to full name
     dateOfIncident: new Date("2024-03-15"),
     typeOfAction: "Formal Warning",
     incidentDescription: "Failure to follow safety procedures during a fieldcraft exercise, resulting in minor equipment damage.",
@@ -366,4 +367,5 @@ export default function DisciplinePage() {
     </div>
   );
 }
+
 
