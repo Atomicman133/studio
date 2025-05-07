@@ -2,12 +2,13 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -45,9 +46,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
+import { RANKS } from "./staff-schema";
 import { format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const initialStaff: StaffMember[] = [
   {
@@ -90,11 +95,15 @@ export default function StaffPage() {
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingStaff, setEditingStaff] = React.useState<StaffMember | null>(null);
   const [staffToDelete, setStaffToDelete] = React.useState<StaffMember | null>(null);
+  const [viewingStaffMember, setViewingStaffMember] = React.useState<StaffMember | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
 
   const handleAddStaff = (data: StaffMember) => {
     const newStaffMember = { ...data, id: crypto.randomUUID() };
     setStaffList((prev) => [...prev, newStaffMember]);
     setIsFormOpen(false);
+    toast({ title: "Success", description: "Staff member added." });
   };
 
   const handleUpdateStaff = (data: StaffMember) => {
@@ -103,52 +112,192 @@ export default function StaffPage() {
     );
     setIsFormOpen(false);
     setEditingStaff(null);
+    toast({ title: "Success", description: "Staff member updated." });
   };
 
   const handleEdit = (staffMember: StaffMember) => {
     setEditingStaff(staffMember);
+    setViewingStaffMember(null);
     setIsFormOpen(true);
   };
+
+  const handleViewDetails = (staffMember: StaffMember) => {
+    setViewingStaffMember(staffMember);
+    setEditingStaff(null);
+    setIsFormOpen(false);
+  };
+  
+  const closeViewDialog = () => {
+    setViewingStaffMember(null);
+  };
+
 
   const handleDeleteConfirm = () => {
     if (staffToDelete) {
       setStaffList((prev) => prev.filter((staff) => staff.id !== staffToDelete.id));
       setStaffToDelete(null);
+      toast({ title: "Success", description: "Staff member deleted." });
     }
   };
 
   const openFormForNew = () => {
     setEditingStaff(null);
+    setViewingStaffMember(null);
     setIsFormOpen(true);
   };
   
   const closeForm = () => {
     setEditingStaff(null);
     setIsFormOpen(false);
-  }
+  };
+
+  const handleCsvImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      toast({ variant: "destructive", title: "Import Error", description: "No file selected." });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) {
+        toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+        return;
+      }
+      
+      const importedMembers: StaffMember[] = [];
+      const errors: string[] = [];
+      const lines = text.split(/\r\n|\n/);
+
+      if (lines.length < 2) {
+        errors.push("CSV must have a header and at least one data row.");
+      } else {
+        const header = lines[0].split(',').map(h => h.trim());
+        const expectedHeader = ["serviceNumber", "rank", "firstName", "lastName", "email", "phone", "role", "joinDate"];
+        if (JSON.stringify(header) !== JSON.stringify(expectedHeader)) {
+            errors.push(`Invalid CSV header. Expected: ${expectedHeader.join(',')}. Got: ${header.join(',')}`);
+        } else {
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+
+                const values = line.split(',').map(v => v.trim());
+                if (values.length !== header.length) {
+                    errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}.`);
+                    continue;
+                }
+
+                const staffData: any = {};
+                header.forEach((col, index) => {
+                    staffData[col] = values[index];
+                });
+
+                const rank = staffData.rank as typeof RANKS[number];
+                if (!RANKS.includes(rank)) {
+                    errors.push(`Row ${i + 1}: Invalid rank "${rank}". Valid ranks are: ${RANKS.join(", ")}.`);
+                    continue;
+                }
+
+                const joinDate = staffData.joinDate ? new Date(staffData.joinDate) : undefined;
+                if (staffData.joinDate && isNaN(joinDate?.getTime())) {
+                    errors.push(`Row ${i + 1}: Invalid joinDate format for "${staffData.joinDate}". Please use YYYY-MM-DD.`);
+                    continue;
+                }
+                
+                if (!staffData.serviceNumber || !staffData.firstName || !staffData.lastName || !staffData.email || !staffData.role) {
+                    errors.push(`Row ${i + 1}: Missing one or more required fields (serviceNumber, firstName, lastName, email, role).`);
+                    continue;
+                }
+                
+                // Basic email validation
+                if (!/^\S+@\S+\.\S+$/.test(staffData.email)) {
+                    errors.push(`Row ${i+1}: Invalid email format for "${staffData.email}".`);
+                    continue;
+                }
+
+                // Check for duplicates based on service number or email before adding
+                const isDuplicate = staffList.some(s => s.serviceNumber === staffData.serviceNumber || s.email === staffData.email) ||
+                                    importedMembers.some(s => s.serviceNumber === staffData.serviceNumber || s.email === staffData.email);
+                if (isDuplicate) {
+                    errors.push(`Row ${i + 1}: Duplicate service number or email for "${staffData.serviceNumber}/${staffData.email}". Skipped.`);
+                    continue;
+                }
+
+
+                importedMembers.push({
+                    id: crypto.randomUUID(),
+                    serviceNumber: staffData.serviceNumber,
+                    rank: rank,
+                    firstName: staffData.firstName,
+                    lastName: staffData.lastName,
+                    email: staffData.email,
+                    phone: staffData.phone || undefined,
+                    role: staffData.role,
+                    joinDate: joinDate,
+                });
+            }
+        }
+      }
+
+      if (importedMembers.length > 0) {
+        setStaffList(prev => [...prev, ...importedMembers]);
+        toast({ title: "Import Successful", description: `${importedMembers.length} staff member(s) imported.` });
+      }
+      if (errors.length > 0) {
+        const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+        toast({
+            variant: "destructive",
+            title: `CSV Import ${importedMembers.length > 0 ? "Partially Successful" : "Failed"}`,
+            description: (
+              <ScrollArea className="max-h-40">
+                <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
+              </ScrollArea>
+            ),
+            duration: 10000, // Longer duration for errors
+        });
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""; // Reset file input
+      }
+    };
+    reader.onerror = () => {
+      toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""; // Reset file input
+      }
+    };
+    reader.readAsText(file);
+  };
 
   return (
     <div className="space-y-6">
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <CardTitle>Staff Management</CardTitle>
+              <CardTitle className="text-2xl">Staff Management</CardTitle>
               <CardDescription>
                 Manage staff member records and information.
               </CardDescription>
             </div>
-            <Button onClick={openFormForNew} size="lg">
-              <PlusCircle className="mr-2 h-5 w-5" /> Add New Staff
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
+                <PlusCircle className="mr-2 h-5 w-5" /> Add New Staff
+              </Button>
+              <Button onClick={() => fileInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto">
+                <UploadCloud className="mr-2 h-5 w-5" /> Import CSV
+              </Button>
+              <input type="file" ref={fileInputRef} onChange={handleCsvImport} accept=".csv" style={{ display: 'none' }} />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
           {staffList.length === 0 ? (
              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <UsersIcon className="h-16 w-16 text-muted-foreground mb-4" />
+                <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Members Yet</h3>
-                <p className="text-muted-foreground mb-4">Click &quot;Add New Staff&quot; to get started.</p>
+                <p className="text-muted-foreground mb-4">Click &quot;Add New Staff&quot; or &quot;Import CSV&quot; to get started.</p>
              </div>
           ) : (
             <Table>
@@ -157,9 +306,9 @@ export default function StaffPage() {
                   <TableHead>Service No.</TableHead>
                   <TableHead>Rank</TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Join Date</TableHead>
+                  <TableHead className="hidden md:table-cell">Email</TableHead>
+                  <TableHead className="hidden lg:table-cell">Role</TableHead>
+                  <TableHead className="hidden lg:table-cell">Join Date</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -169,9 +318,9 @@ export default function StaffPage() {
                     <TableCell>{staff.serviceNumber}</TableCell>
                     <TableCell>{staff.rank}</TableCell>
                     <TableCell>{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                    <TableCell>{staff.email}</TableCell>
-                    <TableCell>{staff.role}</TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">{staff.email}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{staff.role}</TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
                     </TableCell>
                     <TableCell className="text-right">
@@ -184,6 +333,10 @@ export default function StaffPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => handleViewDetails(staff)}>
+                            <Info className="mr-2 h-4 w-4" />
+                            View Details
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleEdit(staff)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
@@ -205,7 +358,32 @@ export default function StaffPage() {
             </Table>
           )}
         </CardContent>
+         {staffList.length > 0 && (
+          <CardFooter className="text-xs text-muted-foreground">
+            Showing {staffList.length} staff member(s).
+          </CardFooter>
+        )}
       </Card>
+      
+      <Alert>
+        <UploadCloud className="h-4 w-4" />
+        <AlertTitle>CSV Import Instructions</AlertTitle>
+        <AlertDescription>
+          To bulk import staff members, upload a CSV file with the following columns in order:
+          <ul className="list-disc pl-5 mt-2 text-xs">
+            <li><code>serviceNumber</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
+            <li><code>rank</code> (Text, Required, e.g., &quot;FLTLT&quot;. Must be one of: {RANKS.join(", ")})</li>
+            <li><code>firstName</code> (Text, Required, e.g., &quot;Jane&quot;)</li>
+            <li><code>lastName</code> (Text, Required, e.g., &quot;Smith&quot;)</li>
+            <li><code>email</code> (Text, Required, Valid email format, e.g., &quot;jane.smith@example.com&quot;)</li>
+            <li><code>phone</code> (Text, Optional, e.g., &quot;0412345678&quot;)</li>
+            <li><code>role</code> (Text, Required, e.g., &quot;Commanding Officer&quot;)</li>
+            <li><code>joinDate</code> (Date, Optional, Format: YYYY-MM-DD, e.g., &quot;2018-05-15&quot;)</li>
+          </ul>
+          The first row must be a header row with these exact names. Service Number and Email must be unique per staff member.
+        </AlertDescription>
+      </Alert>
+
 
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
         if (!isOpen) closeForm(); else setIsFormOpen(true);
@@ -221,16 +399,79 @@ export default function StaffPage() {
                 : "Fill in the form to add a new staff member."}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <StaffForm
-              onSubmit={editingStaff ? handleUpdateStaff : handleAddStaff}
-              defaultValues={editingStaff || undefined}
-              onCancel={closeForm}
-              isEditing={!!editingStaff}
-            />
-          </div>
+          <ScrollArea className="max-h-[70vh] p-1">
+            <div className="py-4 pr-4">
+              <StaffForm
+                onSubmit={editingStaff ? handleUpdateStaff : handleAddStaff}
+                defaultValues={editingStaff || undefined}
+                onCancel={closeForm}
+                isEditing={!!editingStaff}
+              />
+            </div>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
+
+      {viewingStaffMember && (
+         <Dialog open={!!viewingStaffMember} onOpenChange={closeViewDialog}>
+            <DialogContent className="sm:max-w-2xl">
+                <DialogHeader>
+                    <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
+                    <DialogDescription>
+                       Service Number: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role}
+                    </DialogDescription>
+                </DialogHeader>
+                <ScrollArea className="max-h-[70vh] p-1 pr-4">
+                    <div className="space-y-4 py-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <h3 className="font-semibold text-sm mb-1">Email</h3>
+                                <p className="text-sm text-muted-foreground">{viewingStaffMember.email}</p>
+                            </div>
+                             <div>
+                                <h3 className="font-semibold text-sm mb-1">Phone</h3>
+                                <p className="text-sm text-muted-foreground">{viewingStaffMember.phone || "N/A"}</p>
+                            </div>
+                             <div>
+                                <h3 className="font-semibold text-sm mb-1">Join Date</h3>
+                                <p className="text-sm text-muted-foreground">{viewingStaffMember.joinDate ? format(viewingStaffMember.joinDate, "PPP") : "N/A"}</p>
+                            </div>
+                        </div>
+                        <Card className="mt-4">
+                            <CardHeader>
+                                <CardTitle className="text-lg">Related Records</CardTitle>
+                                <CardDescription>Professional development, training, compliance, and discipline records.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-sm text-muted-foreground">
+                                    Integration with other modules to display related records for this staff member is planned for a future update.
+                                </p>
+                                {/* 
+                                TODO: In the future, fetch and display:
+                                - PDPs for this staff member
+                                - Training logs
+                                - Compliance items
+                                - Discipline actions
+                                This will likely require matching by staff name or ideally a unique staff ID propagated to other schemas.
+                                */}
+                            </CardContent>
+                        </Card>
+                    </div>
+                </ScrollArea>
+                <DialogFooter className="pt-4 border-t">
+                    <Button variant="outline" onClick={() => {
+                      if (viewingStaffMember) {
+                        handleEdit(viewingStaffMember);
+                      }
+                    }}>
+                        <Edit3 className="mr-2 h-4 w-4" /> Edit
+                    </Button>
+                    <Button onClick={closeViewDialog}>Close</Button>
+                </DialogFooter>
+            </DialogContent>
+         </Dialog>
+      )}
+
 
       {staffToDelete && (
         <AlertDialog open={!!staffToDelete} onOpenChange={() => setStaffToDelete(null)}>
@@ -260,7 +501,7 @@ export default function StaffPage() {
   );
 }
 
-// Helper icon for empty state, replace if you have a better one
+// Re-using existing icon component from the page if it was removed.
 function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -282,3 +523,5 @@ function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+    
