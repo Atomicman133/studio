@@ -8,6 +8,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -107,7 +108,7 @@ const processComplianceReports = (
       staffMemberId: staff.id || staffId, // Use staff.id if available
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
-      squadron: memberLogs.length > 0 ? memberLogs[0].squadron : (staff as any).squadron || "N/A", // staff.squadron if available from StaffMember
+      squadron: (staff as any).squadron || memberLogs[0]?.squadron || "N/A", // staff.squadron if available from StaffMember
       isCompliant,
       criteriaChecks,
     };
@@ -307,3 +308,6 @@ export default function ReportingPage() {
     </div>
   );
 }
+
+
+    
