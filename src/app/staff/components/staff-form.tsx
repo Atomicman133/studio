@@ -1,7 +1,7 @@
 
 "use client";
 
-import type { Control } from "react-hook-form";
+// import type { Control } from "react-hook-form"; // No longer needed explicitly
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { staffMemberSchema, type StaffMember, RANKS } from "../staff-schema";
@@ -30,17 +30,18 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface StaffFormProps {
-  onSubmit: (data: StaffMember) => void;
+  onSubmit: (data: StaffMember | Omit<StaffMember, 'id'>) => void; // Adjusted to allow Omit for new staff
   defaultValues?: Partial<StaffMember>;
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // Optional prop for loading state
 }
 
-export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: StaffFormProps) {
+export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: StaffFormProps) {
   const form = useForm<StaffMember>({
     resolver: zodResolver(staffMemberSchema),
     defaultValues: defaultValues || {
@@ -52,14 +53,20 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
       phone: "",
       role: "",
       joinDate: undefined,
-      squadron: "", // Added squadron
+      squadron: "",
     },
   });
 
   const handleSubmit = (data: StaffMember) => {
-    onSubmit(data);
-    if (!isEditing) { // Only reset if not editing
-      form.reset(); 
+    if (isEditing && defaultValues?.id) {
+      onSubmit({ ...data, id: defaultValues.id }); // Ensure ID is passed for updates
+    } else {
+      const { id, ...newData } = data; // Remove ID for new entries
+      onSubmit(newData);
+    }
+
+    if (!isEditing) {
+      form.reset();
     }
   };
 
@@ -74,7 +81,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>Service Number</FormLabel>
                 <FormControl>
-                  <Input placeholder="eg. 8000000" {...field} />
+                  <Input placeholder="eg. 8000000" {...field} disabled={isSubmitting} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -86,7 +93,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Rank</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isSubmitting}>
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder="Select a rank" />
@@ -111,7 +118,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>First Name</FormLabel>
                 <FormControl>
-                  <Input placeholder="John" {...field} />
+                  <Input placeholder="John" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -124,7 +131,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>Last Name</FormLabel>
                 <FormControl>
-                  <Input placeholder="Doe" {...field} />
+                  <Input placeholder="Doe" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -137,7 +144,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>Email</FormLabel>
                 <FormControl>
-                  <Input type="email" placeholder="john.doe@example.com" {...field} />
+                  <Input type="email" placeholder="john.doe@example.com" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -150,7 +157,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>Phone (Optional)</FormLabel>
                 <FormControl>
-                  <Input placeholder="0400 000 000" {...field} />
+                  <Input placeholder="0400 000 000" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -163,7 +170,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>Squadron</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., 123 Squadron" {...field} />
+                  <Input placeholder="e.g., 123 Squadron" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -176,7 +183,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
               <FormItem>
                 <FormLabel>Role/Position</FormLabel>
                 <FormControl>
-                  <Input placeholder="Training Officer" {...field} />
+                  <Input placeholder="Training Officer" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -186,7 +193,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
             control={form.control}
             name="joinDate"
             render={({ field }) => (
-              <FormItem className="flex flex-col md:col-span-2"> {/* Allow join date to span if needed or place strategically */}
+              <FormItem className="flex flex-col md:col-span-2">
                 <FormLabel>Join Date (Optional)</FormLabel>
                 <Popover>
                   <PopoverTrigger asChild>
@@ -197,6 +204,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
                           "w-full pl-3 text-left font-normal",
                           !field.value && "text-muted-foreground"
                         )}
+                        disabled={isSubmitting}
                       >
                         {field.value ? (
                           format(field.value, "PPP")
@@ -213,7 +221,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
                       selected={field.value}
                       onSelect={field.onChange}
                       disabled={(date) =>
-                        date > new Date() || date < new Date("1900-01-01")
+                        date > new Date() || date < new Date("1900-01-01") || !!isSubmitting
                       }
                       initialFocus
                     />
@@ -225,10 +233,13 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing }: Staf
           />
         </div>
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Add Staff Member"}</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" /> }
+            {isEditing ? "Save Changes" : "Add Staff Member"}
+          </Button>
         </div>
       </form>
     </Form>

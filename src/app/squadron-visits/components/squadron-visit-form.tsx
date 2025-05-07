@@ -3,12 +3,11 @@
 
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { squadronVisitSchema, type SquadronVisit, visitActionItemSchema } from "../squadron-visit-schema";
+import { squadronVisitSchema, type SquadronVisit } from "../squadron-visit-schema"; // visitActionItemSchema used implicitly
 import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -24,7 +23,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, PlusCircle, Trash2 } from "lucide-react";
+import { CalendarIcon, PlusCircle, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -33,7 +32,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { ScrollArea } from "@/components/ui/scroll-area";
+// import { ScrollArea } from "@/components/ui/scroll-area"; // Not used directly in form, but in page
 import {
   Select,
   SelectContent,
@@ -48,9 +47,10 @@ interface SquadronVisitFormProps {
   defaultValues?: Partial<SquadronVisit>;
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // For loading state
 }
 
-const FormCheckboxItem = ({ control, name, label }: { control: any, name: keyof SquadronVisit, label: string }) => (
+const FormCheckboxItem = ({ control, name, label, disabled }: { control: any, name: keyof SquadronVisit, label: string, disabled?: boolean }) => (
   <FormField
     control={control}
     name={name}
@@ -58,19 +58,20 @@ const FormCheckboxItem = ({ control, name, label }: { control: any, name: keyof 
       <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3 shadow-sm bg-background hover:bg-muted/50 transition-colors">
         <FormControl>
           <Checkbox
-            checked={field.value as boolean | undefined} // Cast to boolean
+            checked={field.value as boolean | undefined}
             onCheckedChange={field.onChange}
+            disabled={disabled}
           />
         </FormControl>
         <div className="space-y-1 leading-none">
-          <FormLabel className="font-normal cursor-pointer">{label}</FormLabel>
+          <FormLabel className={cn("font-normal", disabled ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer")}>{label}</FormLabel>
         </div>
       </FormItem>
     )}
   />
 );
 
-export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing }: SquadronVisitFormProps) {
+export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: SquadronVisitFormProps) {
   const form = useForm<SquadronVisit>({
     resolver: zodResolver(squadronVisitSchema),
     defaultValues: defaultValues || {
@@ -125,9 +126,9 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
   });
 
   const handleSubmit = (data: SquadronVisit) => {
-    onSubmit(data);
+    onSubmit(data); // ID logic handled by parent
     if (!isEditing) {
-      form.reset();
+      form.reset(); // Reset only if creating new
     }
   };
 
@@ -216,7 +217,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Squadron</FormLabel>
-                    <FormControl><Input placeholder="e.g., 123 Squadron" {...field} /></FormControl>
+                    <FormControl><Input placeholder="e.g., 123 Squadron" {...field} disabled={isSubmitting}/></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -230,14 +231,14 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
-                          <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")}>
+                          <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal",!field.value && "text-muted-foreground")} disabled={isSubmitting}>
                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus disabled={isSubmitting}/>
                       </PopoverContent>
                     </Popover>
                     <FormMessage />
@@ -252,7 +253,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>RXO Name</FormLabel>
-                    <FormControl><Input placeholder="Name of RXO conducting visit" {...field} /></FormControl>
+                    <FormControl><Input placeholder="Name of RXO conducting visit" {...field} disabled={isSubmitting}/></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -263,7 +264,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>CO Name (Squadron)</FormLabel>
-                    <FormControl><Input placeholder="Name of Squadron CO" {...field} /></FormControl>
+                    <FormControl><Input placeholder="Name of Squadron CO" {...field} disabled={isSubmitting}/></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -272,7 +273,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
           </CardContent>
         </Card>
 
-        <Accordion type="multiple" className="w-full space-y-4">
+        <Accordion type="multiple" className="w-full space-y-4" defaultValue={discussionSections.map(s => s.value)}>
           {discussionSections.map(section => (
             <AccordionItem value={section.value} key={section.value} className="border rounded-md shadow-sm bg-card">
               <AccordionTrigger className="px-4 py-3 hover:no-underline text-lg font-medium">
@@ -280,7 +281,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-4 pt-0 space-y-4">
                 {section.items.map(item => (
-                  <FormCheckboxItem key={item.name} control={form.control} name={item.name as keyof SquadronVisit} label={item.label} />
+                  <FormCheckboxItem key={item.name} control={form.control} name={item.name as keyof SquadronVisit} label={item.label} disabled={isSubmitting}/>
                 ))}
                 {section.textField && (
                   <FormField
@@ -289,7 +290,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>{section.textField.label}</FormLabel>
-                        <FormControl><Textarea placeholder="Notes..." {...field} rows={2} /></FormControl>
+                        <FormControl><Textarea placeholder="Notes..." {...field} rows={2} disabled={isSubmitting}/></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -301,7 +302,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Additional Notes for {section.title}</FormLabel>
-                      <FormControl><Textarea placeholder="Any other details for this section..." {...field} rows={3} /></FormControl>
+                      <FormControl><Textarea placeholder="Any other details for this section..." {...field} rows={3} disabled={isSubmitting}/></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -317,7 +318,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
           render={({ field }) => (
             <FormItem>
               <FormLabel>General Comments / Overall Notes</FormLabel>
-              <FormControl><Textarea placeholder="Any overall comments or notes from the visit..." {...field} rows={4} /></FormControl>
+              <FormControl><Textarea placeholder="Any overall comments or notes from the visit..." {...field} rows={4} disabled={isSubmitting}/></FormControl>
               <FormMessage />
             </FormItem>
           )}
@@ -332,7 +333,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
               <Card key={field.id} className="mb-4 p-4 space-y-3 shadow-sm border">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-semibold text-md">Action Item {index + 1}</h4>
-                  <Button type="button" variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => remove(index)}>
+                  <Button type="button" variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => remove(index)} disabled={isSubmitting}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -342,7 +343,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                   render={({ field: itemField }) => (
                     <FormItem>
                       <FormLabel>Description</FormLabel>
-                      <FormControl><Textarea placeholder="Describe the action item" {...itemField} rows={2} /></FormControl>
+                      <FormControl><Textarea placeholder="Describe the action item" {...itemField} rows={2} disabled={isSubmitting}/></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -354,7 +355,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                     render={({ field: itemField }) => (
                       <FormItem>
                         <FormLabel>Responsible</FormLabel>
-                        <FormControl><Input placeholder="Person or role" {...itemField} /></FormControl>
+                        <FormControl><Input placeholder="Person or role" {...itemField} disabled={isSubmitting}/></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -368,14 +369,14 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                         <Popover>
                           <PopoverTrigger asChild>
                             <FormControl>
-                              <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !itemField.value && "text-muted-foreground")}>
+                              <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !itemField.value && "text-muted-foreground")} disabled={isSubmitting}>
                                 {itemField.value ? format(itemField.value, "PPP") : <span>Pick a date</span>}
                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                               </Button>
                             </FormControl>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar mode="single" selected={itemField.value} onSelect={itemField.onChange} initialFocus />
+                            <Calendar mode="single" selected={itemField.value} onSelect={itemField.onChange} initialFocus disabled={isSubmitting}/>
                           </PopoverContent>
                         </Popover>
                         <FormMessage />
@@ -388,7 +389,7 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                     render={({ field: itemField }) => (
                       <FormItem>
                         <FormLabel>Status</FormLabel>
-                        <Select onValueChange={itemField.onChange} defaultValue={itemField.value}>
+                        <Select onValueChange={itemField.onChange} defaultValue={itemField.value} disabled={isSubmitting}>
                           <FormControl><SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger></FormControl>
                           <SelectContent>
                             {["Open", "In Progress", "Completed", "Deferred"].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -401,15 +402,18 @@ export function SquadronVisitForm({ onSubmit, defaultValues, onCancel, isEditing
                 </div>
               </Card>
             ))}
-            <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => append({ description: "", responsible: "", status: "Open" })}>
+            <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => append({ description: "", responsible: "", status: "Open" })} disabled={isSubmitting}>
               <PlusCircle className="mr-2 h-4 w-4" /> Add Action Item
             </Button>
           </CardContent>
         </Card>
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Record Visit"}</Button>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isEditing ? "Save Changes" : "Record Visit"}
+          </Button>
         </div>
       </form>
     </Form>

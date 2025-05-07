@@ -3,12 +3,11 @@
 
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { auditSchema, type SafetyAudit, auditFindingSchema, type AuditFinding } from "../audit-schema";
+import { auditSchema, type SafetyAudit } from "../audit-schema"; // AuditFinding type also comes from here
 import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -30,18 +29,19 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, PlusCircle, Trash2 } from "lucide-react";
+import { CalendarIcon, PlusCircle, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card"; // CardContent not used directly here
 
 interface SafetyAuditFormProps {
   onSubmit: (data: SafetyAudit) => void;
   defaultValues?: Partial<SafetyAudit>;
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // For loading state
 }
 
-export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }: SafetyAuditFormProps) {
+export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: SafetyAuditFormProps) {
   const form = useForm<SafetyAudit>({
     resolver: zodResolver(auditSchema),
     defaultValues: defaultValues || {
@@ -61,7 +61,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
   });
 
   const handleSubmit = (data: SafetyAudit) => {
-    onSubmit(data);
+    onSubmit(data); // Parent handles ID logic for add/update
     if (!isEditing) {
       form.reset({
         auditTitle: "",
@@ -85,7 +85,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
             <FormItem>
               <FormLabel>Audit Title</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Quarterly Barracks Safety Inspection" {...field} />
+                <Input placeholder="e.g., Quarterly Barracks Safety Inspection" {...field} disabled={isSubmitting} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -99,13 +99,13 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
             <FormItem>
               <FormLabel>Type of Audit</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Work Area Inspection, Facility Safety Check" {...field} />
+                <Input placeholder="e.g., Work Area Inspection, Facility Safety Check" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
             control={form.control}
             name="auditDate"
@@ -121,6 +121,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                           "w-full pl-3 text-left font-normal",
                           !field.value && "text-muted-foreground"
                         )}
+                        disabled={isSubmitting}
                       >
                         {field.value ? (
                           format(field.value, "PPP")
@@ -136,7 +137,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                       mode="single"
                       selected={field.value}
                       onSelect={field.onChange}
-                      disabled={(date) => date > new Date()}
+                      disabled={(date) => date > new Date() || !!isSubmitting}
                       initialFocus
                     />
                   </PopoverContent>
@@ -153,7 +154,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
             <FormItem>
               <FormLabel>Auditor(s) Name</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., FLTLT Safety Officer" {...field} />
+                <Input placeholder="e.g., FLTLT Safety Officer" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -167,13 +168,13 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
             <FormItem>
               <FormLabel>Scope of Audit</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Squadron HQ Building, All Flight Simulators" {...field} />
+                <Input placeholder="e.g., Squadron HQ Building, All Flight Simulators" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
           control={form.control}
           name="summary"
@@ -181,7 +182,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
             <FormItem>
               <FormLabel>Overall Summary (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Brief overview of the audit's findings and general state..." {...field} rows={3} />
+                <Textarea placeholder="Brief overview of the audit's findings and general state..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -200,6 +201,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                     size="icon"
                     className="text-destructive hover:bg-destructive/10"
                     onClick={() => remove(index)}
+                    disabled={isSubmitting}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -210,7 +212,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                 render={({ field: findingField }) => (
                   <FormItem>
                     <FormLabel>Description</FormLabel>
-                    <FormControl><Textarea placeholder="Describe the finding or hazard" {...findingField} rows={2} /></FormControl>
+                    <FormControl><Textarea placeholder="Describe the finding or hazard" {...findingField} rows={2} disabled={isSubmitting}/></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -222,7 +224,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                   render={({ field: findingField }) => (
                     <FormItem>
                       <FormLabel>Severity</FormLabel>
-                      <Select onValueChange={findingField.onChange} defaultValue={findingField.value}>
+                      <Select onValueChange={findingField.onChange} defaultValue={findingField.value} disabled={isSubmitting}>
                         <FormControl><SelectTrigger><SelectValue placeholder="Select severity" /></SelectTrigger></FormControl>
                         <SelectContent>
                           {["Low", "Medium", "High", "Critical"].map(sev => (
@@ -240,7 +242,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                   render={({ field: findingField }) => (
                     <FormItem>
                       <FormLabel>Status</FormLabel>
-                      <Select onValueChange={findingField.onChange} defaultValue={findingField.value}>
+                      <Select onValueChange={findingField.onChange} defaultValue={findingField.value} disabled={isSubmitting}>
                         <FormControl><SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger></FormControl>
                         <SelectContent>
                           {["Open", "In Progress", "Resolved", "Closed"].map(stat => (
@@ -259,7 +261,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                 render={({ field: findingField }) => (
                   <FormItem>
                     <FormLabel>Recommended Corrective/Preventative Action (Optional)</FormLabel>
-                    <FormControl><Textarea placeholder="What needs to be done?" {...findingField} rows={2} /></FormControl>
+                    <FormControl><Textarea placeholder="What needs to be done?" {...findingField} rows={2} disabled={isSubmitting}/></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -271,7 +273,7 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                   render={({ field: findingField }) => (
                     <FormItem>
                       <FormLabel>Assigned To (Optional)</FormLabel>
-                      <FormControl><Input placeholder="Name or Role" {...findingField} /></FormControl>
+                      <FormControl><Input placeholder="Name or Role" {...findingField} disabled={isSubmitting}/></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -285,14 +287,14 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
                       <Popover>
                         <PopoverTrigger asChild>
                           <FormControl>
-                            <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !findingField.value && "text-muted-foreground")}>
+                            <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !findingField.value && "text-muted-foreground")} disabled={isSubmitting}>
                               {findingField.value ? format(findingField.value, "PPP") : <span>Pick a date</span>}
                               <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                             </Button>
                           </FormControl>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar mode="single" selected={findingField.value} onSelect={findingField.onChange} initialFocus />
+                          <Calendar mode="single" selected={findingField.value} onSelect={findingField.onChange} initialFocus disabled={isSubmitting}/>
                         </PopoverContent>
                       </Popover>
                       <FormMessage />
@@ -308,16 +310,20 @@ export function SafetyAuditForm({ onSubmit, defaultValues, onCancel, isEditing }
             size="sm"
             className="mt-2"
             onClick={() => append({ description: "", severity: "Medium", status: "Open" })}
+            disabled={isSubmitting}
           >
             <PlusCircle className="mr-2 h-4 w-4" /> Add Finding / CAPA
           </Button>
         </div>
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Create Audit Record"}</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isEditing ? "Save Changes" : "Create Audit Record"}
+          </Button>
         </div>
       </form>
     </Form>

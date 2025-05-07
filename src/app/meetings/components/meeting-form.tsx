@@ -4,7 +4,7 @@
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { meetingFormSchema, type Meeting, type MeetingFormData } from "../meeting-schema";
+import { meetingFormSchema, type MeetingFormData } from "../meeting-schema"; // Use MeetingFormData
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -24,18 +24,18 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, XCircle } from "lucide-react";
+import { CalendarIcon, XCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { convertFileToDataUrl } from "@/lib/utils"; // Assuming convertFileToDataUrl is moved to lib/utils
 
 interface MeetingFormProps {
-  onSubmit: (data: Meeting) => void; // Expects the final Meeting type
-  defaultValues?: Partial<Meeting>; // Default values for Meeting type
+  onSubmit: (data: MeetingFormData) => void; // Now expects MeetingFormData
+  defaultValues?: Partial<MeetingFormData>; // defaultValues is MeetingFormData
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // For loading state
 }
 
-export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: MeetingFormProps) {
+export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: MeetingFormProps) {
   const [currentAgendaFileName, setCurrentAgendaFileName] = React.useState<string | undefined>(defaultValues?.agendaDocumentFileName);
 
   const form = useForm<MeetingFormData>({
@@ -47,7 +47,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
       agendaNotes: defaultValues?.agendaNotes || "",
       agendaDocumentFileName: defaultValues?.agendaDocumentFileName || undefined,
       agendaDocumentDataUrl: defaultValues?.agendaDocumentDataUrl || undefined,
-      agendaDocumentFile: undefined, // File input always starts empty
+      agendaDocumentFile: undefined,
       discussionPoints: defaultValues?.discussionPoints || "",
       decisionsMade: defaultValues?.decisionsMade || "",
       actionItemsText: defaultValues?.actionItemsText || "",
@@ -63,66 +63,29 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
     if (file) {
       form.setValue("agendaDocumentFile", file, { shouldValidate: true });
       setCurrentAgendaFileName(file.name);
+      // Clear existing filename/dataurl if new file is selected (they will be re-populated on submit)
+      form.setValue("agendaDocumentFileName", undefined); 
+      form.setValue("agendaDocumentDataUrl", undefined);
     } else {
       form.setValue("agendaDocumentFile", undefined);
-      // If clearing input and it's an edit form with existing file, keep currentAgendaFileName as is until explicit removal
+      // If input is cleared, we will rely on existing data if editing, or submit undefined if new
+      // We need to handle if they previously had a file and cleared it.
+      // Let currentAgendaFileName manage what's displayed. Submission logic will sort it out.
     }
   };
 
   const handleRemoveAgendaDocument = () => {
     form.setValue("agendaDocumentFile", undefined, { shouldValidate: true });
-    form.setValue("agendaDocumentFileName", undefined);
-    form.setValue("agendaDocumentDataUrl", undefined);
+    form.setValue("agendaDocumentFileName", undefined); // Explicitly set to undefined
+    form.setValue("agendaDocumentDataUrl", undefined);  // Explicitly set to undefined
     setCurrentAgendaFileName(undefined);
   };
 
-  const handleSubmit = async (data: MeetingFormData) => {
-    let agendaDocumentInfo: Partial<Meeting> = {};
-    if (data.agendaDocumentFile) {
-      try {
-        const { name, dataUrl } = await convertFileToDataUrl(data.agendaDocumentFile);
-        agendaDocumentInfo = { agendaDocumentFileName: name, agendaDocumentDataUrl: dataUrl };
-      } catch (error) {
-        console.error("Error converting agenda document file:", error);
-        // Consider showing a toast message here
-      }
-    } else if (data.agendaDocumentFileName === undefined && data.agendaDocumentDataUrl === undefined && isEditing) {
-      // This means the file was explicitly removed during edit
-       agendaDocumentInfo = { agendaDocumentFileName: undefined, agendaDocumentDataUrl: undefined };
-    }
-
-
-    const finalMeetingData: Meeting = {
-      id: defaultValues?.id || undefined, // Preserve ID if editing
-      title: data.title,
-      date: data.date,
-      attendees: data.attendees,
-      agendaNotes: data.agendaNotes,
-      discussionPoints: data.discussionPoints,
-      decisionsMade: data.decisionsMade,
-      actionItemsText: data.actionItemsText,
-      // Apply agenda document updates
-      agendaDocumentFileName: agendaDocumentInfo.agendaDocumentFileName !== undefined ? agendaDocumentInfo.agendaDocumentFileName : (isEditing ? defaultValues?.agendaDocumentFileName : undefined),
-      agendaDocumentDataUrl: agendaDocumentInfo.agendaDocumentDataUrl !== undefined ? agendaDocumentInfo.agendaDocumentDataUrl : (isEditing ? defaultValues?.agendaDocumentDataUrl : undefined),
-    };
-    
-    // If a new file was uploaded, agendaDocumentInfo will have name/dataUrl.
-    // If file was removed, data.agendaDocumentFileName/Url from form will be undefined.
-    // If no change, rely on defaultValues for existing file info.
-
-    if (data.agendaDocumentFile) { // If new file uploaded, it overrides
-        finalMeetingData.agendaDocumentFileName = agendaDocumentInfo.agendaDocumentFileName;
-        finalMeetingData.agendaDocumentDataUrl = agendaDocumentInfo.agendaDocumentDataUrl;
-    } else if (currentAgendaFileName === undefined && isEditing) { // If file was explicitly removed
-        finalMeetingData.agendaDocumentFileName = undefined;
-        finalMeetingData.agendaDocumentDataUrl = undefined;
-    } else if (isEditing && defaultValues?.agendaDocumentFileName && !data.agendaDocumentFile) { // Keep existing if not removed and no new file
-        finalMeetingData.agendaDocumentFileName = defaultValues.agendaDocumentFileName;
-        finalMeetingData.agendaDocumentDataUrl = defaultValues.agendaDocumentDataUrl;
-    }
-
-
-    onSubmit(finalMeetingData);
+  const handleSubmit = (data: MeetingFormData) => {
+    // The parent component (MeetingsPage) will now handle the conversion of file to dataUrl
+    // and merge it with other data before calling the mutation.
+    // This form just passes the MeetingFormData as is.
+    onSubmit(data);
 
     if (!isEditing) {
       form.reset({
@@ -151,7 +114,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             <FormItem>
               <FormLabel>Meeting Title</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Weekly Staff Meeting" {...field} />
+                <Input placeholder="e.g., Weekly Staff Meeting" {...field} disabled={isSubmitting} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -173,6 +136,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
                         "w-full pl-3 text-left font-normal",
                         !field.value && "text-muted-foreground"
                       )}
+                      disabled={isSubmitting}
                     >
                       {field.value ? (
                         format(field.value, "PPP")
@@ -189,6 +153,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
                     selected={field.value}
                     onSelect={field.onChange}
                     initialFocus
+                    disabled={isSubmitting}
                   />
                 </PopoverContent>
               </Popover>
@@ -204,20 +169,20 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             <FormItem>
               <FormLabel>Attendees</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., John Doe, Jane Smith" {...field} />
+                <Input placeholder="e.g., John Doe, Jane Smith" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormDescription>Comma-separated list of attendee names.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormItem>
           <FormLabel>Agenda Document (Optional)</FormLabel>
            {currentAgendaFileName && !form.watch("agendaDocumentFile") && (
             <div className="text-sm text-muted-foreground mb-2 flex items-center justify-between p-2 border rounded-md">
               <span>Current: {currentAgendaFileName}</span>
-              <Button type="button" variant="ghost" size="sm" onClick={handleRemoveAgendaDocument} title="Remove current agenda document">
+              <Button type="button" variant="ghost" size="sm" onClick={handleRemoveAgendaDocument} title="Remove current agenda document" disabled={isSubmitting}>
                 <XCircle className="h-4 w-4 mr-1" /> Remove
               </Button>
             </div>
@@ -227,6 +192,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             type="file"
             accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
             onChange={handleAgendaFileChange}
+            disabled={isSubmitting}
             className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
           />
           <FormDescription>Upload PDF, DOC, DOCX, JPG, PNG, or WEBP file (Max 5MB).</FormDescription>
@@ -241,7 +207,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             <FormItem>
               <FormLabel>Agenda Notes (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Key agenda points or notes..." {...field} rows={3} />
+                <Textarea placeholder="Key agenda points or notes..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -255,7 +221,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             <FormItem>
               <FormLabel>Discussion Points (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Key topics discussed..." {...field} rows={4}/>
+                <Textarea placeholder="Key topics discussed..." {...field} rows={4} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -269,13 +235,13 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             <FormItem>
               <FormLabel>Decisions Made (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Decisions and outcomes..." {...field} rows={3} />
+                <Textarea placeholder="Decisions and outcomes..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
           control={form.control}
           name="actionItemsText"
@@ -283,7 +249,7 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
             <FormItem>
               <FormLabel>Action Items (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="e.g., - Send report (John Doe, due 2024-12-31)" {...field} rows={4} />
+                <Textarea placeholder="e.g., - Send report (John Doe, due 2024-12-31)" {...field} rows={4} disabled={isSubmitting}/>
               </FormControl>
               <FormDescription>List action items, assignees, and due dates.</FormDescription>
               <FormMessage />
@@ -292,10 +258,13 @@ export function MeetingForm({ onSubmit, defaultValues, onCancel, isEditing }: Me
         />
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Log Meeting Record"}</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isEditing ? "Save Changes" : "Log Meeting Record"}
+          </Button>
         </div>
       </form>
     </Form>

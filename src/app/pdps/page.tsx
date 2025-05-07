@@ -1,9 +1,8 @@
 
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Briefcase, Target, BarChart2, UserRoundCheck, FileEdit, Edit3, Info, ListChecks } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Briefcase, Target, BarChart2, UserRoundCheck, FileEdit, Edit3, Info, ListChecks, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -52,68 +51,136 @@ import { PdpForm } from "./components/pdp-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { useToast } from "@/hooks/use-toast";
 
-export const initialPdps: Pdp[] = [
-  {
-    id: "pdp1",
-    staffName: "Jane Smith", // Changed to full name for consistency
-    pdpPeriod: "2024 Annual",
-    goals: [
-      { id: "g1", specific: "Complete Advanced Leadership Course", measurable: "Certificate of Completion", achievable: "Course available in Q3", relevant: "To improve leadership skills for Training Officer role", timeBound: "End of Q3 2024", status: "In Progress" },
-      { id: "g2", specific: "Mentor 2 junior NCOs", measurable: "Feedback from NCOs, observed sessions", achievable: "Cadets available", relevant: "Develop mentorship capabilities", timeBound: "End of 2024", status: "Not Started" },
-    ],
-    developmentActivities: "Enroll in ALC, Schedule mentorship sessions",
-    reviewDate: new Date("2024-09-30"),
-    feedback: "Good progress on ALC modules.",
-  },
-  {
-    id: "pdp2",
-    staffName: "Alice Williams", // Changed to full name
-    pdpPeriod: "2024-2025",
-    goals: [
-       { id: "g3", specific: "Obtain First Aid Instructor Qualification", measurable: "Instructor Certificate", achievable: "Course scheduled for October", relevant: "To enhance squadron's first aid training capability", timeBound: "November 2024", status: "Not Started" },
-    ],
-    developmentActivities: "Attend First Aid Instructor course, practice teaching sessions.",
-  },
-   {
-    id: "pdp3",
-    staffName: "John Doe", // Added for John Doe
-    pdpPeriod: "2024 Q3-Q4",
-    goals: [
-       { id: "g4", specific: "Improve Squadron Safety Briefing Delivery", measurable: "Positive feedback from CO and staff", achievable: "Practice sessions, review material", relevant: "To enhance effectiveness as Safety Officer", timeBound: "End of Q4 2024", status: "Not Started" },
-    ],
-    developmentActivities: "Observe other safety briefings, request feedback on delivery.",
-    reviewDate: new Date("2024-12-15"),
-  }
-];
+const PDPS_QUERY_KEY = 'pdps';
+
+// Helper to convert Firestore Timestamps to JS Dates in PDP data
+const convertPdpTimestamps = (data: any): Pdp => {
+  return {
+    ...data,
+    reviewDate: data.reviewDate instanceof Timestamp ? data.reviewDate.toDate() : data.reviewDate,
+    goals: data.goals?.map((goal: any) => ({
+        ...goal,
+        // Convert any potential dates within goals here if needed
+    })) || [],
+  };
+};
+
+// --- Fetch PDPs ---
+async function fetchPdps(): Promise<Pdp[]> {
+  const pdpsCollectionRef = collection(db, 'pdps');
+  // Example: Order by staffName (adjust as needed)
+  const q = query(pdpsCollectionRef, orderBy('staffName'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...convertPdpTimestamps(doc.data()),
+  })) as Pdp[];
+}
+
+// --- Add PDP ---
+async function addPdp(newPdpData: Omit<Pdp, 'id'>): Promise<string> {
+  const pdpsCollectionRef = collection(db, 'pdps');
+  const dataToSave = {
+    ...newPdpData,
+    reviewDate: newPdpData.reviewDate ? Timestamp.fromDate(newPdpData.reviewDate) : null,
+    goals: newPdpData.goals.map(g => ({...g, id: g.id || crypto.randomUUID() })), // Ensure goal IDs
+  };
+  const docRef = await addDoc(pdpsCollectionRef, dataToSave);
+  return docRef.id;
+}
+
+// --- Update PDP ---
+async function updatePdp(updatedPdp: Pdp): Promise<void> {
+  if (!updatedPdp.id) throw new Error("PDP ID is required for update.");
+  const pdpDocRef = doc(db, 'pdps', updatedPdp.id);
+  const { id, ...dataToUpdate } = updatedPdp;
+  const dataToSave = {
+    ...dataToUpdate,
+    reviewDate: dataToUpdate.reviewDate ? Timestamp.fromDate(dataToUpdate.reviewDate) : null,
+    goals: dataToUpdate.goals.map(g => ({...g, id: g.id || crypto.randomUUID() })), // Ensure goal IDs
+  };
+  await updateDoc(pdpDocRef, dataToSave);
+}
+
+// --- Delete PDP ---
+async function deletePdp(pdpId: string): Promise<void> {
+  if (!pdpId) throw new Error("PDP ID is required for deletion.");
+  const pdpDocRef = doc(db, 'pdps', pdpId);
+  await deleteDoc(pdpDocRef);
+}
 
 export default function PdpsPage() {
-  const [pdpList, setPdpList] = React.useState<Pdp[]>(initialPdps);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: pdpList = [], isLoading, error } = useQuery<Pdp[], Error>({
+    queryKey: [PDPS_QUERY_KEY],
+    queryFn: fetchPdps,
+  });
+
+  const addPdpMutation = useMutation<string, Error, Omit<Pdp, 'id'>>({
+    mutationFn: addPdp,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PDPS_QUERY_KEY] });
+      setIsFormOpen(false);
+      toast({ title: "Success", description: "PDP created." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to create PDP: ${err.message}` });
+    }
+  });
+
+  const updatePdpMutation = useMutation<void, Error, Pdp>({
+    mutationFn: updatePdp,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [PDPS_QUERY_KEY] });
+      queryClient.setQueryData<Pdp[]>([PDPS_QUERY_KEY], (oldData) =>
+        oldData?.map((p) => (p.id === variables.id ? variables : p))
+      );
+      setIsFormOpen(false);
+      setEditingPdp(null);
+      toast({ title: "Success", description: "PDP updated." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to update PDP: ${err.message}` });
+    }
+  });
+
+  const deletePdpMutation = useMutation<void, Error, string>({
+    mutationFn: deletePdp,
+    onSuccess: (_, pdpId) => {
+      queryClient.invalidateQueries({ queryKey: [PDPS_QUERY_KEY] });
+      queryClient.setQueryData<Pdp[]>([PDPS_QUERY_KEY], (oldData) =>
+        oldData?.filter((p) => p.id !== pdpId)
+      );
+      setPdpToDelete(null);
+      toast({ title: "Success", description: "PDP deleted." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to delete PDP: ${err.message}` });
+      setPdpToDelete(null);
+    }
+  });
+
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingPdp, setEditingPdp] = React.useState<Pdp | null>(null);
   const [pdpToDelete, setPdpToDelete] = React.useState<Pdp | null>(null);
   const [viewingPdp, setViewingPdp] = React.useState<Pdp | null>(null);
 
-
-  const handleAddPdp = (data: Pdp) => {
-    const newPdp = { 
-      ...data, 
-      id: crypto.randomUUID(),
-      goals: data.goals.map(g => ({...g, id: crypto.randomUUID()}))
-    };
-    setPdpList((prev) => [newPdp, ...prev]);
-    setIsFormOpen(false);
+  const handleAddPdp = (data: Pdp) => { // Form passes full Pdp, but we omit ID for new
+    const {id, ...newPdpData} = data;
+    addPdpMutation.mutate(newPdpData);
   };
 
   const handleUpdatePdp = (data: Pdp) => {
-    setPdpList((prev) =>
-      prev.map((pdp) => (pdp.id === data.id ? {
-        ...data,
-        goals: data.goals.map(g => g.id ? g : {...g, id: crypto.randomUUID()})
-      } : pdp))
-    );
-    setIsFormOpen(false);
-    setEditingPdp(null);
+    if (editingPdp && editingPdp.id) {
+      updatePdpMutation.mutate({ ...data, id: editingPdp.id });
+    }
   };
 
   const handleEdit = (pdp: Pdp) => {
@@ -129,9 +196,8 @@ export default function PdpsPage() {
   };
 
   const handleDeleteConfirm = () => {
-    if (pdpToDelete) {
-      setPdpList((prev) => prev.filter((pdp) => pdp.id !== pdpToDelete.id));
-      setPdpToDelete(null);
+    if (pdpToDelete && pdpToDelete.id) {
+      deletePdpMutation.mutate(pdpToDelete.id);
     }
   };
 
@@ -140,7 +206,7 @@ export default function PdpsPage() {
     setViewingPdp(null);
     setIsFormOpen(true);
   };
-  
+
   const closeForm = () => {
     setEditingPdp(null);
     setIsFormOpen(false);
@@ -173,19 +239,33 @@ export default function PdpsPage() {
                 <CardDescription>Create, manage, and track professional development plans for staff members.</CardDescription>
               </div>
             </div>
-            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-              <PlusCircle className="mr-2 h-5 w-5" /> Create New PDP
+            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addPdpMutation.isPending}>
+              {addPdpMutation.isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+              Create New PDP
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {pdpList.length === 0 ? (
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading PDPs...</p>
+            </div>
+          )}
+          {error && !isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+              <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading PDPs</h3>
+              <p className="text-destructive mb-4">{error.message}</p>
+            </div>
+          )}
+          {!isLoading && !error && pdpList.length === 0 ? (
              <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Briefcase className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-muted-foreground mb-2">No PDPs Created Yet</h3>
                 <p className="text-muted-foreground mb-4">Click &quot;Create New PDP&quot; to get started.</p>
              </div>
-          ) : (
+          ) : !isLoading && !error && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -203,8 +283,8 @@ export default function PdpsPage() {
                     <TableCell>{pdp.pdpPeriod}</TableCell>
                     <TableCell className="hidden md:table-cell">
                       <Badge variant={
-                        getOverallStatus(pdp.goals) === "Completed" ? "default" : 
-                        getOverallStatus(pdp.goals) === "In Progress" ? "secondary" : "outline" // Example, adjust as needed
+                        getOverallStatus(pdp.goals) === "Completed" ? "default" :
+                        getOverallStatus(pdp.goals) === "In Progress" ? "secondary" : "outline"
                       }>
                         {getOverallStatus(pdp.goals)}
                       </Badge>
@@ -215,18 +295,18 @@ export default function PdpsPage() {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button variant="ghost" className="h-8 w-8 p-0" disabled={updatePdpMutation.isPending || deletePdpMutation.isPending}>
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                           <DropdownMenuItem onClick={() => handleViewDetails(pdp)}>
+                           <DropdownMenuItem onClick={() => handleViewDetails(pdp)} disabled={updatePdpMutation.isPending || deletePdpMutation.isPending}>
                             <Info className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(pdp)}>
+                          <DropdownMenuItem onClick={() => handleEdit(pdp)} disabled={updatePdpMutation.isPending || deletePdpMutation.isPending}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
@@ -234,6 +314,7 @@ export default function PdpsPage() {
                           <DropdownMenuItem
                             onClick={() => setPdpToDelete(pdp)}
                             className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            disabled={updatePdpMutation.isPending || deletePdpMutation.isPending}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -247,7 +328,7 @@ export default function PdpsPage() {
             </Table>
           )}
         </CardContent>
-         {pdpList.length > 0 && (
+         {!isLoading && !error && pdpList.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground">
             Showing {pdpList.length} of {pdpList.length} PDPs.
           </CardFooter>
@@ -271,10 +352,11 @@ export default function PdpsPage() {
           <ScrollArea className="max-h-[70vh] p-1">
             <div className="py-4 pr-4">
                 <PdpForm
-                onSubmit={editingPdp ? handleUpdatePdp : handleAddPdp}
-                defaultValues={editingPdp || undefined}
-                onCancel={closeForm}
-                isEditing={!!editingPdp}
+                  onSubmit={editingPdp ? handleUpdatePdp : handleAddPdp}
+                  defaultValues={editingPdp || undefined}
+                  onCancel={closeForm}
+                  isEditing={!!editingPdp}
+                  isSubmitting={editingPdp ? updatePdpMutation.isPending : addPdpMutation.isPending}
                 />
             </div>
           </ScrollArea>
@@ -283,7 +365,7 @@ export default function PdpsPage() {
 
       {viewingPdp && (
          <Dialog open={!!viewingPdp} onOpenChange={closeViewDialog}>
-            <DialogContent className="sm:max-w-3xl"> {/* Wider for better goal display */}
+            <DialogContent className="sm:max-w-3xl">
                 <DialogHeader>
                     <DialogTitle>PDP for {viewingPdp.staffName} ({viewingPdp.pdpPeriod})</DialogTitle>
                     <DialogDescription>
@@ -332,10 +414,12 @@ export default function PdpsPage() {
                       if (viewingPdp) {
                         handleEdit(viewingPdp);
                       }
-                    }}>
+                    }}
+                    disabled={updatePdpMutation.isPending}
+                    >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewDialog}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={updatePdpMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -351,20 +435,22 @@ export default function PdpsPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setPdpToDelete(null)}>
+              <AlertDialogCancel onClick={() => setPdpToDelete(null)} disabled={deletePdpMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                disabled={deletePdpMutation.isPending}
               >
+                {deletePdpMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       )}
-      
+
       <Card className="shadow-sm mt-8">
         <CardHeader>
             <div className="flex items-center gap-3">
@@ -407,5 +493,3 @@ export default function PdpsPage() {
     </div>
   );
 }
-
-

@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -53,169 +53,68 @@ import { format, parse as parseDateFns, isValid as isValidDate } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { RANKS, type StaffMember } from "@/app/staff/staff-schema";
-import { initialStaff } from "@/app/staff/page"; // Import initialStaff
+import { useStaff } from "@/hooks/useStaffData"; // Import useStaff hook
 import { useToast } from "@/hooks/use-toast";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { convertFileToDataUrl } from "@/lib/utils"; // Ensure this utility exists
 
 
-export const initialTrainingLogs: TrainingLog[] = [
-  {
-    id: "t1",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane",
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "Officer Development Course",
-    completionDate: new Date("2023-11-20"),
-    qualificationAchieved: "ODC Certificate",
-  },
-  {
-    id: "t2",
-    rank: "FLGOFF(AAFC)",
-    staffName: "Doe, John",
-    squadron: "456 Squadron",
-    currentRole: "Safety Officer",
-    courseName: "Range Safety Officer Training",
-    completionDate: new Date("2024-02-10"),
-    instructorQualification: "Certified RSO",
-    achievementDetails: "Top score in practical assessment."
-  },
-  {
-    id: "t3",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane",
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "Advanced First Aid",
-    completionDate: new Date("2024-03-15"),
-    qualificationAchieved: "HLTAID011", // Example of a First Aid cert
-    achievementDetails: "Instructor recommendation."
-  },
-   {
-    id: "t4",
-    rank: "PLTOFF(AAFC)",
-    staffName: "Williams, Alice",
-    squadron: "123 Squadron",
-    currentRole: "Admin Officer",
-    courseName: "Introduction to AAFC Systems",
-    completionDate: new Date("2024-01-15"),
-    qualificationAchieved: "System Access Granted",
-  },
-  {
-    id: "t5",
-    rank: "SQNLDR(AAFC)",
-    staffName: "Brown, Robert",
-    squadron: "721 Wing HQ", 
-    currentRole: "Wing Training Coordinator",
-    courseName: "Senior Leadership Seminar",
-    completionDate: new Date("2023-09-05"),
-    qualificationAchieved: "SLS Attendance",
-  },
-  // Adding more diverse logs for better compliance testing
-  {
-    id: "t6",
-    rank: "FLGOFF(AAFC)",
-    staffName: "Doe, John", // John Doe from 456 SQN
-    squadron: "456 Squadron",
-    currentRole: "Safety Officer",
-    courseName: "Working With Children Check Application",
-    completionDate: new Date("2023-01-10"), // Assume this is when it was processed/granted
-    qualificationAchieved: "WWCC Cleared",
-  },
-  {
-    id: "t7",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane", // Jane Smith from 123 SQN
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "Code of Conduct Acceptance",
-    completionDate: new Date("2023-02-01"),
-  },
-  {
-    id: "t8",
-    rank: "FLGOFF(AAFC)",
-    staffName: "Doe, John",
-    squadron: "456 Squadron",
-    currentRole: "Safety Officer",
-    courseName: "National Police Clearance",
-    completionDate: new Date("2020-07-01"), // This will be expired for a 5-year rule
-  },
-  {
-    id: "t9",
-    rank: "PLTOFF(AAFC)",
-    staffName: "Williams, Alice",
-    squadron: "123 Squadron",
-    currentRole: "Admin Officer",
-    courseName: "Defence Youth Safety Training (DYSAT)",
-    completionDate: new Date("2024-06-01"), // Current for 1-year rule
-  },
-  {
-    id: "t10",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane",
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "Psychological Assessment",
-    completionDate: new Date("2022-05-01"),
-  },
-   { // Jane Smith gets her WWCC
-    id: "t11",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane",
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "Working With Children Check (Vic)",
-    completionDate: new Date("2023-03-15"),
-    qualificationAchieved: "WWCC Card Holder"
-  },
-  { // Jane Smith gets her Police Check (recent)
-    id: "t12",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane",
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "National Police Clearance (NPC)",
-    completionDate: new Date("2023-08-20"),
-  },
-  { // Jane Smith gets her DYSAT (recent)
-    id: "t13",
-    rank: "FLTLT(AAFC)",
-    staffName: "Smith, Jane",
-    squadron: "123 Squadron",
-    currentRole: "Training Officer",
-    courseName: "Defence Youth Safety Awareness Training",
-    completionDate: new Date("2024-05-10"),
-  },
-   { // John Doe gets Code of Conduct
-    id: "t14",
-    rank: "FLGOFF(AAFC)",
-    staffName: "Doe, John",
-    squadron: "456 Squadron",
-    currentRole: "Safety Officer",
-    courseName: "Code of Conduct and Behavioural Policy Acceptance",
-    completionDate: new Date("2024-01-15"),
-  },
-  { // John Doe gets Psych Assessment
-    id: "t15",
-    rank: "FLGOFF(AAFC)",
-    staffName: "Doe, John",
-    squadron: "456 Squadron",
-    currentRole: "Safety Officer",
-    courseName: "Mandatory Psychological Assessment",
-    completionDate: new Date("2024-02-20"),
-  },
-   { // John Doe gets DYSAT (old, will be expired)
-    id: "t16",
-    rank: "FLGOFF(AAFC)",
-    staffName: "Doe, John",
-    squadron: "456 Squadron",
-    currentRole: "Safety Officer",
-    courseName: "DYSAT Refresher",
-    completionDate: new Date("2023-01-05"), // Will be expired
-  },
-];
+const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
+
+// Helper to convert Firestore Timestamps
+const convertLogTimestamps = (data: any): TrainingLog => {
+  return {
+    ...data,
+    completionDate: (data.completionDate as Timestamp).toDate(),
+  };
+};
+
+// --- Fetch Training Logs ---
+async function fetchTrainingLogs(): Promise<TrainingLog[]> {
+  const collectionRef = collection(db, 'trainingLogs'); // Assuming 'trainingLogs' collection
+  const q = query(collectionRef, orderBy('completionDate', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...convertLogTimestamps(doc.data()),
+  })) as TrainingLog[];
+}
+
+// --- Add Training Log ---
+async function addTrainingLog(newLogData: Omit<TrainingLog, 'id'>): Promise<string> {
+  const collectionRef = collection(db, 'trainingLogs');
+  const dataToSave = {
+    ...newLogData,
+    completionDate: Timestamp.fromDate(newLogData.completionDate),
+  };
+  const docRef = await addDoc(collectionRef, dataToSave);
+  return docRef.id;
+}
+
+// --- Update Training Log ---
+async function updateTrainingLog(updatedLog: TrainingLog): Promise<void> {
+  if (!updatedLog.id) throw new Error("Log ID is required for update.");
+  const docRef = doc(db, 'trainingLogs', updatedLog.id);
+  const { id, ...dataToUpdate } = updatedLog;
+  const dataToSave = {
+    ...dataToUpdate,
+    completionDate: Timestamp.fromDate(dataToUpdate.completionDate),
+  };
+  await updateDoc(docRef, dataToSave);
+}
+
+// --- Delete Training Log ---
+async function deleteTrainingLog(logId: string): Promise<void> {
+  if (!logId) throw new Error("Log ID is required for deletion.");
+  await deleteDoc(doc(db, 'trainingLogs', logId));
+}
+
+
 
 type StaffMemberLogGroup = {
-  identifier: string; 
+  identifier: string;
   rank: typeof RANKS[number];
   staffName: string;
   logs: TrainingLog[];
@@ -237,24 +136,68 @@ function downloadTextFile(filename: string, text: string) {
   document.body.removeChild(element);
 }
 
-async function convertFileToDataUrl(file: File): Promise<{ name: string; dataUrl: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve({ name: file.name, dataUrl: reader.result as string });
-    reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
-  });
-}
-
-
 export default function TrainingPage() {
-  const [trainingLogsList, setTrainingLogsList] = React.useState<TrainingLog[]>(initialTrainingLogs);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: staffList = [], isLoading: isLoadingStaff } = useStaff(); // Fetch staff data
+
+  // --- React Query for Training Logs ---
+  const { data: trainingLogsList = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
+    queryKey: [TRAINING_LOGS_QUERY_KEY],
+    queryFn: fetchTrainingLogs,
+  });
+
+  const addLogMutation = useMutation<string, Error, Omit<TrainingLog, 'id'>>({
+    mutationFn: addTrainingLog,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+      setIsFormOpen(false);
+      toast({ title: "Success", description: "Training record added." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to add record: ${err.message}` });
+    }
+  });
+
+  const updateLogMutation = useMutation<void, Error, TrainingLog>({
+    mutationFn: updateTrainingLog,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+       queryClient.setQueryData<TrainingLog[]>([TRAINING_LOGS_QUERY_KEY], (oldData) =>
+         oldData?.map((log) => (log.id === variables.id ? variables : log))
+       );
+      setIsFormOpen(false);
+      setEditingLog(null);
+      toast({ title: "Success", description: "Training record updated." });
+    },
+     onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to update record: ${err.message}` });
+    }
+  });
+
+  const deleteLogMutation = useMutation<void, Error, string>({
+    mutationFn: deleteTrainingLog,
+    onSuccess: (_, logId) => {
+      queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+       queryClient.setQueryData<TrainingLog[]>([TRAINING_LOGS_QUERY_KEY], (oldData) =>
+         oldData?.filter((log) => log.id !== logId)
+       );
+      setLogToDelete(null);
+      toast({ title: "Success", description: "Training record deleted." });
+    },
+     onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to delete record: ${err.message}` });
+      setLogToDelete(null);
+    }
+  });
+
+  // --- End React Query for Training Logs ---
+
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingLog, setEditingLog] = React.useState<TrainingLog | null>(null);
   const [logToDelete, setLogToDelete] = React.useState<TrainingLog | null>(null);
   const [viewingLog, setViewingLog] = React.useState<TrainingLog | null>(null);
   const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null);
-  const { toast } = useToast();
 
 
   const squadronStaffGroups = React.useMemo(() => {
@@ -287,14 +230,14 @@ export default function TrainingPage() {
           .sort((a, b) => {
             const rankAIndex = RANKS.indexOf(a.rank);
             const rankBIndex = RANKS.indexOf(b.rank);
-            
+
             if (rankAIndex === -1 && rankBIndex === -1) return a.staffName.localeCompare(b.staffName);
-            if (rankAIndex === -1) return 1; 
-            if (rankBIndex === -1) return -1; 
-            
-            const rankComparison = rankBIndex - rankAIndex; 
+            if (rankAIndex === -1) return 1;
+            if (rankBIndex === -1) return -1;
+
+            const rankComparison = rankBIndex - rankAIndex;
             if (rankComparison !== 0) return rankComparison;
-            
+
             return a.staffName.localeCompare(b.staffName);
           });
 
@@ -318,8 +261,7 @@ export default function TrainingPage() {
       }
     }
 
-    const newLog: TrainingLog = {
-      id: crypto.randomUUID(),
+    const newLog: Omit<TrainingLog, 'id'> = { // Use Omit here as ID is generated by backend
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -329,15 +271,14 @@ export default function TrainingPage() {
       qualificationAchieved: data.qualificationAchieved,
       instructorQualification: data.instructorQualification,
       achievementDetails: data.achievementDetails,
-      ...certificateInfo,
+      certificateFileName: certificateInfo.certificateFileName, // Use processed info
+      certificateDataUrl: certificateInfo.certificateDataUrl,   // Use processed info
     };
-    setTrainingLogsList((prev) => [newLog, ...prev]);
-    setIsFormOpen(false);
-    toast({ title: "Success", description: "Training record added." });
+    addLogMutation.mutate(newLog); // Use mutation
   };
 
   const handleUpdateLog = async (data: TrainingLogFormData) => {
-    if (!editingLog) return;
+    if (!editingLog || !editingLog.id) return;
 
     let certificateUpdates: Partial<TrainingLog> = {};
     if (data.certificateFile) {
@@ -349,17 +290,13 @@ export default function TrainingPage() {
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
       }
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
+      // File was explicitly removed
       certificateUpdates = { certificateFileName: undefined, certificateDataUrl: undefined };
-    } else {
-      // Keep existing certificate if no new file and not explicitly removed
-      certificateUpdates = {
-        certificateFileName: editingLog.certificateFileName,
-        certificateDataUrl: editingLog.certificateDataUrl,
-      };
     }
+    // If no new file and not explicitly removed, keep existing (no changes to certificateUpdates needed)
 
     const updatedLog: TrainingLog = {
-      ...editingLog, // Preserve existing fields like ID
+      id: editingLog.id, // Keep existing ID
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -369,15 +306,11 @@ export default function TrainingPage() {
       qualificationAchieved: data.qualificationAchieved,
       instructorQualification: data.instructorQualification,
       achievementDetails: data.achievementDetails,
-      ...certificateUpdates,
+      certificateFileName: certificateUpdates.hasOwnProperty('certificateFileName') ? certificateUpdates.certificateFileName : editingLog.certificateFileName,
+      certificateDataUrl: certificateUpdates.hasOwnProperty('certificateDataUrl') ? certificateUpdates.certificateDataUrl : editingLog.certificateDataUrl,
     };
 
-    setTrainingLogsList((prev) =>
-      prev.map((log) => (log.id === updatedLog.id ? updatedLog : log))
-    );
-    setIsFormOpen(false);
-    setEditingLog(null);
-    toast({ title: "Success", description: "Training record updated." });
+    updateLogMutation.mutate(updatedLog); // Use mutation
   };
 
   const handleEdit = (log: TrainingLog) => {
@@ -393,10 +326,8 @@ export default function TrainingPage() {
   };
 
   const handleDeleteConfirm = () => {
-    if (logToDelete) {
-      setTrainingLogsList((prev) => prev.filter((log) => log.id !== logToDelete.id));
-      setLogToDelete(null);
-      toast({ title: "Success", description: "Training record deleted." });
+    if (logToDelete && logToDelete.id) {
+      deleteLogMutation.mutate(logToDelete.id); // Use mutation
     }
   };
 
@@ -412,7 +343,7 @@ export default function TrainingPage() {
     content += `Role at time of training: ${log.currentRole}\n`;
     content += `Course Name: ${log.courseName}\n`;
     content += `Completion Date: ${format(log.completionDate, "PPP")}\n\n`;
-    
+
     if (log.qualificationAchieved) {
       content += `Qualification Achieved: ${log.qualificationAchieved}\n`;
     }
@@ -425,10 +356,10 @@ export default function TrainingPage() {
     if (log.certificateFileName) {
       content += `Certificate Attached: ${log.certificateFileName}\n`;
     }
-    
+
     downloadTextFile(filename, content);
   };
-  
+
   const handleExportAllTrainingRecordsForMember = (staffMemberGroup: StaffMemberLogGroup) => {
     const staffIdentifier = `${staffMemberGroup.rank}_${staffMemberGroup.staffName.replace(/\s*,\s*|\s+/g, '_')}`;
     const filename = `all_training_records_${staffIdentifier}.txt`;
@@ -458,7 +389,7 @@ export default function TrainingPage() {
       }
       content += `------------------------------------\n\n`;
     });
-    
+
     downloadTextFile(filename, content);
   };
 
@@ -468,7 +399,7 @@ export default function TrainingPage() {
     setViewingLog(null);
     setIsFormOpen(true);
   };
-  
+
   const closeForm = () => {
     setEditingLog(null);
     setIsFormOpen(false);
@@ -477,7 +408,7 @@ export default function TrainingPage() {
   const closeViewDialog = () => {
     setViewingLog(null);
   };
-  
+
   function parseMemberRankName(memberRankNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
     let rank: typeof RANKS[number] | null = null;
     let namePart = memberRankNameInput.trim();
@@ -502,12 +433,12 @@ export default function TrainingPage() {
         return { rank, firstName, lastName };
       }
     }
-    
+
     // Fallback if parsing fails
     if (parts.length === 1 && parts[0]) {
       return { rank, firstName: null, lastName: parts[0] }; // Assume single remaining part is lastName
     }
-    
+
     return { rank, firstName: null, lastName: namePart }; // If still unparsed, put all in lastName
   }
 
@@ -520,7 +451,7 @@ export default function TrainingPage() {
     }
     const directParsed = new Date(dateString);
     if (isValidDate(directParsed)) return directParsed;
-    
+
     return null;
   };
 
@@ -533,14 +464,14 @@ export default function TrainingPage() {
     }
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => { // Make async
       const text = e.target?.result as string;
       if (!text) {
         toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
         return;
       }
-      
-      const newLogs: TrainingLog[] = [];
+
+      const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
       const errors: string[] = [];
       const lines = text.split(/\r\n|\n/);
 
@@ -550,7 +481,7 @@ export default function TrainingPage() {
         const headerLine = lines[0].trim();
         const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         const expectedHeader = ["MemberUID", "Member Rank - Name", "EffectiveDate", "Accomplishment"];
-        
+
         const allHeadersPresent = expectedHeader.every(eh => header.includes(eh));
 
         if (!allHeadersPresent) {
@@ -559,12 +490,12 @@ export default function TrainingPage() {
             const headerIndices: Record<string, number> = {};
             expectedHeader.forEach(eh => {
                 headerIndices[eh] = header.indexOf(eh);
-                if (headerIndices[eh] === -1) { // Should not happen due to allHeadersPresent check, but good for safety
+                if (headerIndices[eh] === -1) {
                   errors.push(`Critical Error: Missing expected header column: "${eh}" despite passing initial check.`);
                 }
             });
 
-            if (errors.length > 0 && !allHeadersPresent) { // Stop if headers are fundamentally wrong
+            if (!allHeadersPresent) { // Stop if headers are fundamentally wrong
                  toast({
                     variant: "destructive",
                     title: "CSV Import Failed: Header Mismatch",
@@ -574,8 +505,8 @@ export default function TrainingPage() {
                 if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
                 return;
             }
-            
-            const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number, parsedRankName: { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } }> = [];
+
+            const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
             let preliminaryParsingOk = true;
 
             for (let i = 1; i < lines.length; i++) {
@@ -588,40 +519,35 @@ export default function TrainingPage() {
                     preliminaryParsingOk = false;
                     continue;
                 }
-                
+
                 const csvRowData: Record<string, string> = {};
                 expectedHeader.forEach(eh => {
                     csvRowData[eh] = values[headerIndices[eh]];
                 });
 
                 const serviceNumber = csvRowData["MemberUID"];
-                const memberRankNameStr = csvRowData["Member Rank - Name"];
-                
+
                 if (!serviceNumber) {
                     errors.push(`Row ${i + 1}: Missing "MemberUID".`);
                     preliminaryParsingOk = false;
                     continue;
                 }
 
-                const parsedRankName = parseMemberRankName(memberRankNameStr);
-                if (!parsedRankName.rank) {
-                  errors.push(`Row ${i + 1}: Could not parse valid rank from "Member Rank - Name": "${memberRankNameStr}". Valid ranks: ${RANKS.join(", ")}`);
-                  preliminaryParsingOk = false;
-                  continue;
-                }
-                if (!parsedRankName.firstName || !parsedRankName.lastName) {
-                  errors.push(`Row ${i + 1}: Could not parse first and last name from "Member Rank - Name": "${memberRankNameStr}". Expected format: "RANK FirstName LastName".`);
-                  preliminaryParsingOk = false;
-                  continue;
-                }
-
-                const matchedStaff = initialStaff.find(sm => sm.serviceNumber === serviceNumber);
+                // Find staff member using only MemberUID
+                const matchedStaff = staffList.find(sm => sm.serviceNumber === serviceNumber);
 
                 if (!matchedStaff) {
                     errors.push(`Row ${i + 1}: Staff member with MemberUID "${serviceNumber}" not found. Please ensure a staff profile exists with this Service Number in Staff Management.`);
                     preliminaryParsingOk = false;
                 } else {
-                    membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1, parsedRankName });
+                    // Optional: Validate Rank/Name from CSV against profile? For now, we trust the profile.
+                    const parsedRankName = parseMemberRankName(csvRowData["Member Rank - Name"]);
+                    if (!parsedRankName.rank || !parsedRankName.firstName || !parsedRankName.lastName) {
+                       console.warn(`Row ${i + 1}: Could not fully parse Rank/Name from CSV "${csvRowData["Member Rank - Name"]}", but proceeding with UID match.`);
+                       // Not treating this as a hard error since UID matched
+                    }
+
+                    membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1 });
                 }
             }
 
@@ -639,10 +565,10 @@ export default function TrainingPage() {
             membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
                 const accomplishment = csvRowData["Accomplishment"];
                 const effectiveDateStr = csvRowData["EffectiveDate"];
-                
+
                 if (!accomplishment) {
                     errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Accomplishment".`);
-                    return; 
+                    return;
                 }
                 if (!effectiveDateStr) {
                     errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "EffectiveDate".`);
@@ -654,36 +580,51 @@ export default function TrainingPage() {
                     errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
                     return;
                 }
-                
-                newLogs.push({
-                    id: crypto.randomUUID(),
+
+                newLogsToAdd.push({
                     rank: staffMember.rank, // Use rank from matched staff profile
                     staffName: `${staffMember.lastName}, ${staffMember.firstName}`, // Use name from matched staff profile
-                    squadron: staffMember.squadron || "N/A", 
-                    currentRole: staffMember.role, 
+                    squadron: staffMember.squadron || "N/A",
+                    currentRole: staffMember.role,
                     courseName: accomplishment, // From CSV
                     completionDate: completionDate, // From CSV
-                    qualificationAchieved: accomplishment, // From CSV
+                    qualificationAchieved: accomplishment, // From CSV (assume it's a qual)
+                    // Other fields default to empty/undefined
+                    instructorQualification: "",
+                    achievementDetails: "",
+                    certificateFileName: undefined,
+                    certificateDataUrl: undefined,
                 });
             });
         }
       }
 
-      if (newLogs.length > 0) {
-        setTrainingLogsList(prev => [...prev, ...newLogs].sort((a,b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime() ));
-        toast({ title: "Import Successful", description: `${newLogs.length} accomplishment(s) imported.` });
+      let importedCount = 0;
+      if (newLogsToAdd.length > 0) {
+        // Add logs one by one using mutation
+        for (const log of newLogsToAdd) {
+           try {
+               await addLogMutation.mutateAsync(log);
+               importedCount++;
+           } catch (err: any) {
+               errors.push(`Failed to import accomplishment "${log.courseName}" for UID ${log.rank} ${log.staffName}: ${err.message}`);
+           }
+        }
+         if (importedCount > 0) {
+            toast({ title: "Import Processing Complete", description: `${importedCount} accomplishment(s) added.` });
+         }
       }
-      
+
       // Consolidated error display
       if (errors.length > 0) {
-        const title = newLogs.length > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
-        const variant = newLogs.length > 0 ? "default" : "destructive";
+        const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
+        const variant = importedCount > 0 ? "default" : "destructive";
         const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-        
+
         let descriptionPrefix = "";
-        if (newLogs.length > 0 && errors.length > 0) {
-            descriptionPrefix = `${newLogs.length} records imported. Some rows had errors:\n`;
-        } else if (newLogs.length === 0 && errors.length > 0) {
+        if (importedCount > 0 && errors.length > 0) {
+            descriptionPrefix = `${importedCount} records imported. Some rows had errors:\n`;
+        } else if (importedCount === 0 && errors.length > 0) {
             descriptionPrefix = "No records imported. Errors found:\n";
         }
 
@@ -695,19 +636,19 @@ export default function TrainingPage() {
                 <pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}{errorMessages}</pre>
               </ScrollArea>
             ),
-            duration: 15000, 
+            duration: 15000,
         });
       }
 
 
       if (accomplishmentCsvInputRef.current) {
-        accomplishmentCsvInputRef.current.value = ""; 
+        accomplishmentCsvInputRef.current.value = "";
       }
     };
     reader.onerror = () => {
       toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
       if (accomplishmentCsvInputRef.current) {
-        accomplishmentCsvInputRef.current.value = ""; 
+        accomplishmentCsvInputRef.current.value = "";
       }
     };
     reader.readAsText(file);
@@ -727,11 +668,13 @@ export default function TrainingPage() {
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-                    <PlusCircle className="mr-2 h-5 w-5" /> Log Training Record
+                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addLogMutation.isPending}>
+                   {addLogMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+                    Log Training Record
                 </Button>
-                <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto">
-                    <UploadCloud className="mr-2 h-5 w-5" /> Import Accomplishments
+                <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoadingStaff}>
+                   {isLoadingStaff ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
+                    Import Accomplishments
                 </Button>
                 <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
             </div>
@@ -739,7 +682,27 @@ export default function TrainingPage() {
         </CardHeader>
       </Card>
 
-      {squadronStaffGroups.length === 0 && (
+      {/* Loading / Error States */}
+       {isLoadingLogs && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+            <p className="text-muted-foreground">Loading training records...</p>
+          </CardContent>
+        </Card>
+      )}
+      {errorLogs && !isLoadingLogs && (
+         <Card className="border-destructive">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+             <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+             <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Training Records</h3>
+            <p className="text-destructive mb-4">{errorLogs.message}</p>
+          </CardContent>
+        </Card>
+      )}
+
+
+      {!isLoadingLogs && !errorLogs && squadronStaffGroups.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <GraduationCap className="h-16 w-16 text-muted-foreground mb-4" />
@@ -749,7 +712,7 @@ export default function TrainingPage() {
         </Card>
       )}
 
-      {squadronStaffGroups.map((squadronGroup) => (
+      {!isLoadingLogs && !errorLogs && squadronStaffGroups.map((squadronGroup) => (
         <Card key={squadronGroup.squadronName} className="shadow-xl mb-8">
           <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b rounded-t-lg">
             <CardTitle className="text-2xl">Squadron: {squadronGroup.squadronName}</CardTitle>
@@ -767,7 +730,7 @@ export default function TrainingPage() {
                           <CardTitle className="text-xl">{staffMemberGroup.rank} {staffMemberGroup.staffName}</CardTitle>
                           <CardDescription>{staffMemberGroup.logs.length} training record(s)</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)}>
+                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
                           <Archive className="mr-2 h-4 w-4" /> Export All for Member
                         </Button>
                       </div>
@@ -803,22 +766,22 @@ export default function TrainingPage() {
                               <TableCell className="text-right">
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <Button variant="ghost" className="h-8 w-8 p-0" disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
                                       <span className="sr-only">Open menu</span>
                                       <MoreHorizontal className="h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => handleViewDetails(log)}>
+                                    <DropdownMenuItem onClick={() => handleViewDetails(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
                                       <Info className="mr-2 h-4 w-4" />
                                       View Details
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleEdit(log)}>
+                                    <DropdownMenuItem onClick={() => handleEdit(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
                                       <Pencil className="mr-2 h-4 w-4" />
                                       Edit
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)}>
+                                    <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
                                       <Download className="mr-2 h-4 w-4" />
                                       Export Record
                                     </DropdownMenuItem>
@@ -826,6 +789,7 @@ export default function TrainingPage() {
                                     <DropdownMenuItem
                                       onClick={() => setLogToDelete(log)}
                                       className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                      disabled={deleteLogMutation.isPending || updateLogMutation.isPending}
                                     >
                                       <Trash2 className="mr-2 h-4 w-4" />
                                       Delete
@@ -845,8 +809,8 @@ export default function TrainingPage() {
           </CardContent>
         </Card>
       ))}
-        
-      {squadronStaffGroups.length > 0 && (
+
+      {!isLoadingLogs && !errorLogs && squadronStaffGroups.length > 0 && (
           <Card>
             <CardFooter className="text-xs text-muted-foreground pt-4 justify-center">
                  Displaying records for {squadronStaffGroups.reduce((acc, sq) => acc + sq.staffMembers.length, 0)} staff member(s) across {squadronStaffGroups.length} squadron(s). Total individual logs: {trainingLogsList.length}.
@@ -960,10 +924,10 @@ export default function TrainingPage() {
                       if (viewingLog) {
                         handleEdit(viewingLog);
                       }
-                    }}>
+                    }} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewDialog}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -980,20 +944,22 @@ export default function TrainingPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setLogToDelete(null)}>
+              <AlertDialogCancel onClick={() => setLogToDelete(null)} disabled={deleteLogMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                 disabled={deleteLogMutation.isPending}
               >
+                {deleteLogMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       )}
-      
+
       <Card className="shadow-sm mt-8">
         <CardHeader>
              <div className="flex items-center gap-3">
@@ -1044,4 +1010,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-

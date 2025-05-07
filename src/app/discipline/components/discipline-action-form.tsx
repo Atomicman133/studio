@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -30,7 +29,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DisciplineActionFormProps {
@@ -38,9 +37,10 @@ interface DisciplineActionFormProps {
   defaultValues?: Partial<DisciplineAction>;
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // For loading state
 }
 
-export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEditing }: DisciplineActionFormProps) {
+export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: DisciplineActionFormProps) {
   const form = useForm<DisciplineAction>({
     resolver: zodResolver(disciplineActionSchema),
     defaultValues: defaultValues || {
@@ -56,7 +56,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
   });
 
   const handleSubmit = (data: DisciplineAction) => {
-    onSubmit(data);
+    onSubmit(data); // ID logic handled by parent
      if (!isEditing) {
       form.reset();
     }
@@ -72,13 +72,13 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
             <FormItem>
               <FormLabel>Staff Member Involved</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., John Doe" {...field} />
+                <Input placeholder="e.g., John Doe" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
             control={form.control}
             name="dateOfIncident"
@@ -94,6 +94,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
                           "w-full pl-3 text-left font-normal",
                           !field.value && "text-muted-foreground"
                         )}
+                        disabled={isSubmitting}
                       >
                         {field.value ? (
                           format(field.value, "PPP")
@@ -109,7 +110,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
                       mode="single"
                       selected={field.value}
                       onSelect={field.onChange}
-                      disabled={(date) => date > new Date()}
+                      disabled={(date) => date > new Date() || !!isSubmitting}
                       initialFocus
                     />
                   </PopoverContent>
@@ -125,7 +126,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
           render={({ field }) => (
             <FormItem>
               <FormLabel>Type of Action</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isSubmitting}>
                 <FormControl>
                   <SelectTrigger>
                     <SelectValue placeholder="Select type of action" />
@@ -149,13 +150,13 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
             <FormItem>
               <FormLabel>Description of Incident/Breach</FormLabel>
               <FormControl>
-                <Textarea placeholder="Detailed account of what happened..." {...field} rows={5} />
+                <Textarea placeholder="Detailed account of what happened..." {...field} rows={5} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
           control={form.control}
           name="policyBreached"
@@ -163,7 +164,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
             <FormItem>
               <FormLabel>Policy/Regulation Breached (Optional)</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., AAFC Manual of Ground Training, Section 2.3" {...field} />
+                <Input placeholder="e.g., AAFC Manual of Ground Training, Section 2.3" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -177,13 +178,13 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
             <FormItem>
               <FormLabel>Outcome of Action (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="e.g., Staff member counselled, action plan agreed." {...field} rows={3}/>
+                <Textarea placeholder="e.g., Staff member counselled, action plan agreed." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
           control={form.control}
           name="sanctionsApplied"
@@ -191,7 +192,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
             <FormItem>
               <FormLabel>Sanctions Applied (If any, Optional)</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Restricted duties for 1 month" {...field} />
+                <Input placeholder="e.g., Restricted duties for 1 month" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -205,7 +206,7 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
             <FormItem>
               <FormLabel>Appeal Process Notes (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Details of any appeal lodged or outcomes..." {...field} rows={2} />
+                <Textarea placeholder="Details of any appeal lodged or outcomes..." {...field} rows={2} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -213,10 +214,13 @@ export function DisciplineActionForm({ onSubmit, defaultValues, onCancel, isEdit
         />
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Record Action"}</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isEditing ? "Save Changes" : "Record Action"}
+          </Button>
         </div>
       </form>
     </Form>

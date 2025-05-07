@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info, Paperclip } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info, Paperclip, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,7 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter, // Ensure DialogFooter is imported
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -46,66 +46,188 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Meeting } from "./meeting-schema";
+import type { Meeting, MeetingFormData } from "./meeting-schema"; // MeetingFormData for form
 import { MeetingForm } from "./components/meeting-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge"; 
+import { Badge } from "@/components/ui/badge";
 import jsPDF from 'jspdf';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { useToast } from "@/hooks/use-toast";
+import { convertFileToDataUrl } from "@/lib/utils";
 
 
-export const initialMeetings: Meeting[] = [
-  {
-    id: "m1",
-    title: "Weekly Sync",
-    date: new Date("2024-07-01T10:00:00Z"),
-    attendees: "John Doe, Jane Smith, Alice Williams",
-    agendaNotes: "1. Project Updates\n2. Blockers\n3. Next Steps",
-    discussionPoints: "Discussed progress on Project Phoenix. Jane needs access to new API.",
-    decisionsMade: "Grant Jane API access. John to follow up on deployment.",
-    actionItemsText: "- John: Follow up on deployment (ASAP)\n- Jane: Integrate new API (by EOW)"
-  },
-  {
-    id: "m2",
-    title: "Q3 Planning",
-    date: new Date("2024-06-15T14:00:00Z"),
-    attendees: "Alice Brown, Bob Green, Charlie Black, Jane Smith",
-    agendaNotes: "1. Review Q2 Performance\n2. Q3 Goals\n3. Resource Allocation",
-    discussionPoints: "Q2 targets mostly met. Discussed new initiatives for Q3.",
-    decisionsMade: "Finalize Q3 roadmap by end of week.",
-    actionItemsText: "- Alice: Draft Q3 roadmap (by EOD Wednesday)"
-  }
-];
+const MEETINGS_QUERY_KEY = 'meetings';
+
+// Helper to convert Firestore Timestamps to JS Dates in meeting data
+const convertMeetingTimestamps = (data: any): Meeting => {
+  return {
+    ...data,
+    date: data.date instanceof Timestamp ? data.date.toDate() : data.date,
+  };
+};
+
+// --- Fetch Meetings ---
+async function fetchMeetings(): Promise<Meeting[]> {
+  const meetingsCollectionRef = collection(db, 'meetings');
+  const q = query(meetingsCollectionRef, orderBy('date', 'desc'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...convertMeetingTimestamps(doc.data()),
+  })) as Meeting[];
+}
+
+// --- Add Meeting ---
+async function addMeeting(newMeetingData: Omit<Meeting, 'id'>): Promise<string> {
+  const meetingsCollectionRef = collection(db, 'meetings');
+  const dataToSave = {
+    ...newMeetingData,
+    date: Timestamp.fromDate(newMeetingData.date), // Convert JS Date to Firestore Timestamp
+  };
+  const docRef = await addDoc(meetingsCollectionRef, dataToSave);
+  return docRef.id;
+}
+
+// --- Update Meeting ---
+async function updateMeeting(updatedMeeting: Meeting): Promise<void> {
+  if (!updatedMeeting.id) throw new Error("Meeting ID is required for update.");
+  const meetingDocRef = doc(db, 'meetings', updatedMeeting.id);
+  const { id, ...dataToUpdate } = updatedMeeting;
+  const dataToSave = {
+    ...dataToUpdate,
+    date: Timestamp.fromDate(dataToUpdate.date),
+  };
+  await updateDoc(meetingDocRef, dataToSave);
+}
+
+// --- Delete Meeting ---
+async function deleteMeeting(meetingId: string): Promise<void> {
+  if (!meetingId) throw new Error("Meeting ID is required for deletion.");
+  const meetingDocRef = doc(db, 'meetings', meetingId);
+  await deleteDoc(meetingDocRef);
+}
 
 
 export default function MeetingsPage() {
-  const [meetingsList, setMeetingsList] = React.useState<Meeting[]>(initialMeetings);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: meetingsList = [], isLoading, error } = useQuery<Meeting[], Error>({
+    queryKey: [MEETINGS_QUERY_KEY],
+    queryFn: fetchMeetings,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  const addMeetingMutation = useMutation<string, Error, Omit<Meeting, 'id'>>({
+    mutationFn: addMeeting,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [MEETINGS_QUERY_KEY] });
+      setIsFormOpen(false);
+      toast({ title: "Success", description: "Meeting record added." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to add meeting: ${err.message}` });
+    }
+  });
+
+  const updateMeetingMutation = useMutation<void, Error, Meeting>({
+    mutationFn: updateMeeting,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [MEETINGS_QUERY_KEY] });
+      queryClient.setQueryData<Meeting[]>([MEETINGS_QUERY_KEY], (oldData) =>
+         oldData?.map((m) => (m.id === variables.id ? variables : m))
+       );
+      setIsFormOpen(false);
+      setEditingMeeting(null);
+      toast({ title: "Success", description: "Meeting record updated." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to update meeting: ${err.message}` });
+    }
+  });
+
+  const deleteMeetingMutation = useMutation<void, Error, string>({
+    mutationFn: deleteMeeting,
+    onSuccess: (_, meetingId) => {
+      queryClient.invalidateQueries({ queryKey: [MEETINGS_QUERY_KEY] });
+      queryClient.setQueryData<Meeting[]>([MEETINGS_QUERY_KEY], (oldData) =>
+         oldData?.filter((m) => m.id !== meetingId)
+       );
+      setMeetingToDelete(null);
+      toast({ title: "Success", description: "Meeting record deleted." });
+    },
+     onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to delete meeting: ${err.message}` });
+      setMeetingToDelete(null);
+    }
+  });
+
+
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingMeeting, setEditingMeeting] = React.useState<Meeting | null>(null);
   const [meetingToDelete, setMeetingToDelete] = React.useState<Meeting | null>(null);
   const [viewingMeeting, setViewingMeeting] = React.useState<Meeting | null>(null);
 
 
-  const handleAddMeeting = (data: Meeting) => {
-    const newMeeting = { ...data, id: crypto.randomUUID() };
-    setMeetingsList((prev) => [newMeeting, ...prev]); 
-    setIsFormOpen(false);
+  const handleAddOrUpdateMeeting = async (formData: MeetingFormData) => {
+    let agendaDocumentInfo: Partial<Meeting> = {};
+    if (formData.agendaDocumentFile) {
+        try {
+            const { name, dataUrl } = await convertFileToDataUrl(formData.agendaDocumentFile);
+            agendaDocumentInfo = { agendaDocumentFileName: name, agendaDocumentDataUrl: dataUrl };
+        } catch (err) {
+            console.error("Error converting agenda document file:", err);
+            toast({ variant: "destructive", title: "File Error", description: "Could not process agenda document." });
+            // Optionally prevent submission or handle error state
+            return; // Or throw an error to be caught by mutation's onError
+        }
+    } else if (formData.agendaDocumentFileName === undefined && formData.agendaDocumentDataUrl === undefined && editingMeeting) {
+        // File was explicitly removed during edit
+        agendaDocumentInfo = { agendaDocumentFileName: undefined, agendaDocumentDataUrl: undefined };
+    }
+
+
+    const meetingData: Omit<Meeting, 'id'> = {
+      title: formData.title,
+      date: formData.date,
+      attendees: formData.attendees,
+      agendaNotes: formData.agendaNotes,
+      discussionPoints: formData.discussionPoints,
+      decisionsMade: formData.decisionsMade,
+      actionItemsText: formData.actionItemsText,
+      agendaDocumentFileName: agendaDocumentInfo.agendaDocumentFileName !== undefined ? agendaDocumentInfo.agendaDocumentFileName : (editingMeeting ? editingMeeting.agendaDocumentFileName : undefined),
+      agendaDocumentDataUrl: agendaDocumentInfo.agendaDocumentDataUrl !== undefined ? agendaDocumentInfo.agendaDocumentDataUrl : (editingMeeting ? editingMeeting.agendaDocumentDataUrl : undefined),
+    };
+    
+    if (formData.agendaDocumentFile) { // If new file uploaded, it overrides
+        meetingData.agendaDocumentFileName = agendaDocumentInfo.agendaDocumentFileName;
+        meetingData.agendaDocumentDataUrl = agendaDocumentInfo.agendaDocumentDataUrl;
+    } else if (formData.agendaDocumentFileName === undefined && editingMeeting) { // If file was explicitly removed (filename on form is undefined)
+        meetingData.agendaDocumentFileName = undefined;
+        meetingData.agendaDocumentDataUrl = undefined;
+    } else if (editingMeeting && editingMeeting.agendaDocumentFileName && !formData.agendaDocumentFile) { // Keep existing if not removed and no new file
+        meetingData.agendaDocumentFileName = editingMeeting.agendaDocumentFileName;
+        meetingData.agendaDocumentDataUrl = editingMeeting.agendaDocumentDataUrl;
+    }
+
+
+    if (editingMeeting && editingMeeting.id) {
+        updateMeetingMutation.mutate({ ...meetingData, id: editingMeeting.id });
+    } else {
+        addMeetingMutation.mutate(meetingData);
+    }
   };
 
-  const handleUpdateMeeting = (data: Meeting) => {
-    setMeetingsList((prev) =>
-      prev.map((meeting) => (meeting.id === data.id ? data : meeting))
-    );
-    setIsFormOpen(false);
-    setEditingMeeting(null);
-  };
 
   const handleEdit = (meeting: Meeting) => {
     setEditingMeeting(meeting);
     setViewingMeeting(null);
     setIsFormOpen(true);
   };
-  
+
   const handleViewDetails = (meeting: Meeting) => {
     setViewingMeeting(meeting);
     setEditingMeeting(null);
@@ -113,9 +235,8 @@ export default function MeetingsPage() {
   };
 
   const handleDeleteConfirm = () => {
-    if (meetingToDelete) {
-      setMeetingsList((prev) => prev.filter((meeting) => meeting.id !== meetingToDelete.id));
-      setMeetingToDelete(null);
+    if (meetingToDelete && meetingToDelete.id) {
+      deleteMeetingMutation.mutate(meetingToDelete.id);
     }
   };
 
@@ -134,7 +255,7 @@ export default function MeetingsPage() {
 
     const addTextSection = (title: string, text?: string) => {
       if (!text || text.trim() === "") return;
-      if (yPos > doc.internal.pageSize.getHeight() - margin - sectionSpacing) { // Check space before adding section
+      if (yPos > doc.internal.pageSize.getHeight() - margin - sectionSpacing - 20) { // Added buffer for section
         doc.addPage();
         yPos = margin;
       }
@@ -142,14 +263,14 @@ export default function MeetingsPage() {
       doc.setFont(undefined, 'bold');
       doc.text(title, margin, yPos);
       yPos += lineSpacing;
-      
+
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
       const lines = doc.splitTextToSize(text, maxLineWidth - indent);
       doc.text(lines, margin + indent, yPos);
-      yPos += lines.length * (lineSpacing * 0.8) + sectionSpacing * 0.7; 
+      yPos += lines.length * (lineSpacing * 0.8) + sectionSpacing * 0.7;
     };
-    
+
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
     doc.text(`Meeting Minutes: ${meeting.title}`, margin, yPos);
@@ -165,7 +286,7 @@ export default function MeetingsPage() {
     addTextSection("Discussion Points:", meeting.discussionPoints);
     addTextSection("Decisions Made:", meeting.decisionsMade);
     addTextSection("Action Items:", meeting.actionItemsText);
-    
+
     doc.save(filename);
   };
 
@@ -174,7 +295,7 @@ export default function MeetingsPage() {
     setViewingMeeting(null);
     setIsFormOpen(true);
   };
-  
+
   const closeForm = () => {
     setEditingMeeting(null);
     setIsFormOpen(false);
@@ -196,19 +317,33 @@ export default function MeetingsPage() {
                 <CardDescription>Record and document meeting minutes, action items, and decisions efficiently.</CardDescription>
                 </div>
             </div>
-            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-              <PlusCircle className="mr-2 h-5 w-5" /> Log New Meeting Record
+            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addMeetingMutation.isPending}>
+              {addMeetingMutation.isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+              Log New Meeting Record
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {meetingsList.length === 0 ? (
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading meeting records...</p>
+            </div>
+          )}
+          {error && !isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+              <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Meetings</h3>
+              <p className="text-destructive mb-4">{error.message}</p>
+            </div>
+          )}
+          {!isLoading && !error && meetingsList.length === 0 ? (
              <div className="flex flex-col items-center justify-center py-12 text-center">
                 <FileText className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Meeting Records Yet</h3>
                 <p className="text-muted-foreground mb-4">Click &quot;Log New Meeting Record&quot; to get started.</p>
              </div>
-          ) : (
+          ) : !isLoading && !error && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -227,22 +362,22 @@ export default function MeetingsPage() {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateMeetingMutation.isPending || deleteMeetingMutation.isPending}>
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                           <DropdownMenuItem onClick={() => handleViewDetails(meeting)}>
+                           <DropdownMenuItem onClick={() => handleViewDetails(meeting)} disabled={updateMeetingMutation.isPending || deleteMeetingMutation.isPending}>
                             <Info className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(meeting)}>
+                          <DropdownMenuItem onClick={() => handleEdit(meeting)} disabled={updateMeetingMutation.isPending || deleteMeetingMutation.isPending}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleExportMinutesAsPdf(meeting)}>
+                          <DropdownMenuItem onClick={() => handleExportMinutesAsPdf(meeting)} disabled={updateMeetingMutation.isPending || deleteMeetingMutation.isPending}>
                             <Download className="mr-2 h-4 w-4" />
                             Export as PDF
                           </DropdownMenuItem>
@@ -250,6 +385,7 @@ export default function MeetingsPage() {
                           <DropdownMenuItem
                             onClick={() => setMeetingToDelete(meeting)}
                             className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            disabled={updateMeetingMutation.isPending || deleteMeetingMutation.isPending}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -263,13 +399,13 @@ export default function MeetingsPage() {
             </Table>
           )}
         </CardContent>
-         {meetingsList.length > 0 && (
+         {!isLoading && !error && meetingsList.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground">
             Showing {meetingsList.length} of {meetingsList.length} meeting records.
           </CardFooter>
         )}
       </Card>
-      
+
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
         if (!isOpen) closeForm(); else setIsFormOpen(true);
       }}>
@@ -287,10 +423,11 @@ export default function MeetingsPage() {
           <ScrollArea className="max-h-[70vh] p-1">
             <div className="py-4 pr-4">
                 <MeetingForm
-                onSubmit={editingMeeting ? handleUpdateMeeting : handleAddMeeting}
-                defaultValues={editingMeeting || undefined}
-                onCancel={closeForm}
-                isEditing={!!editingMeeting}
+                  onSubmit={handleAddOrUpdateMeeting}
+                  defaultValues={editingMeeting || undefined}
+                  onCancel={closeForm}
+                  isEditing={!!editingMeeting}
+                  isSubmitting={editingMeeting ? updateMeetingMutation.isPending : addMeetingMutation.isPending}
                 />
             </div>
           </ScrollArea>
@@ -351,10 +488,12 @@ export default function MeetingsPage() {
                       if (viewingMeeting) {
                         handleEdit(viewingMeeting);
                       }
-                    }}>
+                    }}
+                    disabled={updateMeetingMutation.isPending}
+                    >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewDialog}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={updateMeetingMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -370,13 +509,15 @@ export default function MeetingsPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setMeetingToDelete(null)}>
+              <AlertDialogCancel onClick={() => setMeetingToDelete(null)} disabled={deleteMeetingMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                disabled={deleteMeetingMutation.isPending}
               >
+                {deleteMeetingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -416,10 +557,13 @@ export default function MeetingsPage() {
               <Download className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
               Search, filter, and export meeting minutes (PDF export implemented) and action item lists.
             </li>
+             <li className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+              Integration with Staff Management for selecting attendees from a list.
+            </li>
           </ul>
         </CardContent>
       </Card>
     </div>
   );
 }
-

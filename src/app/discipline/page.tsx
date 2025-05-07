@@ -1,9 +1,8 @@
 
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Gavel, FileSignature, UserX, Archive, ShieldAlert, Edit3, Info, UploadCloud, ListChecks, MessageSquareText } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Gavel, FileSignature, UserX, Archive, ShieldAlert, Edit3, Info, UploadCloud, ListChecks, MessageSquareText, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -54,58 +53,167 @@ import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { useToast } from "@/hooks/use-toast";
+
+const ACTIONS_QUERY_KEY = 'disciplineActions';
+const CONVERSATIONS_QUERY_KEY = 'recordsOfConversation';
+
+// --- Helper to convert Firestore Timestamps to JS Dates ---
+const convertActionTimestamps = (data: any): DisciplineAction => ({
+  ...data,
+  dateOfIncident: data.dateOfIncident instanceof Timestamp ? data.dateOfIncident.toDate() : data.dateOfIncident,
+});
+
+const convertConversationTimestamps = (data: any): RecordOfConversation => ({
+  ...data,
+  interviewDate: data.interviewDate instanceof Timestamp ? data.interviewDate.toDate() : data.interviewDate,
+});
 
 
-export const initialDisciplineActions: DisciplineAction[] = [
-  {
-    id: "da1",
-    staffName: "John Doe", 
-    dateOfIncident: new Date("2024-05-10"),
-    typeOfAction: "Informal Discussion",
-    incidentDescription: "Late arrival to parade night without prior notification.",
-    policyBreached: "Squadron Standing Orders - Punctuality",
-    outcome: "Counseled on importance of punctuality and communication.",
-  },
-  {
-    id: "da2",
-    staffName: "Jane Smith", 
-    dateOfIncident: new Date("2024-03-15"),
-    typeOfAction: "Formal Warning",
-    incidentDescription: "Failure to follow safety procedures during a fieldcraft exercise, resulting in minor equipment damage.",
-    policyBreached: "AAFC WHS Manual - Section 4.2",
-    sanctionsApplied: "Temporary removal from supervising field activities until re-assessment.",
-    appealProcessNotes: "No appeal lodged."
-  },
-];
+// --- Discipline Action Firestore Functions ---
+async function fetchDisciplineActions(): Promise<DisciplineAction[]> {
+  const collectionRef = collection(db, 'disciplineActions');
+  const q = query(collectionRef, orderBy('dateOfIncident', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...convertActionTimestamps(doc.data()) })) as DisciplineAction[];
+}
 
-export const initialRecordsOfConversation: RecordOfConversation[] = [
-    {
-        id: "roc1",
-        referenceNumber: "CEA2024/003",
-        interviewingOfficerName: "FLTLT Robert Wing",
-        interviewingOfficerPosition: "Wing XSO",
-        interviewDate: new Date("2024-07-01"),
-        interviewTime: "10:00",
-        interviewType: "In Person",
-        subject: "Cadet Welfare Concern - CPL Bloggs",
-        personsPresent: "FLTLT Wing, PLTOFF Smith (SQN CO)",
-        conversationWithName: "PLTOFF Smith",
-        conversationWithDeptUnitFirm: "123 Squadron",
-        background: "Follow-up to an email regarding CPL Bloggs's disengagement from activities.",
-        conversation: "Discussed potential underlying issues, strategies for re-engagement, and available support resources. PLTOFF Smith outlined steps already taken.",
-        actionsTaken: "Wing XSO to provide contact for specialist support services. SQN CO to arrange a low-pressure chat with CPL Bloggs.",
-        followUp: "Check-in with SQN CO in 2 weeks."
-    }
-]
+async function addDisciplineAction(newData: Omit<DisciplineAction, 'id'>): Promise<string> {
+  const collectionRef = collection(db, 'disciplineActions');
+  const dataToSave = { ...newData, dateOfIncident: Timestamp.fromDate(newData.dateOfIncident) };
+  const docRef = await addDoc(collectionRef, dataToSave);
+  return docRef.id;
+}
+
+async function updateDisciplineAction(updatedData: DisciplineAction): Promise<void> {
+  if (!updatedData.id) throw new Error("ID is required for update.");
+  const docRef = doc(db, 'disciplineActions', updatedData.id);
+  const { id, ...dataToUpdate } = updatedData;
+  await updateDoc(docRef, { ...dataToUpdate, dateOfIncident: Timestamp.fromDate(dataToUpdate.dateOfIncident) });
+}
+
+async function deleteDisciplineAction(id: string): Promise<void> {
+  if (!id) throw new Error("ID is required for deletion.");
+  await deleteDoc(doc(db, 'disciplineActions', id));
+}
+
+// --- Record of Conversation Firestore Functions ---
+async function fetchRecordsOfConversation(): Promise<RecordOfConversation[]> {
+  const collectionRef = collection(db, 'recordsOfConversation');
+  const q = query(collectionRef, orderBy('interviewDate', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...convertConversationTimestamps(doc.data()) })) as RecordOfConversation[];
+}
+
+async function addRecordOfConversation(newData: Omit<RecordOfConversation, 'id'>): Promise<string> {
+  const collectionRef = collection(db, 'recordsOfConversation');
+  const dataToSave = { ...newData, interviewDate: Timestamp.fromDate(newData.interviewDate) };
+  const docRef = await addDoc(collectionRef, dataToSave);
+  return docRef.id;
+}
+
+async function updateRecordOfConversation(updatedData: RecordOfConversation): Promise<void> {
+  if (!updatedData.id) throw new Error("ID is required for update.");
+  const docRef = doc(db, 'recordsOfConversation', updatedData.id);
+  const { id, ...dataToUpdate } = updatedData;
+  await updateDoc(docRef, { ...dataToUpdate, interviewDate: Timestamp.fromDate(dataToUpdate.interviewDate) });
+}
+
+async function deleteRecordOfConversation(id: string): Promise<void> {
+  if (!id) throw new Error("ID is required for deletion.");
+  await deleteDoc(doc(db, 'recordsOfConversation', id));
+}
+
 
 export default function DisciplinePage() {
-  const [actionsList, setActionsList] = React.useState<DisciplineAction[]>(initialDisciplineActions);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // --- React Query for Discipline Actions ---
+  const { data: actionsList = [], isLoading: isLoadingActions, error: errorActions } = useQuery<DisciplineAction[], Error>({
+    queryKey: [ACTIONS_QUERY_KEY],
+    queryFn: fetchDisciplineActions,
+  });
+  const addActionMutation = useAddMutation(addDisciplineAction, ACTIONS_QUERY_KEY, "Discipline action recorded.");
+  const updateActionMutation = useUpdateMutation(updateDisciplineAction, ACTIONS_QUERY_KEY, "Discipline action updated.");
+  const deleteActionMutation = useDeleteMutation(deleteDisciplineAction, ACTIONS_QUERY_KEY, "Discipline action deleted.");
+
+  // --- React Query for Records of Conversation ---
+  const { data: conversationsList = [], isLoading: isLoadingConversations, error: errorConversations } = useQuery<RecordOfConversation[], Error>({
+    queryKey: [CONVERSATIONS_QUERY_KEY],
+    queryFn: fetchRecordsOfConversation,
+  });
+  const addConversationMutation = useAddMutation(addRecordOfConversation, CONVERSATIONS_QUERY_KEY, "Record of conversation created.");
+  const updateConversationMutation = useUpdateMutation(updateRecordOfConversation, CONVERSATIONS_QUERY_KEY, "Record of conversation updated.");
+  const deleteConversationMutation = useDeleteMutation(deleteRecordOfConversation, CONVERSATIONS_QUERY_KEY, "Record of conversation deleted.");
+
+  // --- Generic Mutation Hooks (to reduce boilerplate) ---
+  function useAddMutation<TData extends { id?: string }, TVariables extends Omit<TData, 'id'>>(
+    mutationFn: (data: TVariables) => Promise<string>,
+    queryKey: string[],
+    successMessage: string
+  ) {
+    return useMutation<string, Error, TVariables>({
+      mutationFn,
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey });
+        toast({ title: "Success", description: successMessage });
+      },
+      onError: (err) => {
+        toast({ variant: "destructive", title: "Error", description: err.message });
+      },
+    });
+  }
+
+  function useUpdateMutation<TData extends { id?: string }>(
+    mutationFn: (data: TData) => Promise<void>,
+    queryKey: string[],
+    successMessage: string
+  ) {
+    return useMutation<void, Error, TData>({
+      mutationFn,
+      onSuccess: (_, variables) => {
+        queryClient.invalidateQueries({ queryKey });
+        queryClient.setQueryData<TData[]>(queryKey, (oldData) =>
+          oldData?.map((item) => (item.id === variables.id ? variables : item))
+        );
+        toast({ title: "Success", description: successMessage });
+      },
+      onError: (err) => {
+        toast({ variant: "destructive", title: "Error", description: err.message });
+      },
+    });
+  }
+
+ function useDeleteMutation(
+    mutationFn: (id: string) => Promise<void>,
+    queryKey: string[],
+    successMessage: string
+  ) {
+    return useMutation<void, Error, string>({
+      mutationFn,
+      onSuccess: (_, id) => {
+        queryClient.invalidateQueries({ queryKey });
+        queryClient.setQueryData<Array<{id?: string}>>(queryKey, (oldData) =>
+          oldData?.filter((item) => item.id !== id)
+        );
+        toast({ title: "Success", description: successMessage });
+      },
+      onError: (err) => {
+        toast({ variant: "destructive", title: "Error", description: err.message });
+      },
+    });
+  }
+
+
   const [isActionFormOpen, setIsActionFormOpen] = React.useState(false);
   const [editingAction, setEditingAction] = React.useState<DisciplineAction | null>(null);
   const [actionToDelete, setActionToDelete] = React.useState<DisciplineAction | null>(null);
   const [viewingAction, setViewingAction] = React.useState<DisciplineAction | null>(null);
 
-  const [conversationsList, setConversationsList] = React.useState<RecordOfConversation[]>(initialRecordsOfConversation);
   const [isConversationFormOpen, setIsConversationFormOpen] = React.useState(false);
   const [editingConversation, setEditingConversation] = React.useState<RecordOfConversation | null>(null);
   const [conversationToDelete, setConversationToDelete] = React.useState<RecordOfConversation | null>(null);
@@ -114,15 +222,15 @@ export default function DisciplinePage() {
 
   // Discipline Action Handlers
   const handleAddAction = (data: DisciplineAction) => {
-    const newAction = { ...data, id: crypto.randomUUID() };
-    setActionsList((prev) => [newAction, ...prev]);
+    const { id, ...newData } = data;
+    addActionMutation.mutate(newData);
     setIsActionFormOpen(false);
   };
 
   const handleUpdateAction = (data: DisciplineAction) => {
-    setActionsList((prev) =>
-      prev.map((action) => (action.id === data.id ? data : action))
-    );
+    if (editingAction && editingAction.id) {
+      updateActionMutation.mutate({ ...data, id: editingAction.id });
+    }
     setIsActionFormOpen(false);
     setEditingAction(null);
   };
@@ -140,10 +248,10 @@ export default function DisciplinePage() {
   };
 
   const handleDeleteActionConfirm = () => {
-    if (actionToDelete) {
-      setActionsList((prev) => prev.filter((action) => action.id !== actionToDelete.id));
-      setActionToDelete(null);
+    if (actionToDelete && actionToDelete.id) {
+      deleteActionMutation.mutate(actionToDelete.id);
     }
+    setActionToDelete(null);
   };
 
   const openActionFormForNew = () => {
@@ -151,7 +259,7 @@ export default function DisciplinePage() {
     setViewingAction(null);
     setIsActionFormOpen(true);
   };
-  
+
   const closeActionForm = () => {
     setEditingAction(null);
     setIsActionFormOpen(false);
@@ -163,15 +271,15 @@ export default function DisciplinePage() {
 
   // Record of Conversation Handlers
   const handleAddConversation = (data: RecordOfConversation) => {
-    const newConversation = { ...data, id: crypto.randomUUID() };
-    setConversationsList((prev) => [newConversation, ...prev]);
+    const {id, ...newData} = data;
+    addConversationMutation.mutate(newData);
     setIsConversationFormOpen(false);
   };
 
   const handleUpdateConversation = (data: RecordOfConversation) => {
-    setConversationsList((prev) =>
-      prev.map((roc) => (roc.id === data.id ? data : roc))
-    );
+    if (editingConversation && editingConversation.id) {
+      updateConversationMutation.mutate({ ...data, id: editingConversation.id });
+    }
     setIsConversationFormOpen(false);
     setEditingConversation(null);
   };
@@ -189,10 +297,10 @@ export default function DisciplinePage() {
   };
 
   const handleDeleteConversationConfirm = () => {
-    if (conversationToDelete) {
-      setConversationsList((prev) => prev.filter((roc) => roc.id !== conversationToDelete.id));
-      setConversationToDelete(null);
+    if (conversationToDelete && conversationToDelete.id) {
+      deleteConversationMutation.mutate(conversationToDelete.id);
     }
+    setConversationToDelete(null);
   };
 
   const openConversationFormForNew = () => {
@@ -200,7 +308,7 @@ export default function DisciplinePage() {
     setViewingConversation(null);
     setIsConversationFormOpen(true);
   };
-  
+
   const closeConversationForm = () => {
     setEditingConversation(null);
     setIsConversationFormOpen(false);
@@ -234,21 +342,23 @@ export default function DisciplinePage() {
                 <div className="flex justify-between items-start sm:items-center">
                     <div>
                         <CardTitle className="text-xl">Discipline Actions List</CardTitle>
-                        <CardDescription>Record conversations, document breaches of conduct, and manage disciplinary processes.</CardDescription>
+                        <CardDescription>Record breaches of conduct and manage disciplinary processes.</CardDescription>
                     </div>
-                    <Button onClick={openActionFormForNew} size="default" className="shrink-0">
-                    <PlusCircle className="mr-2 h-5 w-5" /> Record New Action
+                    <Button onClick={openActionFormForNew} size="default" className="shrink-0" disabled={addActionMutation.isPending}>
+                    {addActionMutation.isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />} Record New Action
                     </Button>
                 </div>
                 </CardHeader>
                 <CardContent>
-                {actionsList.length === 0 ? (
+                {isLoadingActions && <div className="flex justify-center py-12"><Loader2 className="h-10 w-10 text-primary animate-spin" /></div>}
+                {errorActions && <div className="text-destructive text-center py-12">Error loading actions: {errorActions.message}</div>}
+                {!isLoadingActions && !errorActions && actionsList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                         <Gavel className="h-16 w-16 text-muted-foreground mb-4" />
                         <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Discipline Actions Recorded</h3>
                         <p className="text-muted-foreground mb-4">Click &quot;Record New Action&quot; to get started.</p>
                     </div>
-                ) : (
+                ) : !isLoadingActions && !errorActions && (
                     <Table>
                     <TableHeader>
                         <TableRow>
@@ -273,18 +383,18 @@ export default function DisciplinePage() {
                             <TableCell className="text-right">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
+                                <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateActionMutation.isPending || deleteActionMutation.isPending}>
                                     <span className="sr-only">Open menu</span>
                                     <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Options</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => handleViewActionDetails(action)}>
+                                <DropdownMenuItem onClick={() => handleViewActionDetails(action)} disabled={updateActionMutation.isPending || deleteActionMutation.isPending}>
                                     <Info className="mr-2 h-4 w-4" />
                                     View Details
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEditAction(action)}>
+                                <DropdownMenuItem onClick={() => handleEditAction(action)} disabled={updateActionMutation.isPending || deleteActionMutation.isPending}>
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Edit
                                 </DropdownMenuItem>
@@ -292,6 +402,7 @@ export default function DisciplinePage() {
                                 <DropdownMenuItem
                                     onClick={() => setActionToDelete(action)}
                                     className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                    disabled={updateActionMutation.isPending || deleteActionMutation.isPending}
                                 >
                                     <Trash2 className="mr-2 h-4 w-4" />
                                     Delete
@@ -305,7 +416,7 @@ export default function DisciplinePage() {
                     </Table>
                 )}
                 </CardContent>
-                {actionsList.length > 0 && (
+                {!isLoadingActions && !errorActions && actionsList.length > 0 && (
                 <CardFooter className="text-xs text-muted-foreground">
                     Showing {actionsList.length} of {actionsList.length} discipline records.
                 </CardFooter>
@@ -321,19 +432,21 @@ export default function DisciplinePage() {
                             <CardTitle className="text-xl">Records of Conversation List</CardTitle>
                             <CardDescription>Document formal interviews and conversations.</CardDescription>
                         </div>
-                        <Button onClick={openConversationFormForNew} size="default" className="shrink-0">
-                            <PlusCircle className="mr-2 h-5 w-5" /> New RoC
+                        <Button onClick={openConversationFormForNew} size="default" className="shrink-0" disabled={addConversationMutation.isPending}>
+                            {addConversationMutation.isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />} New RoC
                         </Button>
                     </div>
                 </CardHeader>
                 <CardContent>
-                {conversationsList.length === 0 ? (
+                {isLoadingConversations && <div className="flex justify-center py-12"><Loader2 className="h-10 w-10 text-primary animate-spin" /></div>}
+                {errorConversations && <div className="text-destructive text-center py-12">Error loading records: {errorConversations.message}</div>}
+                {!isLoadingConversations && !errorConversations && conversationsList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                         <MessageSquareText className="h-16 w-16 text-muted-foreground mb-4" />
                         <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Records of Conversation</h3>
                         <p className="text-muted-foreground mb-4">Click &quot;New RoC&quot; to get started.</p>
                     </div>
-                ) : (
+                ) : !isLoadingConversations && !errorConversations && (
                     <Table>
                     <TableHeader>
                         <TableRow>
@@ -354,23 +467,24 @@ export default function DisciplinePage() {
                             <TableCell className="text-right">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
+                                <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateConversationMutation.isPending || deleteConversationMutation.isPending}>
                                     <span className="sr-only">Open menu</span>
                                     <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Options</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => handleViewConversationDetails(roc)}>
+                                <DropdownMenuItem onClick={() => handleViewConversationDetails(roc)} disabled={updateConversationMutation.isPending || deleteConversationMutation.isPending}>
                                     <Info className="mr-2 h-4 w-4" /> View Details
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEditConversation(roc)}>
+                                <DropdownMenuItem onClick={() => handleEditConversation(roc)} disabled={updateConversationMutation.isPending || deleteConversationMutation.isPending}>
                                     <Pencil className="mr-2 h-4 w-4" /> Edit
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                     onClick={() => setConversationToDelete(roc)}
                                     className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                    disabled={updateConversationMutation.isPending || deleteConversationMutation.isPending}
                                 >
                                     <Trash2 className="mr-2 h-4 w-4" /> Delete
                                 </DropdownMenuItem>
@@ -383,7 +497,7 @@ export default function DisciplinePage() {
                     </Table>
                 )}
                 </CardContent>
-                {conversationsList.length > 0 && (
+                {!isLoadingConversations && !errorConversations && conversationsList.length > 0 && (
                 <CardFooter className="text-xs text-muted-foreground">
                     Showing {conversationsList.length} of {conversationsList.length} records of conversation.
                 </CardFooter>
@@ -411,10 +525,11 @@ export default function DisciplinePage() {
           <ScrollArea className="max-h-[70vh] p-1">
             <div className="py-4 pr-4">
                 <DisciplineActionForm
-                onSubmit={editingAction ? handleUpdateAction : handleAddAction}
-                defaultValues={editingAction || undefined}
-                onCancel={closeActionForm}
-                isEditing={!!editingAction}
+                  onSubmit={editingAction ? handleUpdateAction : handleAddAction}
+                  defaultValues={editingAction || undefined}
+                  onCancel={closeActionForm}
+                  isEditing={!!editingAction}
+                  isSubmitting={editingAction ? updateActionMutation.isPending : addActionMutation.isPending}
                 />
             </div>
           </ScrollArea>
@@ -463,14 +578,16 @@ export default function DisciplinePage() {
                     </div>
                 </ScrollArea>
                 <DialogFooter className="pt-4 border-t">
-                    <Button variant="outline" onClick={() => { 
+                    <Button variant="outline" onClick={() => {
                       if (viewingAction) {
-                        handleEditAction(viewingAction); 
+                        handleEditAction(viewingAction);
                       }
-                    }}>
+                    }}
+                    disabled={updateActionMutation.isPending}
+                    >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewActionDialog}>Close</Button>
+                    <Button onClick={closeViewActionDialog} disabled={updateActionMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -486,13 +603,15 @@ export default function DisciplinePage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setActionToDelete(null)}>
+              <AlertDialogCancel onClick={() => setActionToDelete(null)} disabled={deleteActionMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteActionConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                disabled={deleteActionMutation.isPending}
               >
+                {deleteActionMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -504,7 +623,7 @@ export default function DisciplinePage() {
       <Dialog open={isConversationFormOpen} onOpenChange={(isOpen) => {
         if (!isOpen) closeConversationForm(); else setIsConversationFormOpen(true);
       }}>
-        <DialogContent className="sm:max-w-3xl"> {/* Wider for RoC form */}
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
               {editingConversation ? "Edit Record of Conversation" : "New Record of Conversation"}
@@ -518,10 +637,11 @@ export default function DisciplinePage() {
           <ScrollArea className="max-h-[70vh] p-1">
             <div className="py-4 pr-4">
                 <RecordOfConversationForm
-                onSubmit={editingConversation ? handleUpdateConversation : handleAddConversation}
-                defaultValues={editingConversation || undefined}
-                onCancel={closeConversationForm}
-                isEditing={!!editingConversation}
+                  onSubmit={editingConversation ? handleUpdateConversation : handleAddConversation}
+                  defaultValues={editingConversation || undefined}
+                  onCancel={closeConversationForm}
+                  isEditing={!!editingConversation}
+                  isSubmitting={editingConversation ? updateConversationMutation.isPending : addConversationMutation.isPending}
                 />
             </div>
           </ScrollArea>
@@ -546,7 +666,7 @@ export default function DisciplinePage() {
                         {viewingConversation.conversationWithSquadron && <p className="text-sm"><strong>Squadron:</strong> {viewingConversation.conversationWithSquadron}</p>}
                         {viewingConversation.conversationWithTelephone && <p className="text-sm"><strong>Telephone:</strong> {viewingConversation.conversationWithTelephone}</p>}
                         {viewingConversation.personsPresent && <div><h3 className="font-semibold text-sm mb-1">Persons Present</h3><p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingConversation.personsPresent}</p></div>}
-                        
+
                         <div><h3 className="font-semibold text-sm mb-1">Background</h3><p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingConversation.background}</p></div>
                         <div><h3 className="font-semibold text-sm mb-1">Conversation Details</h3><p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingConversation.conversation}</p></div>
                         {viewingConversation.actionsTaken && <div><h3 className="font-semibold text-sm mb-1">Actions Taken</h3><p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingConversation.actionsTaken}</p></div>}
@@ -555,14 +675,16 @@ export default function DisciplinePage() {
                     </div>
                 </ScrollArea>
                 <DialogFooter className="pt-4 border-t">
-                    <Button variant="outline" onClick={() => { 
+                    <Button variant="outline" onClick={() => {
                       if (viewingConversation) {
-                        handleEditConversation(viewingConversation); 
+                        handleEditConversation(viewingConversation);
                       }
-                    }}>
+                    }}
+                    disabled={updateConversationMutation.isPending}
+                    >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewConversationDialog}>Close</Button>
+                    <Button onClick={closeViewConversationDialog} disabled={updateConversationMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -578,20 +700,22 @@ export default function DisciplinePage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setConversationToDelete(null)}>
+              <AlertDialogCancel onClick={() => setConversationToDelete(null)} disabled={deleteConversationMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConversationConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                disabled={deleteConversationMutation.isPending}
               >
+                {deleteConversationMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       )}
-      
+
       <Card className="shadow-sm mt-8">
         <CardHeader>
              <div className="flex items-center gap-3">
@@ -634,5 +758,3 @@ export default function DisciplinePage() {
     </div>
   );
 }
-
-

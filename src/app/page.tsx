@@ -5,23 +5,78 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CalendarClock, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Users } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Users, Loader2 } from "lucide-react";
 import { addYears, isBefore, differenceInDays, format, addDays, isAfter } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
-import { initialStaff, RANKS } from "./staff/page";
+// import { initialStaff } from "./staff/page"; // Use fetched data
 import type { TrainingLog } from "./training/training-schema";
-import { initialTrainingLogs } from "./training/page";
+// import { initialTrainingLogs } from "./training/page"; // Use fetched data
 import { COMPLIANCE_CRITERIA_CONFIG, type StaffComplianceReport, type ComplianceCriterionCheck } from "./reporting/reporting-schema";
 import type { Meeting } from "./meetings/meeting-schema";
-import { initialMeetings } from "./meetings/page";
+// import { initialMeetings } from "./meetings/page"; // No longer used directly
 import type { SafetyAudit, AuditFinding } from "./audits/audit-schema";
-import { initialAudits } from "./audits/page";
+// import { initialAudits } from "./audits/page"; // Use fetched data
 import type { SquadronVisit, VisitActionItem } from "./squadron-visits/squadron-visit-schema";
-import { initialSquadronVisits } from "./squadron-visits/page";
+// import { initialSquadronVisits } from "./squadron-visits/page"; // Use fetched data
 
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"; 
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { useStaff } from "@/hooks/useStaffData"; // Hook for staff data
+import { useQuery } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+
+// --- Fetch Training Logs (similar to training page, simplified for dashboard) ---
+async function fetchTrainingLogs(): Promise<TrainingLog[]> {
+  const collectionRef = collection(db, 'trainingLogs'); // Assuming 'trainingLogs' collection
+  const q = query(collectionRef, orderBy('completionDate', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    completionDate: (doc.data().completionDate as Timestamp).toDate(),
+    // Handle potential certificate data (might not be needed for dashboard calc)
+  })) as TrainingLog[];
+}
+
+// --- Fetch Audits (similar to audits page) ---
+async function fetchAudits(): Promise<SafetyAudit[]> {
+  const auditsCollectionRef = collection(db, 'safetyAudits');
+  const q = query(auditsCollectionRef, orderBy('auditDate', 'desc'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => {
+     const data = doc.data();
+     return {
+        id: doc.id,
+        ...data,
+        auditDate: (data.auditDate as Timestamp).toDate(),
+        findings: data.findings?.map((finding: any) => ({
+          ...finding,
+          dueDate: finding.dueDate instanceof Timestamp ? finding.dueDate.toDate() : finding.dueDate,
+        })) || [],
+      }
+  }) as SafetyAudit[];
+}
+
+// --- Fetch Squadron Visits (similar to visits page) ---
+async function fetchVisits(): Promise<SquadronVisit[]> {
+  const collectionRef = collection(db, 'squadronVisits');
+  const q = query(collectionRef, orderBy('visitDate', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+        id: doc.id,
+        ...data,
+        visitDate: (data.visitDate as Timestamp).toDate(),
+        actionItems: data.actionItems?.map((item: any) => ({
+        ...item,
+        dueDate: item.dueDate instanceof Timestamp ? item.dueDate.toDate() : item.dueDate,
+        })) || [],
+    }
+  }) as SquadronVisit[];
+}
 
 
 // Helper function from reporting page (adapted)
@@ -29,8 +84,8 @@ const getStaffIdentifier = (staffMember: StaffMember): string => {
   return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
 };
 
-const getTrainingLogStaffIdentifier = (log: TrainingLog): string => {
-  const matchedStaff = initialStaff.find(sm => sm.rank === log.rank && `${sm.lastName}, ${sm.firstName}` === log.staffName);
+const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[]): string => {
+  const matchedStaff = staffList.find(sm => sm.rank === log.rank && `${sm.lastName}, ${sm.firstName}` === log.staffName);
   if (matchedStaff) {
     return getStaffIdentifier(matchedStaff);
   }
@@ -44,7 +99,8 @@ const processComplianceReportsForDashboard = (
 ): StaffComplianceReport[] => {
   return staffList.map((staff) => {
     const staffId = getStaffIdentifier(staff);
-    const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log) === staffId);
+    // Pass staffList to getTrainingLogStaffIdentifier
+    const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log, staffList) === staffId);
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
       const relevantLogs = memberLogs
@@ -67,8 +123,6 @@ const processComplianceReportsForDashboard = (
             details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
           }
         } else { // For criteria without expiry, e.g., WWCC, Psych, CoC if they are one-time checks.
-          // Note: Some of these *do* have real-world expiries not captured by yearsToExpire (e.g. WWCC has its own expiry date)
-          // This simplified model assumes they are 'met' if a log exists.
           isMet = true;
           details = `Completed: ${format(completionDate, "PP")}`;
         }
@@ -115,87 +169,103 @@ const chartConfig = {
 
 
 export default function DashboardPage() {
+  const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
+  const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
+    queryKey: ['trainingLogsDashboard'],
+    queryFn: fetchTrainingLogs,
+  });
+  const { data: audits = [], isLoading: isLoadingAudits, error: errorAudits } = useQuery<SafetyAudit[], Error>({
+    queryKey: ['safetyAuditsDashboard'],
+    queryFn: fetchAudits,
+  });
+  const { data: visits = [], isLoading: isLoadingVisits, error: errorVisits } = useQuery<SquadronVisit[], Error>({
+    queryKey: ['squadronVisitsDashboard'],
+    queryFn: fetchVisits,
+  });
+
   const [complianceData, setComplianceData] = React.useState<{ compliant: number; nonCompliant: number } | null>(null);
   const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
   const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
 
   React.useEffect(() => {
-    // Process Compliance Data
-    const reports = processComplianceReportsForDashboard(initialStaff, initialTrainingLogs);
-    const compliantCount = reports.filter(r => r.isCompliant).length;
-    const nonCompliantCount = reports.length - compliantCount;
-    setComplianceData({ compliant: compliantCount, nonCompliant: nonCompliantCount });
+    // Only process data once all sources are loaded and ready
+    if (staffList && staffList.length > 0 && trainingLogs && audits && visits) {
+      // Process Compliance Data
+      const reports = processComplianceReportsForDashboard(staffList, trainingLogs);
+      const compliantCount = reports.filter(r => r.isCompliant).length;
+      const nonCompliantCount = reports.length - compliantCount;
+      setComplianceData({ compliant: compliantCount, nonCompliant: nonCompliantCount });
 
-    // Process Expiring Accomplishments
-    const today = new Date();
-    const thirtyDaysFromNow = addDays(today, 30);
-    const expiring: ExpiringAccomplishment[] = [];
+      // Process Expiring Accomplishments
+      const today = new Date();
+      const thirtyDaysFromNow = addDays(today, 30);
+      const expiring: ExpiringAccomplishment[] = [];
 
-    initialTrainingLogs.forEach(log => {
-      COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
-        if (criterion.identifier(log) && criterion.yearsToExpire) {
-          const completionDate = new Date(log.completionDate);
-          const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-          if (isAfter(expiryDate, today) && isBefore(expiryDate, thirtyDaysFromNow)) {
-            const staffMember = initialStaff.find(s => s.rank === log.rank && `${s.lastName}, ${s.firstName}` === log.staffName && s.squadron === log.squadron);
-            expiring.push({
-              staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
-              staffRank: log.rank,
-              squadron: log.squadron,
-              courseName: `${criterion.name} (${log.courseName})`,
-              expiryDate: expiryDate,
-              daysLeft: differenceInDays(expiryDate, today)
-            });
+      trainingLogs.forEach(log => {
+        COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
+          if (criterion.identifier(log) && criterion.yearsToExpire) {
+            const completionDate = new Date(log.completionDate);
+            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+            if (isAfter(expiryDate, today) && isBefore(expiryDate, thirtyDaysFromNow)) {
+              const staffMember = staffList.find(s => s.rank === log.rank && `${s.lastName}, ${s.firstName}` === log.staffName && s.squadron === log.squadron);
+              expiring.push({
+                staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
+                staffRank: log.rank,
+                squadron: log.squadron,
+                courseName: `${criterion.name} (${log.courseName})`,
+                expiryDate: expiryDate,
+                daysLeft: differenceInDays(expiryDate, today)
+              });
+            }
           }
-        }
+        });
       });
-    });
-    setExpiringAccomplishments(expiring.sort((a,b) => a.daysLeft - b.daysLeft));
+      setExpiringAccomplishments(expiring.sort((a,b) => a.daysLeft - b.daysLeft));
 
-    // Process Upcoming Action Items
-    const fourteenDaysFromNow = addDays(today, 14);
-    const actions: UpcomingActionItem[] = [];
+      // Process Upcoming Action Items
+      const fourteenDaysFromNow = addDays(today, 14);
+      const actions: UpcomingActionItem[] = [];
 
-    initialAudits.forEach(audit => {
-      audit.findings?.forEach(finding => {
-        if (finding.dueDate && (finding.status === "Open" || finding.status === "In Progress")) {
-          const dueDate = new Date(finding.dueDate);
-          if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
-            actions.push({
-              id: finding.id || crypto.randomUUID(),
-              description: finding.description,
-              responsible: finding.assignedTo || "Unassigned",
-              dueDate: dueDate,
-              source: `Audit: ${audit.auditTitle}`,
-              sourceId: audit.id || crypto.randomUUID(),
-              daysLeft: differenceInDays(dueDate, today)
-            });
+      audits.forEach(audit => {
+        audit.findings?.forEach(finding => {
+          if (finding.dueDate && (finding.status === "Open" || finding.status === "In Progress")) {
+            const dueDate = new Date(finding.dueDate);
+            if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
+              actions.push({
+                id: finding.id || crypto.randomUUID(),
+                description: finding.description,
+                responsible: finding.assignedTo || "Unassigned",
+                dueDate: dueDate,
+                source: `Audit: ${audit.auditTitle}`,
+                sourceId: audit.id || crypto.randomUUID(),
+                daysLeft: differenceInDays(dueDate, today)
+              });
+            }
           }
-        }
+        });
       });
-    });
 
-    initialSquadronVisits.forEach(visit => {
-      visit.actionItems?.forEach(item => {
-        if (item.dueDate && (item.status === "Open" || item.status === "In Progress")) {
-          const dueDate = new Date(item.dueDate);
-           if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
-            actions.push({
-              id: item.id || crypto.randomUUID(),
-              description: item.description,
-              responsible: item.responsible,
-              dueDate: dueDate,
-              source: `Visit: ${visit.squadronName}`,
-              sourceId: visit.id || crypto.randomUUID(),
-              daysLeft: differenceInDays(dueDate, today)
-            });
+      visits.forEach(visit => {
+        visit.actionItems?.forEach(item => {
+          if (item.dueDate && (item.status === "Open" || item.status === "In Progress")) {
+            const dueDate = new Date(item.dueDate);
+            if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
+              actions.push({
+                id: item.id || crypto.randomUUID(),
+                description: item.description,
+                responsible: item.responsible,
+                dueDate: dueDate,
+                source: `Visit: ${visit.squadronName}`,
+                sourceId: visit.id || crypto.randomUUID(),
+                daysLeft: differenceInDays(dueDate, today)
+              });
+            }
           }
-        }
+        });
       });
-    });
-    setUpcomingActionItems(actions.sort((a,b) => a.daysLeft - b.daysLeft));
-
-  }, []);
+      setUpcomingActionItems(actions.sort((a,b) => a.daysLeft - b.daysLeft));
+    }
+  }, [staffList, trainingLogs, audits, visits]); // Depend on fetched data
 
   const pieData = complianceData
     ? [
@@ -203,6 +273,36 @@ export default function DashboardPage() {
         { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: "hsl(var(--destructive))" },
       ]
     : [];
+
+  const isLoadingAny = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits;
+  const hasError = errorStaff || errorLogs || errorAudits || errorVisits;
+
+  if (isLoadingAny) {
+      return (
+          <div className="flex flex-col items-center justify-center min-h-[60vh]">
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading dashboard data...</p>
+          </div>
+      );
+  }
+
+  if (hasError) {
+      return (
+          <Card className="border-destructive">
+              <CardHeader>
+                  <CardTitle className="text-destructive flex items-center gap-2"><AlertTriangle /> Dashboard Error</CardTitle>
+              </CardHeader>
+              <CardContent>
+                  <p>Failed to load necessary data for the dashboard. Please try again later.</p>
+                  {/* Optionally display specific error messages */}
+                  {errorStaff && <p className="text-xs mt-2">Staff Error: {errorStaff.message}</p>}
+                  {errorLogs && <p className="text-xs mt-2">Training Log Error: {errorLogs.message}</p>}
+                  {errorAudits && <p className="text-xs mt-2">Audit Error: {errorAudits.message}</p>}
+                  {errorVisits && <p className="text-xs mt-2">Visit Error: {errorVisits.message}</p>}
+              </CardContent>
+          </Card>
+      );
+  }
 
   return (
     <div className="space-y-6">
@@ -245,16 +345,6 @@ export default function DashboardPage() {
                         innerRadius={50}
                         strokeWidth={2}
                         labelLine={false}
-                        // label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
-                        //   const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-                        //   const x = cx + radius * Math.cos(-midAngle * (Math.PI / 180));
-                        //   const y = cy + radius * Math.sin(-midAngle * (Math.PI / 180));
-                        //   return ( (pieData[index].value > 0) ?
-                        //     <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize="10px">
-                        //       {`${(percent * 100).toFixed(0)}%`}
-                        //     </text> : null
-                        //   );
-                        // }}
                       >
                         {pieData.map((entry) => (
                           <Cell key={entry.name} fill={entry.fill} />
@@ -266,7 +356,7 @@ export default function DashboardPage() {
                 </ChartContainer>
               </>
             ) : (
-              <p className="text-muted-foreground">Loading compliance data...</p>
+              <p className="text-muted-foreground">Processing compliance data...</p> // Changed from Loading
             )}
           </CardContent>
         </Card>
@@ -351,4 +441,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

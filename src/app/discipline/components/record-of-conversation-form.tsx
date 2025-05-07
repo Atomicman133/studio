@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -30,7 +29,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface RecordOfConversationFormProps {
@@ -38,9 +37,10 @@ interface RecordOfConversationFormProps {
   defaultValues?: Partial<RecordOfConversation>;
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // For loading state
 }
 
-export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, isEditing }: RecordOfConversationFormProps) {
+export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: RecordOfConversationFormProps) {
   const form = useForm<RecordOfConversation>({
     resolver: zodResolver(recordOfConversationSchema),
     defaultValues: defaultValues || {
@@ -65,7 +65,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
   });
 
   const handleSubmit = (data: RecordOfConversation) => {
-    onSubmit(data);
+    onSubmit(data); // ID logic handled by parent
     if (!isEditing) {
       form.reset();
     }
@@ -81,7 +81,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Reference/CEA Incident Number (Optional)</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., CEA2024/001" {...field} />
+                <Input placeholder="e.g., CEA2024/001" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -96,7 +96,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
               <FormItem>
                 <FormLabel>Interviewing Officer</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., FLTLT John Doe" {...field} />
+                  <Input placeholder="e.g., FLTLT John Doe" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -109,7 +109,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
               <FormItem>
                 <FormLabel>Interviewing Officer Position</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., Wing XSO" {...field} />
+                  <Input placeholder="e.g., Wing XSO" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -130,6 +130,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
                       <Button
                         variant={"outline"}
                         className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
+                        disabled={isSubmitting}
                       >
                         {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                         <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -137,7 +138,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
                     </FormControl>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                    <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus disabled={isSubmitting}/>
                   </PopoverContent>
                 </Popover>
                 <FormMessage />
@@ -151,7 +152,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
               <FormItem>
                 <FormLabel>Time</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., 14:30" {...field} />
+                  <Input placeholder="e.g., 14:30" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -163,7 +164,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Interview Type</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isSubmitting}>
                   <FormControl><SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger></FormControl>
                   <SelectContent>
                     <SelectItem value="In Person">In Person</SelectItem>
@@ -175,7 +176,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             )}
           />
         </div>
-        
+
         <FormField
           control={form.control}
           name="subject"
@@ -183,7 +184,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Subject</FormLabel>
               <FormControl>
-                <Input placeholder="Subject of the conversation" {...field} />
+                <Input placeholder="Subject of the conversation" {...field} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -197,13 +198,13 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Persons Present (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="List all persons present..." {...field} rows={2} />
+                <Textarea placeholder="List all persons present..." {...field} rows={2} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <div className="border p-4 rounded-md space-y-4">
             <h3 className="text-lg font-medium">Conversation With</h3>
             <FormField
@@ -213,7 +214,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
                 <FormItem>
                 <FormLabel>Name (including title or rank)</FormLabel>
                 <FormControl>
-                    <Input placeholder="e.g., SGT Jane Citizen" {...field} />
+                    <Input placeholder="e.g., SGT Jane Citizen" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
                 </FormItem>
@@ -226,7 +227,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
                 <FormItem>
                 <FormLabel>Department, Unit, or Firm (inc. address) (Optional)</FormLabel>
                 <FormControl>
-                    <Input placeholder="e.g., 702 SQN, 123 Fake St, Anytown" {...field} />
+                    <Input placeholder="e.g., 702 SQN, 123 Fake St, Anytown" {...field} disabled={isSubmitting}/>
                 </FormControl>
                 <FormMessage />
                 </FormItem>
@@ -240,7 +241,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
                     <FormItem>
                     <FormLabel>Squadron (Optional)</FormLabel>
                     <FormControl>
-                        <Input placeholder="e.g., 702 Squadron" {...field} />
+                        <Input placeholder="e.g., 702 Squadron" {...field} disabled={isSubmitting}/>
                     </FormControl>
                     <FormMessage />
                     </FormItem>
@@ -253,7 +254,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
                     <FormItem>
                     <FormLabel>Telephone Number (Optional)</FormLabel>
                     <FormControl>
-                        <Input placeholder="e.g., 0400123456" {...field} />
+                        <Input placeholder="e.g., 0400123456" {...field} disabled={isSubmitting}/>
                     </FormControl>
                     <FormMessage />
                     </FormItem>
@@ -270,7 +271,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Background</FormLabel>
               <FormControl>
-                <Textarea placeholder="Provide background information leading to this conversation..." {...field} rows={4} />
+                <Textarea placeholder="Provide background information leading to this conversation..." {...field} rows={4} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -284,13 +285,13 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Conversation</FormLabel>
               <FormControl>
-                <Textarea placeholder="Detail the conversation, key points discussed..." {...field} rows={6} />
+                <Textarea placeholder="Detail the conversation, key points discussed..." {...field} rows={6} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
           control={form.control}
           name="actionsTaken"
@@ -298,7 +299,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Actions (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Actions taken or agreed upon..." {...field} rows={3} />
+                <Textarea placeholder="Actions taken or agreed upon..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -312,7 +313,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Questions (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Key questions asked during the conversation..." {...field} rows={3} />
+                <Textarea placeholder="Key questions asked during the conversation..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -326,7 +327,7 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             <FormItem>
               <FormLabel>Follow Up (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Follow-up actions or notes..." {...field} rows={3} />
+                <Textarea placeholder="Follow-up actions or notes..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -334,10 +335,13 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
         />
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Record Conversation"}</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isEditing ? "Save Changes" : "Record Conversation"}
+          </Button>
         </div>
       </form>
     </Form>

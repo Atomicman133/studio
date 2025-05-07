@@ -1,9 +1,8 @@
 
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, ShieldCheck, ListChecks, FilePlus2, Activity, FileText, Edit3, Info, Camera } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, ShieldCheck, ListChecks, FilePlus2, Activity, FileText, Edit3, Info, Camera, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -52,60 +51,144 @@ import { SafetyAuditForm } from "./components/safety-audit-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { useToast } from "@/hooks/use-toast";
 
-export const initialAudits: SafetyAudit[] = [
-  {
-    id: "sa1",
-    auditTitle: "Classroom Safety Check Q2",
-    auditType: "Scheduled Work Area Inspection",
-    auditDate: new Date("2024-04-15"),
-    auditorName: "Jane Smith", // Updated to full name
-    scope: "All classrooms in Training Wing",
-    summary: "Generally good condition. Minor trip hazard identified in Classroom 3.",
-    findings: [
-      { id:"f1", description: "Loose carpet tile near doorway in Classroom 3.", severity: "Medium", recommendedAction: "Secure or replace carpet tile.", assignedTo: "Alice Williams", dueDate: new Date("2024-04-22"), status: "Resolved" }
-    ]
-  },
-  {
-    id: "sa2",
-    auditTitle: "Pre-Exercise Vehicle Checks",
-    auditType: "Equipment Safety Audit",
-    auditDate: new Date("2024-06-01"),
-    auditorName: "John Doe", // Updated to full name
-    scope: "All Squadron Vehicles",
-    summary: "All vehicles passed pre-use checks. One vehicle requires tire pressure adjustment.",
-     findings: [
-      { id:"f2", description: "Vehicle REG012 - Low tire pressure front-left.", severity: "Low", recommendedAction: "Inflate tire to correct PSI.", assignedTo: "Transport NCO", status: "Resolved" }
-    ]
-  },
-];
+const AUDITS_QUERY_KEY = 'safetyAudits';
+
+// Helper to convert Firestore Timestamps to JS Dates in audit data
+const convertAuditTimestamps = (data: any): SafetyAudit => {
+  return {
+    ...data,
+    auditDate: data.auditDate instanceof Timestamp ? data.auditDate.toDate() : data.auditDate,
+    findings: data.findings?.map((finding: any) => ({
+      ...finding,
+      id: finding.id || crypto.randomUUID(), // Ensure finding ID exists locally if not in DB yet
+      dueDate: finding.dueDate instanceof Timestamp ? finding.dueDate.toDate() : finding.dueDate,
+    })) || [],
+  };
+};
+
+// --- Fetch Audits ---
+async function fetchAudits(): Promise<SafetyAudit[]> {
+  const auditsCollectionRef = collection(db, 'safetyAudits');
+  const q = query(auditsCollectionRef, orderBy('auditDate', 'desc'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...convertAuditTimestamps(doc.data()),
+  })) as SafetyAudit[];
+}
+
+// --- Add Audit ---
+async function addAudit(newAuditData: Omit<SafetyAudit, 'id'>): Promise<string> {
+  const auditsCollectionRef = collection(db, 'safetyAudits');
+  const dataToSave = {
+    ...newAuditData,
+    auditDate: Timestamp.fromDate(newAuditData.auditDate),
+    findings: newAuditData.findings?.map(f => ({
+      ...f,
+      id: f.id || crypto.randomUUID(), // Ensure finding ID
+      dueDate: f.dueDate ? Timestamp.fromDate(f.dueDate) : null,
+    })) || [],
+  };
+  const docRef = await addDoc(auditsCollectionRef, dataToSave);
+  return docRef.id;
+}
+
+// --- Update Audit ---
+async function updateAudit(updatedAudit: SafetyAudit): Promise<void> {
+  if (!updatedAudit.id) throw new Error("Audit ID is required for update.");
+  const auditDocRef = doc(db, 'safetyAudits', updatedAudit.id);
+  const { id, ...dataToUpdate } = updatedAudit;
+  const dataToSave = {
+    ...dataToUpdate,
+    auditDate: Timestamp.fromDate(dataToUpdate.auditDate),
+    findings: dataToUpdate.findings?.map(f => ({
+      ...f,
+      id: f.id || crypto.randomUUID(), // Ensure finding ID
+      dueDate: f.dueDate ? Timestamp.fromDate(f.dueDate) : null,
+    })) || [],
+  };
+  await updateDoc(auditDocRef, dataToSave);
+}
+
+// --- Delete Audit ---
+async function deleteAudit(auditId: string): Promise<void> {
+  if (!auditId) throw new Error("Audit ID is required for deletion.");
+  const auditDocRef = doc(db, 'safetyAudits', auditId);
+  await deleteDoc(auditDocRef);
+}
 
 export default function AuditsPage() {
-  const [auditList, setAuditList] = React.useState<SafetyAudit[]>(initialAudits);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: auditList = [], isLoading, error } = useQuery<SafetyAudit[], Error>({
+    queryKey: [AUDITS_QUERY_KEY],
+    queryFn: fetchAudits,
+  });
+
+  const addAuditMutation = useMutation<string, Error, Omit<SafetyAudit, 'id'>>({
+    mutationFn: addAudit,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [AUDITS_QUERY_KEY] });
+      setIsFormOpen(false);
+      toast({ title: "Success", description: "Safety audit recorded." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to record audit: ${err.message}` });
+    }
+  });
+
+  const updateAuditMutation = useMutation<void, Error, SafetyAudit>({
+    mutationFn: updateAudit,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [AUDITS_QUERY_KEY] });
+      queryClient.setQueryData<SafetyAudit[]>([AUDITS_QUERY_KEY], (oldData) =>
+        oldData?.map((a) => (a.id === variables.id ? variables : a))
+      );
+      setIsFormOpen(false);
+      setEditingAudit(null);
+      toast({ title: "Success", description: "Safety audit updated." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to update audit: ${err.message}` });
+    }
+  });
+
+  const deleteAuditMutation = useMutation<void, Error, string>({
+    mutationFn: deleteAudit,
+    onSuccess: (_, auditId) => {
+      queryClient.invalidateQueries({ queryKey: [AUDITS_QUERY_KEY] });
+      queryClient.setQueryData<SafetyAudit[]>([AUDITS_QUERY_KEY], (oldData) =>
+        oldData?.filter((a) => a.id !== auditId)
+      );
+      setAuditToDelete(null);
+      toast({ title: "Success", description: "Safety audit deleted." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to delete audit: ${err.message}` });
+      setAuditToDelete(null);
+    }
+  });
+
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingAudit, setEditingAudit] = React.useState<SafetyAudit | null>(null);
   const [auditToDelete, setAuditToDelete] = React.useState<SafetyAudit | null>(null);
   const [viewingAudit, setViewingAudit] = React.useState<SafetyAudit | null>(null);
 
-  const handleAddAudit = (data: SafetyAudit) => {
-    const newAudit = { 
-      ...data, 
-      id: crypto.randomUUID(),
-      findings: data.findings?.map(f => ({...f, id: crypto.randomUUID()}))
-    };
-    setAuditList((prev) => [newAudit, ...prev]);
-    setIsFormOpen(false);
+  const handleAddAudit = (data: SafetyAudit) => { // Form passes full Audit, but we omit ID for new
+    const {id, ...newAuditData} = data;
+    addAuditMutation.mutate(newAuditData);
   };
 
   const handleUpdateAudit = (data: SafetyAudit) => {
-    setAuditList((prev) =>
-      prev.map((audit) => (audit.id === data.id ? {
-        ...data,
-        findings: data.findings?.map(f => f.id ? f : {...f, id: crypto.randomUUID()})
-      } : audit))
-    );
-    setIsFormOpen(false);
-    setEditingAudit(null);
+    if (editingAudit && editingAudit.id) {
+      updateAuditMutation.mutate({ ...data, id: editingAudit.id });
+    }
   };
 
   const handleEdit = (audit: SafetyAudit) => {
@@ -121,9 +204,8 @@ export default function AuditsPage() {
   };
 
   const handleDeleteConfirm = () => {
-    if (auditToDelete) {
-      setAuditList((prev) => prev.filter((audit) => audit.id !== auditToDelete.id));
-      setAuditToDelete(null);
+    if (auditToDelete && auditToDelete.id) {
+      deleteAuditMutation.mutate(auditToDelete.id);
     }
   };
 
@@ -132,7 +214,7 @@ export default function AuditsPage() {
     setViewingAudit(null);
     setIsFormOpen(true);
   };
-  
+
   const closeForm = () => {
     setEditingAudit(null);
     setIsFormOpen(false);
@@ -141,7 +223,7 @@ export default function AuditsPage() {
   const closeViewDialog = () => {
     setViewingAudit(null);
   }
-  
+
   const getOverallAuditStatus = (findings?: AuditFinding[]): string => {
     if (!findings || findings.length === 0) return "No Findings";
     const hasOpen = findings.some(f => f.status === "Open" || f.status === "In Progress");
@@ -168,19 +250,33 @@ export default function AuditsPage() {
                 <CardDescription>Perform safety inspections, document hazards, and create action items.</CardDescription>
               </div>
             </div>
-            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-              <PlusCircle className="mr-2 h-5 w-5" /> New Audit Record
+            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addAuditMutation.isPending}>
+              {addAuditMutation.isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" /> }
+              New Audit Record
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {auditList.length === 0 ? (
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading safety audits...</p>
+            </div>
+          )}
+          {error && !isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+              <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Audits</h3>
+              <p className="text-destructive mb-4">{error.message}</p>
+            </div>
+          )}
+          {!isLoading && !error && auditList.length === 0 ? (
              <div className="flex flex-col items-center justify-center py-12 text-center">
                 <ShieldCheck className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Audits Recorded Yet</h3>
                 <p className="text-muted-foreground mb-4">Click &quot;New Audit Record&quot; to get started.</p>
              </div>
-          ) : (
+          ) : !isLoading && !error && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -200,7 +296,7 @@ export default function AuditsPage() {
                     <TableCell className="hidden lg:table-cell">
                        <Badge variant={
                           getOverallAuditStatus(audit.findings).includes("Critical") ? "destructive" :
-                          getOverallAuditStatus(audit.findings).includes("High") ? "destructive" : // Consider a warning variant
+                          getOverallAuditStatus(audit.findings).includes("High") ? "destructive" :
                           getOverallAuditStatus(audit.findings) === "Action Required" ? "secondary" :
                           getOverallAuditStatus(audit.findings) === "All Clear" ? "default" : "outline"
                        }>
@@ -210,18 +306,18 @@ export default function AuditsPage() {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateAuditMutation.isPending || deleteAuditMutation.isPending}>
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Options</DropdownMenuLabel>
-                           <DropdownMenuItem onClick={() => handleViewDetails(audit)}>
+                           <DropdownMenuItem onClick={() => handleViewDetails(audit)} disabled={updateAuditMutation.isPending || deleteAuditMutation.isPending}>
                             <Info className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(audit)}>
+                          <DropdownMenuItem onClick={() => handleEdit(audit)} disabled={updateAuditMutation.isPending || deleteAuditMutation.isPending}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
@@ -229,6 +325,7 @@ export default function AuditsPage() {
                           <DropdownMenuItem
                             onClick={() => setAuditToDelete(audit)}
                             className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            disabled={updateAuditMutation.isPending || deleteAuditMutation.isPending}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -242,7 +339,7 @@ export default function AuditsPage() {
             </Table>
           )}
         </CardContent>
-         {auditList.length > 0 && (
+         {!isLoading && !error && auditList.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground">
             Showing {auditList.length} of {auditList.length} safety audits.
           </CardFooter>
@@ -252,7 +349,7 @@ export default function AuditsPage() {
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
         if (!isOpen) closeForm(); else setIsFormOpen(true);
       }}>
-        <DialogContent className="sm:max-w-3xl"> {/* Wider for findings */}
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
               {editingAudit ? "Edit Safety Audit Record" : "New Safety Audit Record"}
@@ -266,10 +363,11 @@ export default function AuditsPage() {
           <ScrollArea className="max-h-[70vh] p-1">
             <div className="py-4 pr-4">
                 <SafetyAuditForm
-                onSubmit={editingAudit ? handleUpdateAudit : handleAddAudit}
-                defaultValues={editingAudit || undefined}
-                onCancel={closeForm}
-                isEditing={!!editingAudit}
+                  onSubmit={editingAudit ? handleUpdateAudit : handleAddAudit}
+                  defaultValues={editingAudit || undefined}
+                  onCancel={closeForm}
+                  isEditing={!!editingAudit}
+                  isSubmitting={editingAudit ? updateAuditMutation.isPending : addAuditMutation.isPending}
                 />
             </div>
           </ScrollArea>
@@ -297,7 +395,7 @@ export default function AuditsPage() {
                                 <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingAudit.summary}</p>
                             </div>
                         )}
-                        
+
                         {viewingAudit.findings && viewingAudit.findings.length > 0 && (
                             <div>
                                 <h3 className="font-semibold text-lg mb-2">Findings & CAPAs</h3>
@@ -329,10 +427,12 @@ export default function AuditsPage() {
                       if (viewingAudit) {
                         handleEdit(viewingAudit);
                       }
-                    }}>
+                    }}
+                    disabled={updateAuditMutation.isPending}
+                    >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewDialog}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={updateAuditMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -348,20 +448,22 @@ export default function AuditsPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setAuditToDelete(null)}>
+              <AlertDialogCancel onClick={() => setAuditToDelete(null)} disabled={deleteAuditMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                disabled={deleteAuditMutation.isPending}
               >
+                {deleteAuditMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       )}
-      
+
       <Card className="shadow-sm mt-8">
         <CardHeader>
              <div className="flex items-center gap-3">
@@ -394,11 +496,13 @@ export default function AuditsPage() {
               <FileText className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
               Generate comprehensive audit reports and analyze safety trends.
             </li>
+             <li className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+              Integration with Staff Management for assigning CAPAs.
+            </li>
           </ul>
         </CardContent>
       </Card>
     </div>
   );
 }
-
-

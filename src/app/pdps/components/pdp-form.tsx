@@ -3,12 +3,11 @@
 
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { pdpSchema, type Pdp, SMARTGoalSchema, type SMARTGoal } from "../pdp-schema";
+import { pdpSchema, type Pdp } from "../pdp-schema"; // SMARTGoal related types are inferred via Pdp
 import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -30,7 +29,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, PlusCircle, Trash2 } from "lucide-react";
+import { CalendarIcon, PlusCircle, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -39,9 +38,10 @@ interface PdpFormProps {
   defaultValues?: Partial<Pdp>;
   onCancel: () => void;
   isEditing: boolean;
+  isSubmitting?: boolean; // For loading state
 }
 
-export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFormProps) {
+export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: PdpFormProps) {
   const form = useForm<Pdp>({
     resolver: zodResolver(pdpSchema),
     defaultValues: defaultValues || {
@@ -60,7 +60,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
   });
 
   const handleSubmit = (data: Pdp) => {
-    onSubmit(data);
+    onSubmit(data); // The ID logic (add/update) is handled by the parent page
     if (!isEditing) {
      form.reset({
         staffName: "",
@@ -83,7 +83,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
             <FormItem>
               <FormLabel>Staff Member Name</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Jane Doe" {...field} />
+                <Input placeholder="e.g., Jane Doe" {...field} disabled={isSubmitting} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -97,7 +97,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
             <FormItem>
               <FormLabel>PDP Period</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., 2024-2025 or Q3 2024" {...field} />
+                <Input placeholder="e.g., 2024-2025 or Q3 2024" {...field} disabled={isSubmitting} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -117,6 +117,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                     size="icon"
                     className="text-destructive hover:bg-destructive/10"
                     onClick={() => remove(index)}
+                    disabled={isSubmitting}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -128,7 +129,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                 render={({ field: goalField }) => (
                   <FormItem>
                     <FormLabel>Specific</FormLabel>
-                    <FormControl><Input placeholder="What do you want to accomplish?" {...goalField} /></FormControl>
+                    <FormControl><Input placeholder="What do you want to accomplish?" {...goalField} disabled={isSubmitting} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -139,7 +140,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                 render={({ field: goalField }) => (
                   <FormItem>
                     <FormLabel>Measurable</FormLabel>
-                    <FormControl><Input placeholder="How will you track progress?" {...goalField} /></FormControl>
+                    <FormControl><Input placeholder="How will you track progress?" {...goalField} disabled={isSubmitting} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -150,7 +151,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                 render={({ field: goalField }) => (
                   <FormItem>
                     <FormLabel>Achievable</FormLabel>
-                    <FormControl><Input placeholder="Is it realistic?" {...goalField} /></FormControl>
+                    <FormControl><Input placeholder="Is it realistic?" {...goalField} disabled={isSubmitting} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -161,7 +162,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                 render={({ field: goalField }) => (
                   <FormItem>
                     <FormLabel>Relevant</FormLabel>
-                    <FormControl><Input placeholder="Why is this goal important?" {...goalField} /></FormControl>
+                    <FormControl><Input placeholder="Why is this goal important?" {...goalField} disabled={isSubmitting} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -172,7 +173,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                 render={({ field: goalField }) => (
                   <FormItem>
                     <FormLabel>Time-bound</FormLabel>
-                    <FormControl><Input placeholder="What is the deadline?" {...goalField} /></FormControl>
+                    <FormControl><Input placeholder="What is the deadline?" {...goalField} disabled={isSubmitting} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -183,7 +184,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                 render={({ field: goalField }) => (
                   <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={goalField.onChange} defaultValue={goalField.value}>
+                    <Select onValueChange={goalField.onChange} defaultValue={goalField.value} disabled={isSubmitting}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select status" />
@@ -207,6 +208,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
             size="sm"
             className="mt-2"
             onClick={() => append({ specific: "", measurable: "", achievable: "", relevant: "", timeBound: "", status: "Not Started" })}
+            disabled={isSubmitting}
           >
             <PlusCircle className="mr-2 h-4 w-4" /> Add Goal
           </Button>
@@ -222,13 +224,13 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
             <FormItem>
               <FormLabel>Development Activities (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="e.g., Attend leadership course, seek mentorship from SQNLDR X" {...field} rows={3} />
+                <Textarea placeholder="e.g., Attend leadership course, seek mentorship from SQNLDR X" {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
-        
+
         <FormField
             control={form.control}
             name="reviewDate"
@@ -244,6 +246,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                           "w-full pl-3 text-left font-normal",
                           !field.value && "text-muted-foreground"
                         )}
+                        disabled={isSubmitting}
                       >
                         {field.value ? (
                           format(field.value, "PPP")
@@ -260,6 +263,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
                       selected={field.value}
                       onSelect={field.onChange}
                       initialFocus
+                      disabled={isSubmitting}
                     />
                   </PopoverContent>
                 </Popover>
@@ -275,7 +279,7 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
             <FormItem>
               <FormLabel>Feedback / Notes (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Any feedback or notes related to this PDP..." {...field} rows={3} />
+                <Textarea placeholder="Any feedback or notes related to this PDP..." {...field} rows={3} disabled={isSubmitting}/>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -283,10 +287,13 @@ export function PdpForm({ onSubmit, defaultValues, onCancel, isEditing }: PdpFor
         />
 
         <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button type="submit">{isEditing ? "Save Changes" : "Create PDP"}</Button>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" /> }
+            {isEditing ? "Save Changes" : "Create PDP"}
+          </Button>
         </div>
       </form>
     </Form>

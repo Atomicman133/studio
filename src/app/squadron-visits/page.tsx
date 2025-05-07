@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, ClipboardList, Edit3, Info, ListChecks } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, ClipboardList, Edit3, Info, ListChecks, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -57,41 +57,78 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Checkbox } from "@/components/ui/checkbox"; // For displaying boolean fields
+import { Checkbox } from "@/components/ui/checkbox";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { useToast } from "@/hooks/use-toast";
 
 
-export const initialSquadronVisits: SquadronVisit[] = [
-  {
-    id: "sv1",
-    squadronName: "123 Squadron",
-    visitDate: new Date("2024-07-15"),
-    rxoName: "FLTLT Jane Doe (Wing RXO)",
-    coName: "SQNLDR John Smith",
-    staffingListReviewed: true,
-    staffingVacanciesDiscussed: true,
-    staffingSuccessionPlanningNotes: "Discussed potential for PLTOFF Alice to step into AdminO role.",
-    trainingScheduleCurrent: true,
-    generalComments: "Overall a productive visit. Squadron is tracking well.",
-    actionItems: [
-      { id: "act1", description: "Follow up on AdminO succession plan with CO.", responsible: "RXO", dueDate: new Date("2024-07-22"), status: "Open" }
-    ]
-  },
-  {
-    id: "sv2",
-    squadronName: "456 Squadron",
-    visitDate: new Date("2024-06-20"),
-    rxoName: "FLTLT Jane Doe (Wing RXO)",
-    coName: "FLTLT Robert Brown",
-    staffingListReviewed: true,
-    safetyRiskRegisterReviewed: false,
-    safetySectionNotes: "Risk register needs urgent update post-recent field exercise.",
-    generalComments: "Key focus on safety compliance.",
-    actionItems: [
-      { id: "act2", description: "SQN CO to update Risk Register and submit to Wing.", responsible: "456 SQN CO", dueDate: new Date("2024-07-05"), status: "Completed" },
-      { id: "act3", description: "RXO to confirm receipt of updated Risk Register.", responsible: "RXO", dueDate: new Date("2024-07-10"), status: "In Progress" }
-    ]
-  },
-];
+const VISITS_QUERY_KEY = 'squadronVisits';
+
+// Helper to convert Firestore Timestamps to JS Dates
+const convertVisitTimestamps = (data: any): SquadronVisit => {
+  return {
+    ...data,
+    visitDate: data.visitDate instanceof Timestamp ? data.visitDate.toDate() : data.visitDate,
+    actionItems: data.actionItems?.map((item: any) => ({
+      ...item,
+      id: item.id || crypto.randomUUID(), // Ensure action item ID exists locally
+      dueDate: item.dueDate instanceof Timestamp ? item.dueDate.toDate() : item.dueDate,
+    })) || [],
+  };
+};
+
+// --- Fetch Visits ---
+async function fetchVisits(): Promise<SquadronVisit[]> {
+  const collectionRef = collection(db, 'squadronVisits');
+  const q = query(collectionRef, orderBy('visitDate', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...convertVisitTimestamps(doc.data()),
+  })) as SquadronVisit[];
+}
+
+// --- Add Visit ---
+async function addVisit(newVisitData: Omit<SquadronVisit, 'id'>): Promise<string> {
+  const collectionRef = collection(db, 'squadronVisits');
+  const dataToSave = {
+    ...newVisitData,
+    visitDate: Timestamp.fromDate(newVisitData.visitDate),
+    actionItems: newVisitData.actionItems?.map(item => ({
+      ...item,
+      id: item.id || crypto.randomUUID(),
+      dueDate: item.dueDate ? Timestamp.fromDate(item.dueDate) : null,
+    })) || [],
+  };
+  const docRef = await addDoc(collectionRef, dataToSave);
+  return docRef.id;
+}
+
+// --- Update Visit ---
+async function updateVisit(updatedVisit: SquadronVisit): Promise<void> {
+  if (!updatedVisit.id) throw new Error("Visit ID is required for update.");
+  const docRef = doc(db, 'squadronVisits', updatedVisit.id);
+  const { id, ...dataToUpdate } = updatedVisit;
+  const dataToSave = {
+    ...dataToUpdate,
+    visitDate: Timestamp.fromDate(dataToUpdate.visitDate),
+    actionItems: dataToUpdate.actionItems?.map(item => ({
+      ...item,
+      id: item.id || crypto.randomUUID(),
+      dueDate: item.dueDate ? Timestamp.fromDate(item.dueDate) : null,
+    })) || [],
+  };
+  await updateDoc(docRef, dataToSave);
+}
+
+// --- Delete Visit ---
+async function deleteVisit(visitId: string): Promise<void> {
+  if (!visitId) throw new Error("Visit ID is required for deletion.");
+  await deleteDoc(doc(db, 'squadronVisits', visitId));
+}
+
 
 const ViewCheckboxItem = ({ checked, label }: { checked?: boolean, label: string }) => (
   <div className="flex items-center space-x-2 my-1">
@@ -173,31 +210,73 @@ const discussionSectionsConfig = [
 
 
 export default function SquadronVisitsPage() {
-  const [visitList, setVisitList] = React.useState<SquadronVisit[]>(initialSquadronVisits);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: visitList = [], isLoading, error } = useQuery<SquadronVisit[], Error>({
+    queryKey: [VISITS_QUERY_KEY],
+    queryFn: fetchVisits,
+  });
+
+  const addVisitMutation = useMutation<string, Error, Omit<SquadronVisit, 'id'>>({
+    mutationFn: addVisit,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [VISITS_QUERY_KEY] });
+      setIsFormOpen(false);
+      toast({ title: "Success", description: "Squadron visit recorded." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to record visit: ${err.message}` });
+    }
+  });
+
+  const updateVisitMutation = useMutation<void, Error, SquadronVisit>({
+    mutationFn: updateVisit,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [VISITS_QUERY_KEY] });
+      queryClient.setQueryData<SquadronVisit[]>([VISITS_QUERY_KEY], (oldData) =>
+        oldData?.map((v) => (v.id === variables.id ? variables : v))
+      );
+      setIsFormOpen(false);
+      setEditingVisit(null);
+      toast({ title: "Success", description: "Squadron visit updated." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to update visit: ${err.message}` });
+    }
+  });
+
+  const deleteVisitMutation = useMutation<void, Error, string>({
+    mutationFn: deleteVisit,
+    onSuccess: (_, visitId) => {
+      queryClient.invalidateQueries({ queryKey: [VISITS_QUERY_KEY] });
+      queryClient.setQueryData<SquadronVisit[]>([VISITS_QUERY_KEY], (oldData) =>
+        oldData?.filter((v) => v.id !== visitId)
+      );
+      setVisitToDelete(null);
+      toast({ title: "Success", description: "Squadron visit deleted." });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Error", description: `Failed to delete visit: ${err.message}` });
+      setVisitToDelete(null);
+    }
+  });
+
+
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingVisit, setEditingVisit] = React.useState<SquadronVisit | null>(null);
   const [visitToDelete, setVisitToDelete] = React.useState<SquadronVisit | null>(null);
   const [viewingVisit, setViewingVisit] = React.useState<SquadronVisit | null>(null);
 
   const handleAddVisit = (data: SquadronVisit) => {
-    const newVisit = { 
-      ...data, 
-      id: crypto.randomUUID(),
-      actionItems: data.actionItems?.map(f => ({...f, id: crypto.randomUUID()}))
-    };
-    setVisitList((prev) => [newVisit, ...prev]);
-    setIsFormOpen(false);
+    const { id, ...newVisitData } = data;
+    addVisitMutation.mutate(newVisitData);
   };
 
   const handleUpdateVisit = (data: SquadronVisit) => {
-    setVisitList((prev) =>
-      prev.map((visit) => (visit.id === data.id ? {
-        ...data,
-        actionItems: data.actionItems?.map(f => f.id ? f : {...f, id: crypto.randomUUID()})
-      } : visit))
-    );
-    setIsFormOpen(false);
-    setEditingVisit(null);
+    if (editingVisit && editingVisit.id) {
+      updateVisitMutation.mutate({ ...data, id: editingVisit.id });
+    }
   };
 
   const handleEdit = (visit: SquadronVisit) => {
@@ -213,9 +292,8 @@ export default function SquadronVisitsPage() {
   };
 
   const handleDeleteConfirm = () => {
-    if (visitToDelete) {
-      setVisitList((prev) => prev.filter((visit) => visit.id !== visitToDelete.id));
-      setVisitToDelete(null);
+    if (visitToDelete && visitToDelete.id) {
+      deleteVisitMutation.mutate(visitToDelete.id);
     }
   };
 
@@ -224,7 +302,7 @@ export default function SquadronVisitsPage() {
     setViewingVisit(null);
     setIsFormOpen(true);
   };
-  
+
   const closeForm = () => {
     setEditingVisit(null);
     setIsFormOpen(false);
@@ -233,7 +311,7 @@ export default function SquadronVisitsPage() {
   const closeViewDialog = () => {
     setViewingVisit(null);
   }
-  
+
   const getOverallVisitStatus = (actionItems?: VisitActionItem[]): string => {
     if (!actionItems || actionItems.length === 0) return "No Actions";
     const hasOpen = actionItems.some(f => f.status === "Open" || f.status === "In Progress");
@@ -254,19 +332,33 @@ export default function SquadronVisitsPage() {
                 <CardDescription>Record and track squadron visit reports and action items.</CardDescription>
               </div>
             </div>
-            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-              <PlusCircle className="mr-2 h-5 w-5" /> New Visit Record
+            <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addVisitMutation.isPending}>
+              {addVisitMutation.isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+              New Visit Record
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {visitList.length === 0 ? (
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+              <p className="text-muted-foreground">Loading visit records...</p>
+            </div>
+          )}
+          {error && !isLoading && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+              <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Visits</h3>
+              <p className="text-destructive mb-4">{error.message}</p>
+            </div>
+          )}
+          {!isLoading && !error && visitList.length === 0 ? (
              <div className="flex flex-col items-center justify-center py-12 text-center">
                 <ClipboardList className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Visits Recorded Yet</h3>
                 <p className="text-muted-foreground mb-4">Click &quot;New Visit Record&quot; to get started.</p>
              </div>
-          ) : (
+          ) : !isLoading && !error && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -294,18 +386,18 @@ export default function SquadronVisitsPage() {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateVisitMutation.isPending || deleteVisitMutation.isPending}>
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Options</DropdownMenuLabel>
-                           <DropdownMenuItem onClick={() => handleViewDetails(visit)}>
+                           <DropdownMenuItem onClick={() => handleViewDetails(visit)} disabled={updateVisitMutation.isPending || deleteVisitMutation.isPending}>
                             <Info className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(visit)}>
+                          <DropdownMenuItem onClick={() => handleEdit(visit)} disabled={updateVisitMutation.isPending || deleteVisitMutation.isPending}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
@@ -313,6 +405,7 @@ export default function SquadronVisitsPage() {
                           <DropdownMenuItem
                             onClick={() => setVisitToDelete(visit)}
                             className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            disabled={updateVisitMutation.isPending || deleteVisitMutation.isPending}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -326,7 +419,7 @@ export default function SquadronVisitsPage() {
             </Table>
           )}
         </CardContent>
-         {visitList.length > 0 && (
+         {!isLoading && !error && visitList.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground">
             Showing {visitList.length} of {visitList.length} squadron visit records.
           </CardFooter>
@@ -336,7 +429,7 @@ export default function SquadronVisitsPage() {
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
         if (!isOpen) closeForm(); else setIsFormOpen(true);
       }}>
-        <DialogContent className="sm:max-w-4xl"> {/* Wider for the form */}
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>
               {editingVisit ? "Edit Squadron Visit Record" : "New Squadron Visit Record"}
@@ -350,10 +443,11 @@ export default function SquadronVisitsPage() {
           <ScrollArea className="max-h-[75vh] p-1">
             <div className="py-4 pr-4">
                 <SquadronVisitForm
-                onSubmit={editingVisit ? handleUpdateVisit : handleAddVisit}
-                defaultValues={editingVisit || undefined}
-                onCancel={closeForm}
-                isEditing={!!editingVisit}
+                  onSubmit={editingVisit ? handleUpdateVisit : handleAddVisit}
+                  defaultValues={editingVisit || undefined}
+                  onCancel={closeForm}
+                  isEditing={!!editingVisit}
+                  isSubmitting={editingVisit ? updateVisitMutation.isPending : addVisitMutation.isPending}
                 />
             </div>
           </ScrollArea>
@@ -400,14 +494,14 @@ export default function SquadronVisitsPage() {
                             </AccordionItem>
                           ))}
                         </Accordion>
-                        
+
                         {viewingVisit.generalComments && (
                             <div>
                                 <h3 className="font-semibold text-lg mb-1">General Comments / Overall Notes</h3>
                                 <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingVisit.generalComments}</p>
                             </div>
                         )}
-                        
+
                         {viewingVisit.actionItems && viewingVisit.actionItems.length > 0 && (
                             <div>
                                 <h3 className="font-semibold text-lg mb-2">Action Items</h3>
@@ -437,10 +531,12 @@ export default function SquadronVisitsPage() {
                       if (viewingVisit) {
                         handleEdit(viewingVisit);
                       }
-                    }}>
+                    }}
+                    disabled={updateVisitMutation.isPending}
+                    >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewDialog}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={updateVisitMutation.isPending}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -456,20 +552,22 @@ export default function SquadronVisitsPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setVisitToDelete(null)}>
+              <AlertDialogCancel onClick={() => setVisitToDelete(null)} disabled={deleteVisitMutation.isPending}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                disabled={deleteVisitMutation.isPending}
               >
+                {deleteVisitMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       )}
-      
+
       <Card className="shadow-sm mt-8">
         <CardHeader>
              <div className="flex items-center gap-3">
@@ -501,6 +599,14 @@ export default function SquadronVisitsPage() {
              <li className="flex items-center">
               <Info className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
               View detailed visit reports and edit existing records. (Implemented)
+            </li>
+            <li className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+              Export visit reports to PDF/Word.
+            </li>
+             <li className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+              Integration with Staff Management for selecting RXO/CO.
             </li>
           </ul>
         </CardContent>
