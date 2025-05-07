@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -251,7 +250,7 @@ export default function StaffPage() {
           return;
         }
 
-        const membersToAdd: Omit<StaffMember, 'id'>[] = [];
+        const membersToParse: Omit<StaffMember, 'id'>[] = [];
         const errors: string[] = [];
         const lines = text.split(/\r\n|\n/);
 
@@ -338,12 +337,13 @@ export default function StaffPage() {
                       continue;
                   }
 
-                  if (existingStaffNumbers.has(serviceNumber) || existingEmails.has(email) || membersToAdd.some(m => m.serviceNumber === serviceNumber || m.email === email)) {
+                  if (existingStaffNumbers.has(serviceNumber) || existingEmails.has(email) || membersToParse.some(m => m.serviceNumber === serviceNumber || m.email === email)) {
                       errors.push(`Row ${i + 1}: Duplicate MemberUID or EmailAddress for "${serviceNumber}/${email}". Skipped.`);
                       continue;
                   }
 
-                  membersToAdd.push({
+                  // Add to list of members to be added to Firestore
+                  membersToParse.push({
                       serviceNumber: serviceNumber,
                       rank: rank,
                       firstName: firstName,
@@ -359,34 +359,36 @@ export default function StaffPage() {
         }
 
         let importedCount = 0;
-        if (membersToAdd.length > 0) {
-          for (const member of membersToAdd) {
+        if (membersToParse.length > 0 && errors.length === 0) { // Only proceed if no initial parsing errors
+          for (const member of membersToParse) {
              try {
-                 // Await the mutation to ensure sequential addition
+                 // Use the mutation to add each member to Firestore
                  await addStaffMutation.mutateAsync(member);
                  importedCount++;
              } catch (err: any) {
-                 errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}): ${err.message}`);
+                 errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}) to database: ${err.message}`);
                  // Decide if you want to stop the import on first error or continue
                  // break; // Uncomment to stop on first error
              }
           }
            if (importedCount > 0) {
-              toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported.` });
+              toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
            }
         }
 
         if (errors.length > 0) {
-          const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+          const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
+          const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
+          const variant = importedCount > 0 ? "default" : "destructive";
           toast({
-              variant: "destructive",
-              title: `CSV Import ${importedCount > 0 ? "Partially Successful" : "Failed"}`,
+              variant: variant,
+              title: title,
               description: (
                 <ScrollArea className="max-h-40">
                   <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
                 </ScrollArea>
               ),
-              duration: 10000,
+              duration: 15000,
           });
         }
 
@@ -673,7 +675,7 @@ export default function StaffPage() {
                       </Card>
 
                     {/* Accordion for related data */}
-                    <Accordion type="multiple" collapsible className="w-full">
+                    <Accordion type="multiple" className="w-full" defaultValue={["training"]}>
                       <AccordionItem value="training">
                         <AccordionTrigger>
                           <div className="flex items-center gap-2 text-lg">
@@ -827,4 +829,3 @@ export default function StaffPage() {
     </div>
   );
 }
-

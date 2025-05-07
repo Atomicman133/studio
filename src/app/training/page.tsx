@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import * as React from "react";
@@ -472,6 +470,7 @@ export default function TrainingPage() {
         const text = e.target?.result as string;
         if (!text) {
           toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+          setIsImportingAccomplishments(false);
           return;
         }
 
@@ -525,13 +524,19 @@ export default function TrainingPage() {
                   for (let charIndex = 0; charIndex < line.length; charIndex++) {
                     let char = line[charIndex];
                       if (char === '"' && !inQuotes) {
-                          inQuotes = true;
+                           if (charIndex > 0 && line[charIndex - 1] === '"') {
+                              // This is an escaped double quote ""
+                              currentVal += '"';
+                          } else {
+                            inQuotes = true;
+                          }
                       } else if (char === '"' && inQuotes) {
-                          // Check for double quotes representing a single quote
                           if (charIndex + 1 < line.length && line[charIndex + 1] === '"') {
+                              // This is an escaped double quote "", treat first " as content
                               currentVal += '"';
                               charIndex++; // Skip the next quote
                           } else {
+                              // This is the closing quote
                               inQuotes = false;
                           }
                       } else if (char === ',' && !inQuotes) {
@@ -631,7 +636,7 @@ export default function TrainingPage() {
         }
 
         let importedCount = 0;
-        if (newLogsToAdd.length > 0) {
+        if (newLogsToAdd.length > 0 && errors.length === 0) { // Only proceed if no parsing errors
           // Add logs one by one using mutation
           for (const log of newLogsToAdd) {
              try {
@@ -1046,4 +1051,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-
