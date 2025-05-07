@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Briefcase, Target, BarChart2, UserRoundCheck, FileEdit, Edit3, Info } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Briefcase, Target, BarChart2, UserRoundCheck, FileEdit, Edit3, Info, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -317,7 +317,11 @@ export default function PdpsPage() {
                     </div>
                 </ScrollArea>
                 <DialogFooter className="pt-4">
-                    <Button variant="outline" onClick={() => handleEdit(viewingPdp)}>
+                    <Button variant="outline" onClick={() => {
+                      if (viewingPdp) {
+                        handleEdit(viewingPdp);
+                      }
+                    }}>
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
                     <Button onClick={closeViewDialog}>Close</Button>
@@ -392,3 +396,4 @@ export default function PdpsPage() {
     </div>
   );
 }
+

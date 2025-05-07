@@ -24,6 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -271,7 +272,11 @@ export default function TrainingPage() {
                     </div>
                 </ScrollArea>
                 <DialogFooter className="pt-4">
-                    <Button variant="outline" onClick={() => handleEdit(viewingLog)}>
+                    <Button variant="outline" onClick={() => {
+                      if (viewingLog) {
+                        handleEdit(viewingLog);
+                      }
+                    }}>
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
                     <Button onClick={closeViewDialog}>Close</Button>
@@ -347,3 +352,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+

@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, UserCheck, CheckSquare, CalendarClock, BellRing, BarChart3, Edit3, Info, UploadCloud } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, UserCheck, CheckSquare, CalendarClock, BellRing, BarChart3, Edit3, Info, UploadCloud, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,6 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -306,7 +307,11 @@ export default function CompliancePage() {
                     </div>
                 </ScrollArea>
                 <DialogFooter className="pt-4 border-t">
-                    <Button variant="outline" onClick={() => handleEdit(viewingItem)}>
+                    <Button variant="outline" onClick={() => {
+                      if (viewingItem) {
+                        handleEdit(viewingItem);
+                      }
+                    }}>
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
                     <Button onClick={closeViewDialog}>Close</Button>
@@ -381,3 +386,4 @@ export default function CompliancePage() {
     </div>
   );
 }
+
