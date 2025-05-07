@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -350,6 +351,7 @@ export default function TrainingPage() {
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
       certificateUpdates = { certificateFileName: undefined, certificateDataUrl: undefined };
     } else {
+      // Keep existing certificate if no new file and not explicitly removed
       certificateUpdates = {
         certificateFileName: editingLog.certificateFileName,
         certificateDataUrl: editingLog.certificateDataUrl,
@@ -475,35 +477,47 @@ export default function TrainingPage() {
   const closeViewDialog = () => {
     setViewingLog(null);
   };
+  
+  function parseMemberRankName(memberRankNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
+    let rank: typeof RANKS[number] | null = null;
+    let namePart = memberRankNameInput.trim();
 
-  // Function to parse "LastName, FirstName-RANK-ServiceID"
-  const parseMemberRankId = (input: string): { name: string, rank: string, serviceId: string, firstName: string, lastName: string } | null => {
-    const parts = input.split('-');
-    if (parts.length < 3) return null; // Expect at least Name, Rank, ID
+    const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
 
-    const serviceId = parts.pop()!;
-    const rank = parts.pop()!;
-    const nameWithComma = parts.join('-'); // Rejoin if name had hyphens
+    for (const r of sortedRanksForParsing) {
+      if (namePart.toUpperCase().startsWith(r + " ")) {
+        rank = r as typeof RANKS[number];
+        namePart = namePart.substring(r.length).trim();
+        break;
+      }
+    }
 
-    const nameParts = nameWithComma.split(',');
-    if (nameParts.length !== 2) return null; // Expect "LastName, FirstName"
+    if (!namePart) return { rank, firstName: null, lastName: null };
 
-    const lastName = nameParts[0].trim();
-    const firstName = nameParts[1].trim();
+    const parts = namePart.split(' ').filter(p => p);
+    if (parts.length >= 2) {
+      const lastName = parts.pop()!; // Last part is lastName
+      const firstName = parts.join(' '); // Remaining parts are firstName (could include middle names)
+      if (firstName && lastName) {
+        return { rank, firstName, lastName };
+      }
+    }
     
-    if (!RANKS.includes(rank as typeof RANKS[number])) return null; // Validate rank
+    // Fallback if parsing fails
+    if (parts.length === 1 && parts[0]) {
+      return { rank, firstName: null, lastName: parts[0] }; // Assume single remaining part is lastName
+    }
+    
+    return { rank, firstName: null, lastName: namePart }; // If still unparsed, put all in lastName
+  }
 
-    return { name: `${lastName}, ${firstName}`, rank, serviceId, firstName, lastName };
-  };
 
   const parseDate = (dateString: string): Date | null => {
-    // Try common formats. Date-fns parse is more reliable.
     const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd"];
     for (const fmt of formatsToTry) {
       const parsed = parseDateFns(dateString, fmt, new Date());
       if (isValidDate(parsed)) return parsed;
     }
-    // Fallback to new Date() for ISO-like or other standard JS parsable formats
     const directParsed = new Date(dateString);
     if (isValidDate(directParsed)) return directParsed;
     
@@ -534,22 +548,39 @@ export default function TrainingPage() {
         errors.push("CSV must have a header and at least one data row.");
       } else {
         const headerLine = lines[0].trim();
-        const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Remove surrounding quotes if any
-        const expectedHeader = ["Member Name-Rank-ID", "EffectiveDate", "EndDate", "Accomplishment"];
+        const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+        const expectedHeader = ["MemberUID", "Member Rank - Name", "EffectiveDate", "Accomplishment"];
         
-        // Looser header check (contains all expected, order doesn't matter for this simplified check)
         const allHeadersPresent = expectedHeader.every(eh => header.includes(eh));
 
         if (!allHeadersPresent) {
             errors.push(`Invalid CSV header. Expected columns (any order): ${expectedHeader.join(', ')}. Got: ${header.join(',')}`);
         } else {
-            // Find actual indices of headers
             const headerIndices: Record<string, number> = {};
             expectedHeader.forEach(eh => {
                 headerIndices[eh] = header.indexOf(eh);
+                if (headerIndices[eh] === -1) {
+                  errors.push(`Missing expected header column: "${eh}"`);
+                }
             });
+
+            if (errors.length > 0) { // If any expected header is missing
+                 toast({
+                    variant: "destructive",
+                    title: "CSV Import Failed",
+                    description: (
+                        <ScrollArea className="max-h-40">
+                            <pre className="whitespace-pre-wrap text-xs">
+                                Missing one or more required CSV header columns. Details:\n{errors.join("\n")}
+                            </pre>
+                        </ScrollArea>
+                    ),
+                    duration: 15000,
+                });
+                if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                return;
+            }
             
-            // First pass: check if all members exist
             const membersToProcess: Array<{ staffMember: StaffMember, csvRow: Record<string, string>, rowIndex: number }> = [];
             let allMembersFound = true;
 
@@ -559,8 +590,8 @@ export default function TrainingPage() {
 
                 const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
                 if (values.length !== header.length) {
-                    errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}.`);
-                    allMembersFound = false; // Consider this a fatal error for the row
+                    errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line}"`);
+                    allMembersFound = false;
                     continue;
                 }
                 
@@ -569,24 +600,35 @@ export default function TrainingPage() {
                     csvData[eh] = values[headerIndices[eh]];
                 });
 
-                const memberRankIdStr = csvData["Member Name-Rank-ID"];
-                const parsedMemberInfo = parseMemberRankId(memberRankIdStr);
+                const memberRankNameStr = csvData["Member Rank - Name"];
+                const serviceNumber = csvData["MemberUID"];
+                const { rank, firstName, lastName } = parseMemberRankName(memberRankNameStr);
 
-                if (!parsedMemberInfo) {
-                    errors.push(`Row ${i + 1}: Could not parse "Member Name-Rank-ID": "${memberRankIdStr}". Expected format: LastName, FirstName-RANK-ServiceID.`);
+                if (!serviceNumber) {
+                    errors.push(`Row ${i + 1}: Missing "MemberUID".`);
                     allMembersFound = false;
                     continue;
                 }
+                if (!rank) {
+                  errors.push(`Row ${i + 1}: Could not parse rank from "Member Rank - Name": "${memberRankNameStr}". Valid ranks: ${RANKS.join(", ")}`);
+                  allMembersFound = false;
+                  continue;
+                }
+                if (!firstName || !lastName) {
+                  errors.push(`Row ${i + 1}: Could not parse first and last name from "Member Rank - Name": "${memberRankNameStr}". Expected format: "RANK FirstName LastName".`);
+                  allMembersFound = false;
+                  continue;
+                }
 
                 const matchedStaff = initialStaff.find(
-                    (sm) => sm.serviceNumber === parsedMemberInfo.serviceId &&
-                           sm.rank === parsedMemberInfo.rank &&
-                           sm.firstName.toLowerCase() === parsedMemberInfo.firstName.toLowerCase() &&
-                           sm.lastName.toLowerCase() === parsedMemberInfo.lastName.toLowerCase()
+                    (sm) => sm.serviceNumber === serviceNumber &&
+                           sm.rank === rank &&
+                           sm.firstName.toLowerCase() === firstName.toLowerCase() &&
+                           sm.lastName.toLowerCase() === lastName.toLowerCase()
                 );
 
                 if (!matchedStaff) {
-                    errors.push(`Row ${i + 1}: Staff member "${parsedMemberInfo.lastName}, ${parsedMemberInfo.firstName} (${parsedMemberInfo.rank}, ${parsedMemberInfo.serviceId})" not found. Please ensure staff profile exists in Staff Management.`);
+                    errors.push(`Row ${i + 1}: Staff member "${lastName}, ${firstName} (${rank}, ${serviceNumber})" not found. Please ensure staff profile exists.`);
                     allMembersFound = false;
                 } else {
                     membersToProcess.push({ staffMember: matchedStaff, csvRow: csvData, rowIndex: i + 1 });
@@ -594,14 +636,13 @@ export default function TrainingPage() {
             }
 
             if (!allMembersFound) {
-                // Do not proceed with adding logs if any member was not found
                 toast({
                     variant: "destructive",
                     title: "CSV Import Failed",
                     description: (
                         <ScrollArea className="max-h-40">
                             <pre className="whitespace-pre-wrap text-xs">
-                                One or more staff members in the CSV could not be found in the system. Please create or import their profiles first in Staff Management. Details:\n{errors.join("\n")}
+                                One or more staff members in the CSV could not be found or data was malformed. Details:\n{errors.join("\n")}
                             </pre>
                         </ScrollArea>
                     ),
@@ -611,16 +652,13 @@ export default function TrainingPage() {
                 return;
             }
 
-            // Second pass: process members if all were found
             membersToProcess.forEach(({ staffMember, csvRow, rowIndex }) => {
                 const accomplishment = csvRow["Accomplishment"];
                 const effectiveDateStr = csvRow["EffectiveDate"];
-                // EndDate is not directly used in TrainingLog but could be stored in achievementDetails if needed
-                // const endDateStr = csvData["EndDate"]; 
-
+                
                 if (!accomplishment) {
                     errors.push(`Row ${rowIndex}: Missing "Accomplishment".`);
-                    return; // Skip this log entry
+                    return; 
                 }
                 if (!effectiveDateStr) {
                     errors.push(`Row ${rowIndex}: Missing "EffectiveDate".`);
@@ -629,7 +667,7 @@ export default function TrainingPage() {
 
                 const completionDate = parseDate(effectiveDateStr);
                 if (!completionDate) {
-                    errors.push(`Row ${rowIndex}: Invalid "EffectiveDate" format for "${effectiveDateStr}". Please use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
+                    errors.push(`Row ${rowIndex}: Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
                     return;
                 }
                 
@@ -637,11 +675,11 @@ export default function TrainingPage() {
                     id: crypto.randomUUID(),
                     rank: staffMember.rank,
                     staffName: `${staffMember.lastName}, ${staffMember.firstName}`,
-                    squadron: staffMember.squadron || "N/A", // Use staff member's squadron
-                    currentRole: staffMember.role, // Use staff member's role
+                    squadron: staffMember.squadron || "N/A", 
+                    currentRole: staffMember.role, 
                     courseName: accomplishment,
                     completionDate: completionDate,
-                    qualificationAchieved: accomplishment, // Also set as qualification
+                    qualificationAchieved: accomplishment,
                 });
             });
         }
@@ -651,11 +689,11 @@ export default function TrainingPage() {
         setTrainingLogsList(prev => [...prev, ...newLogs].sort((a,b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime() ));
         toast({ title: "Import Successful", description: `${newLogs.length} accomplishment(s) imported.` });
       }
-      if (errors.length > 0) { // These errors are from the second pass if any
-        const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+      if (errors.length > 0 && newLogs.length === 0) { // Only show if all rows failed (excluding header issues handled above)
+        const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
         toast({
             variant: "destructive",
-            title: `CSV Import ${newLogs.length > 0 ? "Partially Successful" : "Failed"}`,
+            title: `CSV Import Failed`,
             description: (
               <ScrollArea className="max-h-40">
                 <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
@@ -663,7 +701,21 @@ export default function TrainingPage() {
             ),
             duration: 10000, 
         });
+      } else if (errors.length > 0 && newLogs.length > 0) { // Partial success
+          const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+           toast({
+            variant: "default", // Use default or a warning variant if available
+            title: `CSV Import Partially Successful`,
+            description: (
+              <ScrollArea className="max-h-40">
+                <pre className="whitespace-pre-wrap text-xs">{newLogs.length} records imported. Some rows had errors:\n{errorMessages}</pre>
+              </ScrollArea>
+            ),
+            duration: 10000, 
+        });
       }
+
+
       if (accomplishmentCsvInputRef.current) {
         accomplishmentCsvInputRef.current.value = ""; 
       }
@@ -822,15 +874,15 @@ export default function TrainingPage() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
-          To bulk import training accomplishments, upload a CSV file with the following columns (header row required):
+          To bulk import training accomplishments, upload a CSV file with the following columns (header row required, order matters):
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
-            <li><code>Member Name-Rank-ID</code> (Text, Required. Format: &quot;LastName, FirstName-RANK-ServiceID&quot; e.g., &quot;Smith, Jane-FLTLT(AAFC)-8001234&quot;. RANK must be one of: {RANKS.join(", ")}. The ServiceID, Rank, and Name must match an existing staff profile.)</li>
-            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD. This will be the completion date of the training.)</li>
-            <li><code>EndDate</code> (Date, Optional. Currently not directly stored but can be included in CSV.)</li>
+            <li><code>MemberUID</code> (Text, Required. This is the Staff Member&apos;s Service Number, e.g., &quot;8001234&quot;)</li>
+            <li><code>Member Rank - Name</code> (Text, Required. Format: &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")}. The Service Number, Rank, and Name must exactly match an existing staff profile in Staff Management.)</li>
+            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD. This will be the completion date of the training.)</li>
             <li><code>Accomplishment</code> (Text, Required. This will be used as the Course Name and Qualification Achieved for the training log.)</li>
           </ul>
           <p className="mt-2 text-xs">
-            <strong>Important:</strong> All staff members identified in the CSV (via &quot;Member Name-Rank-ID&quot;) must already exist in the Staff Management section. If any member is not found, the entire CSV import will be rejected.
+            <strong>Important:</strong> All staff members identified in the CSV (via MemberUID, Member Rank - Name) must already exist in the Staff Management section. If any member is not found, or if data is malformed, the entire CSV import will be rejected.
           </p>
         </AlertDescription>
       </Alert>
@@ -990,7 +1042,7 @@ export default function TrainingPage() {
             </li>
              <li className="flex items-center">
                <UploadCloud className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Bulk import training accomplishments via CSV. (Implemented - See instructions below)
+              Bulk import training accomplishments via CSV. (Implemented - See instructions above)
             </li>
             <li className="flex items-center">
               <BarChartHorizontalBig className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
