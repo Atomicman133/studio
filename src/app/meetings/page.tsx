@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, DownloadCloud, Edit3, Info } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -50,7 +50,7 @@ import type { Meeting } from "./meeting-schema";
 import { MeetingForm } from "./components/meeting-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge"; // Badge import was missing
 
 const initialMeetings: Meeting[] = [
   {
@@ -75,6 +75,15 @@ const initialMeetings: Meeting[] = [
   }
 ];
 
+function downloadTextFile(filename: string, text: string) {
+  const element = document.createElement('a');
+  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+  element.setAttribute('download', filename);
+  element.style.display = 'none';
+  document.body.appendChild(element);
+  element.click();
+  document.body.removeChild(element);
+}
 
 export default function MeetingsPage() {
   const [meetingsList, setMeetingsList] = React.useState<Meeting[]>(initialMeetings);
@@ -115,6 +124,29 @@ export default function MeetingsPage() {
       setMeetingsList((prev) => prev.filter((meeting) => meeting.id !== meetingToDelete.id));
       setMeetingToDelete(null);
     }
+  };
+
+  const handleExportMinutes = (meeting: Meeting) => {
+    const meetingDate = format(meeting.date, "yyyy-MM-dd");
+    const filename = `meeting_minutes_${meeting.title.replace(/\s+/g, '_')}_${meetingDate}.txt`;
+
+    let content = `Meeting Title: ${meeting.title}\n`;
+    content += `Date: ${format(meeting.date, "PPP p")}\n`; // PPP for date, p for time
+    content += `Attendees: ${meeting.attendees}\n\n`;
+
+    content += `Agenda:\n${meeting.agenda}\n\n`;
+
+    if (meeting.discussionPoints) {
+      content += `Discussion Points:\n${meeting.discussionPoints}\n\n`;
+    }
+    if (meeting.decisionsMade) {
+      content += `Decisions Made:\n${meeting.decisionsMade}\n\n`;
+    }
+    if (meeting.actionItemsText) {
+      content += `Action Items:\n${meeting.actionItemsText}\n`;
+    }
+    
+    downloadTextFile(filename, content);
   };
 
   const openFormForNew = () => {
@@ -189,6 +221,10 @@ export default function MeetingsPage() {
                           <DropdownMenuItem onClick={() => handleEdit(meeting)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportMinutes(meeting)}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Export Minutes
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -280,7 +316,7 @@ export default function MeetingsPage() {
                         )}
                     </div>
                 </ScrollArea>
-                <DialogFooter className="pt-4">
+                <DialogFooter className="pt-4 border-t">
                     <Button variant="outline" onClick={() => {
                       if (viewingMeeting) {
                         handleEdit(viewingMeeting);
@@ -343,12 +379,12 @@ export default function MeetingsPage() {
               Document discussion points, decisions made, and assign action items with due dates and responsible persons. (Partially implemented: text fields)
             </li>
             <li className="flex items-center">
-              <DownloadCloud className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
+              <Download className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
               Attach relevant documents or files to meeting records.
             </li>
             <li className="flex items-center">
-              <DownloadCloud className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Search, filter, and export meeting minutes and action item lists.
+              <Download className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
+              Search, filter, and export meeting minutes and action item lists. (Export partially implemented)
             </li>
           </ul>
         </CardContent>
@@ -356,4 +392,3 @@ export default function MeetingsPage() {
     </div>
   );
 }
-
