@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -51,24 +51,41 @@ import { TrainingLogForm } from "./components/training-log-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import type { RANKS } from "@/app/staff/staff-schema";
 
 const initialTrainingLogs: TrainingLog[] = [
   {
     id: "t1",
-    staffName: "Jane Smith",
+    rank: "FLTLT" as typeof RANKS[number],
+    staffName: "Smith, Jane",
+    squadron: "123 Squadron",
+    currentRole: "Training Officer",
     courseName: "Officer Development Course",
     completionDate: new Date("2023-11-20"),
     qualificationAchieved: "ODC Certificate",
   },
   {
     id: "t2",
-    staffName: "John Doe",
+    rank: "FLGOFF" as typeof RANKS[number],
+    staffName: "Doe, John",
+    squadron: "456 Squadron",
+    currentRole: "Safety Officer",
     courseName: "Range Safety Officer Training",
     completionDate: new Date("2024-02-10"),
     instructorQualification: "Certified RSO",
     achievementDetails: "Top score in practical assessment."
   },
 ];
+
+function downloadTextFile(filename: string, text: string) {
+  const element = document.createElement('a');
+  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+  element.setAttribute('download', filename);
+  element.style.display = 'none';
+  document.body.appendChild(element);
+  element.click();
+  document.body.removeChild(element);
+}
 
 export default function TrainingPage() {
   const [trainingLogsList, setTrainingLogsList] = React.useState<TrainingLog[]>(initialTrainingLogs);
@@ -108,6 +125,32 @@ export default function TrainingPage() {
       setTrainingLogsList((prev) => prev.filter((log) => log.id !== logToDelete.id));
       setLogToDelete(null);
     }
+  };
+
+  const handleExportTrainingRecord = (log: TrainingLog) => {
+    const recordDate = format(log.completionDate, "yyyy-MM-dd");
+    const filename = `training_record_${log.rank}_${log.staffName.replace(/\s+/g, '_')}_${log.courseName.replace(/\s+/g, '_')}_${recordDate}.txt`;
+
+    let content = `Training Record\n`;
+    content += `------------------------------------\n`;
+    content += `Rank: ${log.rank}\n`;
+    content += `Staff Name: ${log.staffName}\n`;
+    content += `Squadron: ${log.squadron}\n`;
+    content += `Current Role: ${log.currentRole}\n`;
+    content += `Course Name: ${log.courseName}\n`;
+    content += `Completion Date: ${format(log.completionDate, "PPP")}\n\n`;
+    
+    if (log.qualificationAchieved) {
+      content += `Qualification Achieved: ${log.qualificationAchieved}\n`;
+    }
+    if (log.instructorQualification) {
+      content += `Instructor Qualification: ${log.instructorQualification}\n`;
+    }
+    if (log.achievementDetails) {
+      content += `Achievements/Awards:\n${log.achievementDetails}\n`;
+    }
+    
+    downloadTextFile(filename, content);
   };
 
   const openFormForNew = () => {
@@ -153,20 +196,22 @@ export default function TrainingPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Staff Name</TableHead>
+                  <TableHead>Rank & Name</TableHead>
                   <TableHead>Course/Training</TableHead>
+                  <TableHead className="hidden md:table-cell">Squadron</TableHead>
                   <TableHead>Completion Date</TableHead>
-                  <TableHead className="hidden md:table-cell">Qualification</TableHead>
+                  <TableHead className="hidden lg:table-cell">Qualification</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {trainingLogsList.map((log) => (
                   <TableRow key={log.id}>
-                    <TableCell className="font-medium">{log.staffName}</TableCell>
+                    <TableCell className="font-medium">{log.rank} {log.staffName}</TableCell>
                     <TableCell>{log.courseName}</TableCell>
+                    <TableCell className="hidden md:table-cell">{log.squadron}</TableCell>
                     <TableCell>{format(log.completionDate, "PP")}</TableCell>
-                    <TableCell className="hidden md:table-cell">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -184,6 +229,10 @@ export default function TrainingPage() {
                           <DropdownMenuItem onClick={() => handleEdit(log)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportTrainingRecord(log)}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Export Record
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -242,14 +291,22 @@ export default function TrainingPage() {
                 <DialogHeader>
                     <DialogTitle>{viewingLog.courseName}</DialogTitle>
                     <DialogDescription>
-                        Training for {viewingLog.staffName}, completed on {format(viewingLog.completionDate, "PPP")}
+                        Training for {viewingLog.rank} {viewingLog.staffName}, completed on {format(viewingLog.completionDate, "PPP")}
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
                     <div className="space-y-4 py-4">
                         <div>
                             <h3 className="font-semibold text-sm mb-1">Staff Member</h3>
-                            <p className="text-sm text-muted-foreground">{viewingLog.staffName}</p>
+                            <p className="text-sm text-muted-foreground">{viewingLog.rank} {viewingLog.staffName}</p>
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-sm mb-1">Squadron</h3>
+                            <p className="text-sm text-muted-foreground">{viewingLog.squadron}</p>
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-sm mb-1">Current Role</h3>
+                            <p className="text-sm text-muted-foreground">{viewingLog.currentRole}</p>
                         </div>
                          {viewingLog.qualificationAchieved && (
                             <div>
@@ -269,9 +326,12 @@ export default function TrainingPage() {
                                 <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingLog.achievementDetails}</p>
                             </div>
                         )}
+                         {(!viewingLog.qualificationAchieved && !viewingLog.instructorQualification && !viewingLog.achievementDetails) && (
+                            <p className="text-sm text-muted-foreground italic">No additional qualifications or achievements noted for this record.</p>
+                         )}
                     </div>
                 </ScrollArea>
-                <DialogFooter className="pt-4">
+                <DialogFooter className="pt-4 border-t">
                     <Button variant="outline" onClick={() => {
                       if (viewingLog) {
                         handleEdit(viewingLog);
@@ -292,7 +352,7 @@ export default function TrainingPage() {
             <AlertDialogHeader>
               <AlertDialogTitle>Are you sure?</AlertDialogTitle>
               <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the training record for <strong>{logToDelete.staffName} - {logToDelete.courseName}</strong>.
+                This action cannot be undone. This will permanently delete the training record for <strong>{logToDelete.rank} {logToDelete.staffName} - {logToDelete.courseName}</strong>.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -340,7 +400,7 @@ export default function TrainingPage() {
             </li>
             <li className="flex items-center">
               <BarChartHorizontalBig className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Generate reports on training completion, qualification status, and skill gaps.
+              Generate reports on training completion, qualification status, and skill gaps. (Export single record implemented)
             </li>
              <li className="flex items-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>

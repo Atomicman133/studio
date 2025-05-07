@@ -1,9 +1,13 @@
 
 import { z } from 'zod';
+import { RANKS } from '@/app/staff/staff-schema'; // Import RANKS
 
 export const trainingLogSchema = z.object({
   id: z.string().uuid().optional(),
-  staffName: z.string().min(1, "Staff member's name is required"), // Simplified from staffMemberId for now
+  rank: z.enum(RANKS, { required_error: "Rank is required" }),
+  staffName: z.string().min(1, "Staff member's name is required"),
+  squadron: z.string().min(1, "Squadron is required"),
+  currentRole: z.string().min(1, "Current role is required"),
   courseName: z.string().min(1, "Course name is required"),
   completionDate: z.date({ required_error: "Completion date is required" }),
   qualificationAchieved: z.string().optional().describe("e.g., Certificate IV in Training and Assessment"),
@@ -13,3 +17,4 @@ export const trainingLogSchema = z.object({
 });
 
 export type TrainingLog = z.infer<typeof trainingLogSchema>;
+

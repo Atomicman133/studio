@@ -22,9 +22,17 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { format } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { RANKS } from "@/app/staff/staff-schema"; // Import RANKS
 
 interface TrainingLogFormProps {
   onSubmit: (data: TrainingLog) => void;
@@ -37,7 +45,10 @@ export function TrainingLogForm({ onSubmit, defaultValues, onCancel, isEditing }
   const form = useForm<TrainingLog>({
     resolver: zodResolver(trainingLogSchema),
     defaultValues: defaultValues || {
+      rank: undefined,
       staffName: "",
+      squadron: "",
+      currentRole: "",
       courseName: "",
       completionDate: undefined,
       qualificationAchieved: "",
@@ -49,26 +60,91 @@ export function TrainingLogForm({ onSubmit, defaultValues, onCancel, isEditing }
   const handleSubmit = (data: TrainingLog) => {
     onSubmit(data);
      if (!isEditing) {
-      form.reset();
+      form.reset({
+        rank: undefined,
+        staffName: "",
+        squadron: "",
+        currentRole: "",
+        courseName: "",
+        completionDate: undefined,
+        qualificationAchieved: "",
+        instructorQualification: "",
+        achievementDetails: "",
+      });
     }
   };
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-        <FormField
-          control={form.control}
-          name="staffName"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Staff Member Name</FormLabel>
-              <FormControl>
-                <Input placeholder="e.g., John Doe" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <FormField
+            control={form.control}
+            name="rank"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Rank</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select rank" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {RANKS.map((rank) => (
+                      <SelectItem key={rank} value={rank}>
+                        {rank}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="staffName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Staff Member Name</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g., John Doe (Surname, Firstname)" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="squadron"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Squadron</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g., 123 Squadron" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="currentRole"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Current Role</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g., Training Officer" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
 
         <FormField
           control={form.control}
