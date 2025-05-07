@@ -138,7 +138,7 @@ function downloadTextFile(filename: string, text: string) {
 
 export default function TrainingPage() {
   const queryClient = useQueryClient();
-  const { toast } } from useToast();
+  const { toast } = useToast();
   const { data: staffList = [], isLoading: isLoadingStaff } = useStaff(); // Fetch staff data
 
   // --- React Query for Training Logs ---
@@ -506,6 +506,7 @@ export default function TrainingPage() {
                       duration: 15000,
                   });
                   if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                  setIsImportingAccomplishments(false); // Reset loading state
                   return;
               }
 
@@ -516,7 +517,32 @@ export default function TrainingPage() {
                   const line = lines[i].trim();
                   if (!line) continue;
 
-                  const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                  // Handle commas within quoted fields (basic CSV parsing)
+                  const values = [];
+                  let currentVal = '';
+                  let inQuotes = false;
+                  for (let char of line) {
+                      if (char === '"' && !inQuotes) {
+                          inQuotes = true;
+                      } else if (char === '"' && inQuotes) {
+                          // Check for double quotes representing a single quote
+                          if (line.indexOf('""', line.indexOf(char)) === line.indexOf(char)) {
+                              currentVal += '"';
+                              // Skip the next quote
+                              line = line.substring(0, line.indexOf(char)) + line.substring(line.indexOf(char) + 1);
+                          } else {
+                              inQuotes = false;
+                          }
+                      } else if (char === ',' && !inQuotes) {
+                          values.push(currentVal.trim());
+                          currentVal = '';
+                      } else {
+                          currentVal += char;
+                      }
+                  }
+                  values.push(currentVal.trim()); // Add the last value
+
+
                   if (values.length !== header.length) {
                       errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line}"`);
                       preliminaryParsingOk = false;
@@ -524,8 +550,8 @@ export default function TrainingPage() {
                   }
 
                   const csvRowData: Record<string, string> = {};
-                  expectedHeader.forEach(eh => {
-                      csvRowData[eh] = values[headerIndices[eh]];
+                   expectedHeader.forEach(eh => {
+                      csvRowData[eh] = values[headerIndices[eh]].replace(/^"|"$/g, ''); // Remove surrounding quotes if present
                   });
 
                   const serviceNumber = csvRowData["MemberUID"];
@@ -562,6 +588,7 @@ export default function TrainingPage() {
                       duration: 15000,
                   });
                   if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                  setIsImportingAccomplishments(false); // Reset loading state
                   return;
               }
 
@@ -1018,4 +1045,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-
