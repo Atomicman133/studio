@@ -552,7 +552,7 @@ export default function StaffPage() {
                             </div>
                         </div>
                         
-                        <Accordion type="multiple" collapsible className="w-full">
+                        <Accordion type="multiple" className="w-full">
                           <AccordionItem value="training">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
@@ -704,4 +704,3 @@ export default function StaffPage() {
   );
 }
     
-
