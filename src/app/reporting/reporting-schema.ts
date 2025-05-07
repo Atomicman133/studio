@@ -35,20 +35,23 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
     name: 'Working With Children Check',
     // No expiry specified, considered current if a record exists.
     // In a real system, WWCCs have expiry dates that would need to be tracked.
+    // For this simplified model, we'll treat it as a one-time check for existence.
+    // A more robust system would store the WWCC expiry date separately.
+    yearsToExpire: undefined, // Or a very long period if it's considered 'current indefinitely once obtained' in this model
     identifier: (log: TrainingLog) =>
       (log.courseName.toLowerCase().includes('working with children check') || (log.qualificationAchieved || '').toLowerCase().includes('wwcc'))
   },
   {
     key: 'codeOfConduct',
     name: 'Code of Conduct & Behavioural Policy Acceptance',
-    // No expiry specified, considered current if a record exists.
+    yearsToExpire: undefined, // Typically a one-time acceptance or renewed periodically (e.g., annually, not based on completion date)
     identifier: (log: TrainingLog) =>
       log.courseName.toLowerCase().includes('code of conduct') || log.courseName.toLowerCase().includes('behavioural policy acceptance')
   },
   {
     key: 'psychAssessment',
     name: 'Psychological Assessment',
-    // No expiry specified, considered current if a record exists.
+    yearsToExpire: undefined, // Typically a one-time assessment for suitability
     identifier: (log: TrainingLog) =>
       log.courseName.toLowerCase().includes('psychological assessment')
   },
