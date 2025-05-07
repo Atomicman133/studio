@@ -1,9 +1,8 @@
 
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,7 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
+  DialogFooter, // Ensure DialogFooter is imported
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -52,6 +51,8 @@ import { MeetingForm } from "./components/meeting-form";
 import { format } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge"; 
+import jsPDF from 'jspdf';
+
 
 export const initialMeetings: Meeting[] = [
   {
@@ -59,7 +60,7 @@ export const initialMeetings: Meeting[] = [
     title: "Weekly Sync",
     date: new Date("2024-07-01T10:00:00Z"),
     attendees: "John Doe, Jane Smith, Alice Williams",
-    agenda: "1. Project Updates\n2. Blockers\n3. Next Steps",
+    agendaNotes: "1. Project Updates\n2. Blockers\n3. Next Steps",
     discussionPoints: "Discussed progress on Project Phoenix. Jane needs access to new API.",
     decisionsMade: "Grant Jane API access. John to follow up on deployment.",
     actionItemsText: "- John: Follow up on deployment (ASAP)\n- Jane: Integrate new API (by EOW)"
@@ -69,22 +70,13 @@ export const initialMeetings: Meeting[] = [
     title: "Q3 Planning",
     date: new Date("2024-06-15T14:00:00Z"),
     attendees: "Alice Brown, Bob Green, Charlie Black, Jane Smith",
-    agenda: "1. Review Q2 Performance\n2. Q3 Goals\n3. Resource Allocation",
+    agendaNotes: "1. Review Q2 Performance\n2. Q3 Goals\n3. Resource Allocation",
     discussionPoints: "Q2 targets mostly met. Discussed new initiatives for Q3.",
     decisionsMade: "Finalize Q3 roadmap by end of week.",
     actionItemsText: "- Alice: Draft Q3 roadmap (by EOD Wednesday)"
   }
 ];
 
-function downloadTextFile(filename: string, text: string) {
-  const element = document.createElement('a');
-  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-  element.setAttribute('download', filename);
-  element.style.display = 'none';
-  document.body.appendChild(element);
-  element.click();
-  document.body.removeChild(element);
-}
 
 export default function MeetingsPage() {
   const [meetingsList, setMeetingsList] = React.useState<Meeting[]>(initialMeetings);
@@ -96,7 +88,7 @@ export default function MeetingsPage() {
 
   const handleAddMeeting = (data: Meeting) => {
     const newMeeting = { ...data, id: crypto.randomUUID() };
-    setMeetingsList((prev) => [newMeeting, ...prev]); // Add to top
+    setMeetingsList((prev) => [newMeeting, ...prev]); 
     setIsFormOpen(false);
   };
 
@@ -127,27 +119,54 @@ export default function MeetingsPage() {
     }
   };
 
-  const handleExportMinutes = (meeting: Meeting) => {
+  const handleExportMinutesAsPdf = (meeting: Meeting) => {
+    const doc = new jsPDF();
     const meetingDate = format(meeting.date, "yyyy-MM-dd");
-    const filename = `meeting_minutes_${meeting.title.replace(/\s+/g, '_')}_${meetingDate}.txt`;
+    const filename = `meeting_minutes_${meeting.title.replace(/\s+/g, '_')}_${meetingDate}.pdf`;
 
-    let content = `Meeting Title: ${meeting.title}\n`;
-    content += `Date: ${format(meeting.date, "PPP p")}\n`; // PPP for date, p for time
-    content += `Attendees: ${meeting.attendees}\n\n`;
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxLineWidth = pageWidth - (margin * 2);
 
-    content += `Agenda:\n${meeting.agenda}\n\n`;
-
-    if (meeting.discussionPoints) {
-      content += `Discussion Points:\n${meeting.discussionPoints}\n\n`;
-    }
-    if (meeting.decisionsMade) {
-      content += `Decisions Made:\n${meeting.decisionsMade}\n\n`;
-    }
-    if (meeting.actionItemsText) {
-      content += `Action Items:\n${meeting.actionItemsText}\n`;
-    }
+    const addTextSection = (title: string, text?: string) => {
+      if (!text || text.trim() === "") return;
+      if (yPos > doc.internal.pageSize.getHeight() - margin - sectionSpacing) { // Check space before adding section
+        doc.addPage();
+        yPos = margin;
+      }
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing;
+      
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      const lines = doc.splitTextToSize(text, maxLineWidth - indent);
+      doc.text(lines, margin + indent, yPos);
+      yPos += lines.length * (lineSpacing * 0.8) + sectionSpacing * 0.7; 
+    };
     
-    downloadTextFile(filename, content);
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Meeting Minutes: ${meeting.title}`, margin, yPos);
+    yPos += sectionSpacing * 1.2;
+
+    addTextSection("Date:", format(meeting.date, "PPP p"));
+    addTextSection("Attendees:", meeting.attendees);
+
+    if (meeting.agendaDocumentFileName) {
+      addTextSection("Agenda Document:", `${meeting.agendaDocumentFileName} (Uploaded)`);
+    }
+    addTextSection("Agenda Notes:", meeting.agendaNotes);
+    addTextSection("Discussion Points:", meeting.discussionPoints);
+    addTextSection("Decisions Made:", meeting.decisionsMade);
+    addTextSection("Action Items:", meeting.actionItemsText);
+    
+    doc.save(filename);
   };
 
   const openFormForNew = () => {
@@ -173,12 +192,12 @@ export default function MeetingsPage() {
             <div className="flex items-center gap-3">
                 <FileText className="h-8 w-8 text-primary hidden sm:block" />
                 <div>
-                <CardTitle className="text-2xl">Meeting Logger</CardTitle>
+                <CardTitle className="text-2xl">Meeting Records</CardTitle>
                 <CardDescription>Record and document meeting minutes, action items, and decisions efficiently.</CardDescription>
                 </div>
             </div>
             <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto">
-              <PlusCircle className="mr-2 h-5 w-5" /> Log New Meeting
+              <PlusCircle className="mr-2 h-5 w-5" /> Log New Meeting Record
             </Button>
           </div>
         </CardHeader>
@@ -186,8 +205,8 @@ export default function MeetingsPage() {
           {meetingsList.length === 0 ? (
              <div className="flex flex-col items-center justify-center py-12 text-center">
                 <FileText className="h-16 w-16 text-muted-foreground mb-4" />
-                <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Meetings Logged Yet</h3>
-                <p className="text-muted-foreground mb-4">Click &quot;Log New Meeting&quot; to get started.</p>
+                <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Meeting Records Yet</h3>
+                <p className="text-muted-foreground mb-4">Click &quot;Log New Meeting Record&quot; to get started.</p>
              </div>
           ) : (
             <Table>
@@ -223,9 +242,9 @@ export default function MeetingsPage() {
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleExportMinutes(meeting)}>
+                          <DropdownMenuItem onClick={() => handleExportMinutesAsPdf(meeting)}>
                             <Download className="mr-2 h-4 w-4" />
-                            Export Minutes
+                            Export as PDF
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -246,7 +265,7 @@ export default function MeetingsPage() {
         </CardContent>
          {meetingsList.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground">
-            Showing {meetingsList.length} of {meetingsList.length} meeting logs.
+            Showing {meetingsList.length} of {meetingsList.length} meeting records.
           </CardFooter>
         )}
       </Card>
@@ -257,12 +276,12 @@ export default function MeetingsPage() {
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {editingMeeting ? "Edit Meeting Log" : "Log New Meeting"}
+              {editingMeeting ? "Edit Meeting Record" : "Log New Meeting Record"}
             </DialogTitle>
             <DialogDescription>
               {editingMeeting
                 ? "Update the details of the meeting."
-                : "Fill in the form to log a new meeting."}
+                : "Fill in the form to log a new meeting record."}
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[70vh] p-1">
@@ -293,10 +312,20 @@ export default function MeetingsPage() {
                             <h3 className="font-semibold text-sm mb-1">Attendees</h3>
                             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingMeeting.attendees}</p>
                         </div>
-                        <div>
-                            <h3 className="font-semibold text-sm mb-1">Agenda</h3>
-                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingMeeting.agenda}</p>
-                        </div>
+                        {viewingMeeting.agendaDocumentFileName && viewingMeeting.agendaDocumentDataUrl && (
+                           <div>
+                                <h3 className="font-semibold text-sm mb-1">Agenda Document</h3>
+                                <a href={viewingMeeting.agendaDocumentDataUrl} download={viewingMeeting.agendaDocumentFileName} className="text-primary hover:underline flex items-center text-sm">
+                                    <Paperclip className="mr-1 h-4 w-4 flex-shrink-0" /> {viewingMeeting.agendaDocumentFileName}
+                                </a>
+                            </div>
+                        )}
+                        {viewingMeeting.agendaNotes && (
+                          <div>
+                              <h3 className="font-semibold text-sm mb-1">Agenda Notes</h3>
+                              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingMeeting.agendaNotes}</p>
+                          </div>
+                        )}
                         {viewingMeeting.discussionPoints && (
                             <div>
                                 <h3 className="font-semibold text-sm mb-1">Discussion Points</h3>
@@ -337,7 +366,7 @@ export default function MeetingsPage() {
             <AlertDialogHeader>
               <AlertDialogTitle>Are you sure?</AlertDialogTitle>
               <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the meeting log for &quot;<strong>{meetingToDelete.title}</strong>&quot; held on {format(meetingToDelete.date, "PP")}.
+                This action cannot be undone. This will permanently delete the meeting record for &quot;<strong>{meetingToDelete.title}</strong>&quot; held on {format(meetingToDelete.date, "PP")}.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -361,7 +390,7 @@ export default function MeetingsPage() {
                 <ListTodo className="h-6 w-6 text-primary/80" />
                 <div>
                     <CardTitle className="text-xl">Planned Features</CardTitle>
-                    <CardDescription>Future enhancements for the Meeting Logger.</CardDescription>
+                    <CardDescription>Future enhancements for Meeting Records.</CardDescription>
                 </div>
             </div>
         </CardHeader>
@@ -369,7 +398,7 @@ export default function MeetingsPage() {
           <ul className="list-disc pl-5 space-y-2 text-muted-foreground text-sm">
             <li className="flex items-center">
               <CalendarPlus className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Create new meeting records with date, time, attendees, and agenda. (Implemented)
+              Create new meeting records with date, time, attendees, agenda notes and optional agenda document. (Implemented)
             </li>
             <li className="flex items-center">
               <UsersIconLucide className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
@@ -381,11 +410,11 @@ export default function MeetingsPage() {
             </li>
             <li className="flex items-center">
               <Download className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Attach relevant documents or files to meeting records.
+              Attach relevant documents or files to meeting records (Agenda implemented).
             </li>
             <li className="flex items-center">
               <Download className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Search, filter, and export meeting minutes and action item lists. (Export partially implemented)
+              Search, filter, and export meeting minutes (PDF export implemented) and action item lists.
             </li>
           </ul>
         </CardContent>

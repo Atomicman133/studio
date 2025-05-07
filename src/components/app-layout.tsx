@@ -16,7 +16,7 @@ import {
   LayoutDashboard,
   Plane,
   FileSearch,
-  ClipboardList, // Added for Squadron Visits
+  ClipboardList, 
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -54,7 +54,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/meetings", label: "Meeting Logger", icon: FileText },
+  { href: "/meetings", label: "Meeting Records", icon: FileText },
   { href: "/training", label: "Training Overview", icon: GraduationCap },
   {
     href: "/pdps",
@@ -63,7 +63,7 @@ const navItems: NavItem[] = [
   },
   { href: "/discipline", label: "Discipline Actions", icon: Gavel },
   { href: "/audits", label: "Safety Audits", icon: ShieldCheck },
-  { href: "/squadron-visits", label: "Squadron Visits", icon: ClipboardList }, // Added Squadron Visits
+  { href: "/squadron-visits", label: "Squadron Visits", icon: ClipboardList }, 
   { href: "/reporting", label: "Compliance Reporting", icon: FileSearch }, 
   { href: "/staff", label: "Staff Management", icon: Users },
 ];
@@ -146,8 +146,8 @@ function NavMenuItemContent({
 
 
 function AppLayoutInternal({ children }: { children: React.ReactNode }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar(); // Removed setOpen as it was causing an error.
-  const isCollapsed = !isMobile && state === "collapsed";
+  const { isMobile, open: isSidebarOpen, setOpen: setSidebarOpen, openMobile, setOpenMobile, toggleSidebar } = useSidebar();
+  const isCollapsed = !isMobile && !isSidebarOpen;
 
 
   return (
@@ -233,8 +233,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (!isMounted) {
-    // You can render a static layout or null here to avoid hydration mismatch
-    return null; 
+    // Render a static layout or null for SSR to avoid hydration mismatch until client-side takes over
+    return (
+      <div className="flex min-h-screen w-full">
+        <div className="hidden md:flex md:flex-col md:w-[16rem] border-r bg-background shadow-sm">
+          {/* Static Sidebar Placeholder for SSR */}
+        </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 sm:px-6 shadow-sm">
+            {/* Static Header Placeholder for SSR */}
+          </header>
+          <main className="flex-1 p-4 sm:p-6 lg:p-8 bg-muted/20 dark:bg-muted/10">
+            {children}
+          </main>
+        </div>
+      </div>
+    );
   }
 
   return (
