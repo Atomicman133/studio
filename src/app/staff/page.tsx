@@ -59,8 +59,7 @@ import { RANKS } from "./staff-schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
-// Badge component is not used directly in this file after recent changes, can be removed if not needed by child components passed here.
-// import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData'; // Import hooks
 
 // Import types for related data (actual data will be fetched or passed)
@@ -372,44 +371,23 @@ export default function StaffPage() {
                  // break; // Uncomment to stop on first error
              }
           }
+           if (importedCount > 0) {
+              toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported.` });
+           }
         }
 
-        // Consolidate toast notifications
-        if (importedCount > 0 && errors.length === 0) {
-            toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
-        } else if (importedCount > 0 && errors.length > 0) {
-            const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
-            toast({
-                variant: "default", // Consider it partially successful
-                title: "CSV Import Partially Successful",
-                description: (
-                  <ScrollArea className="max-h-40">
-                    <pre className="whitespace-pre-wrap text-xs">
-                      {importedCount} records imported. Some rows had errors:
-                      <br />
-                      {errorMessages}
-                    </pre>
-                  </ScrollArea>
-                ),
-                duration: 10000,
-            });
-        } else if (errors.length > 0) { // No imports, only errors
-            const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
-            toast({
-                variant: "destructive",
-                title: "CSV Import Failed",
-                description: (
-                  <ScrollArea className="max-h-40">
-                    <pre className="whitespace-pre-wrap text-xs">
-                        {errorMessages}
-                    </pre>
-                  </ScrollArea>
-                ),
-                duration: 10000,
-            });
-        } else if (importedCount === 0 && errors.length === 0 && lines.length > 1) {
-            // No members to add (e.g., all duplicates or empty data rows) but no parsing errors.
-            toast({ title: "Import Information", description: "No new staff members were imported. Data might be empty or all entries already exist." });
+        if (errors.length > 0) {
+          const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? "\n...and more errors." : "");
+          toast({
+              variant: "destructive",
+              title: `CSV Import ${importedCount > 0 ? "Partially Successful" : "Failed"}`,
+              description: (
+                <ScrollArea className="max-h-40">
+                  <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
+                </ScrollArea>
+              ),
+              duration: 10000,
+          });
         }
 
 
@@ -612,8 +590,8 @@ export default function StaffPage() {
       )}
 
       {/* CSV Import Instructions */}
-       <Alert className="mt-8">
-        <AlertCircle className="h-4 w-4" />
+      <Alert className="mt-8">
+        <UploadCloud className="h-4 w-4" />
         <AlertTitle>CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import staff members, upload a CSV file with the following columns in order:
