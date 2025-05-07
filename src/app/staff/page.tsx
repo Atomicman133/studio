@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -60,7 +60,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 // Badge component is not used directly in this file after recent changes, can be removed if not needed by child components passed here.
-// import { Badge } from "@/components/ui/badge"; 
+// import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData'; // Import hooks
 
 // Import types for related data (actual data will be fetched or passed)
@@ -363,14 +363,18 @@ export default function StaffPage() {
         if (membersToAdd.length > 0) {
           for (const member of membersToAdd) {
              try {
+                 // Await the mutation to ensure sequential addition
                  await addStaffMutation.mutateAsync(member);
                  importedCount++;
              } catch (err: any) {
                  errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}): ${err.message}`);
+                 // Decide if you want to stop the import on first error or continue
+                 // break; // Uncomment to stop on first error
              }
           }
         }
-        
+
+        // Consolidate toast notifications
         if (importedCount > 0 && errors.length === 0) {
             toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
         } else if (importedCount > 0 && errors.length > 0) {
@@ -438,7 +442,7 @@ export default function StaffPage() {
   const filteredTrainingLogs: TrainingLog[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
     console.warn("TODO: Implement backend fetch for training logs for staff member:", viewingStaffMember.id);
-    return []; 
+    return [];
   }, [viewingStaffMember]);
 
   const filteredMeetings: Meeting[] = React.useMemo(() => {
@@ -609,7 +613,7 @@ export default function StaffPage() {
 
       {/* CSV Import Instructions */}
        <Alert className="mt-8">
-        <UploadCloud className="h-4 w-4" />
+        <AlertCircle className="h-4 w-4" />
         <AlertTitle>CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import staff members, upload a CSV file with the following columns in order:
