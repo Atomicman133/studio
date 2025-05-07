@@ -138,7 +138,7 @@ function downloadTextFile(filename: string, text: string) {
 
 export default function TrainingPage() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const { toast } } from useToast();
   const { data: staffList = [], isLoading: isLoadingStaff } = useStaff(); // Fetch staff data
 
   // --- React Query for Training Logs ---
@@ -198,6 +198,7 @@ export default function TrainingPage() {
   const [logToDelete, setLogToDelete] = React.useState<TrainingLog | null>(null);
   const [viewingLog, setViewingLog] = React.useState<TrainingLog | null>(null);
   const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null);
+  const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false);
 
 
   const squadronStaffGroups = React.useMemo(() => {
@@ -462,187 +463,193 @@ export default function TrainingPage() {
       toast({ variant: "destructive", title: "Import Error", description: "No file selected." });
       return;
     }
+    setIsImportingAccomplishments(true);
 
     const reader = new FileReader();
     reader.onload = async (e) => { // Make async
-      const text = e.target?.result as string;
-      if (!text) {
-        toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
-        return;
-      }
-
-      const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
-      const errors: string[] = [];
-      const lines = text.split(/\r\n|\n/);
-
-      if (lines.length < 2) {
-        errors.push("CSV must have a header and at least one data row.");
-      } else {
-        const headerLine = lines[0].trim();
-        const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-        const expectedHeader = ["MemberUID", "Member Rank - Name", "EffectiveDate", "Accomplishment"];
-
-        const allHeadersPresent = expectedHeader.every(eh => header.includes(eh));
-
-        if (!allHeadersPresent) {
-            errors.push(`Invalid CSV header. Expected columns (any order): ${expectedHeader.join(', ')}. Got: ${header.join(',')}`);
-        } else {
-            const headerIndices: Record<string, number> = {};
-            expectedHeader.forEach(eh => {
-                headerIndices[eh] = header.indexOf(eh);
-                if (headerIndices[eh] === -1) {
-                  errors.push(`Critical Error: Missing expected header column: "${eh}" despite passing initial check.`);
-                }
-            });
-
-            if (!allHeadersPresent) { // Stop if headers are fundamentally wrong
-                 toast({
-                    variant: "destructive",
-                    title: "CSV Import Failed: Header Mismatch",
-                    description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
-                    duration: 15000,
-                });
-                if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
-                return;
-            }
-
-            const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
-            let preliminaryParsingOk = true;
-
-            for (let i = 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
-
-                const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-                if (values.length !== header.length) {
-                    errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line}"`);
-                    preliminaryParsingOk = false;
-                    continue;
-                }
-
-                const csvRowData: Record<string, string> = {};
-                expectedHeader.forEach(eh => {
-                    csvRowData[eh] = values[headerIndices[eh]];
-                });
-
-                const serviceNumber = csvRowData["MemberUID"];
-
-                if (!serviceNumber) {
-                    errors.push(`Row ${i + 1}: Missing "MemberUID".`);
-                    preliminaryParsingOk = false;
-                    continue;
-                }
-
-                // Find staff member using only MemberUID
-                const matchedStaff = staffList.find(sm => sm.serviceNumber === serviceNumber);
-
-                if (!matchedStaff) {
-                    errors.push(`Row ${i + 1}: Staff member with MemberUID "${serviceNumber}" not found. Please ensure a staff profile exists with this Service Number in Staff Management.`);
-                    preliminaryParsingOk = false;
-                } else {
-                    // Optional: Validate Rank/Name from CSV against profile? For now, we trust the profile.
-                    const parsedRankName = parseMemberRankName(csvRowData["Member Rank - Name"]);
-                    if (!parsedRankName.rank || !parsedRankName.firstName || !parsedRankName.lastName) {
-                       console.warn(`Row ${i + 1}: Could not fully parse Rank/Name from CSV "${csvRowData["Member Rank - Name"]}", but proceeding with UID match.`);
-                       // Not treating this as a hard error since UID matched
-                    }
-
-                    membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1 });
-                }
-            }
-
-            if (!preliminaryParsingOk) {
-                toast({
-                    variant: "destructive",
-                    title: "CSV Import Failed: Data Issues",
-                    description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
-                    duration: 15000,
-                });
-                if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
-                return;
-            }
-
-            membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
-                const accomplishment = csvRowData["Accomplishment"];
-                const effectiveDateStr = csvRowData["EffectiveDate"];
-
-                if (!accomplishment) {
-                    errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Accomplishment".`);
-                    return;
-                }
-                if (!effectiveDateStr) {
-                    errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "EffectiveDate".`);
-                    return;
-                }
-
-                const completionDate = parseDate(effectiveDateStr);
-                if (!completionDate) {
-                    errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
-                    return;
-                }
-
-                newLogsToAdd.push({
-                    rank: staffMember.rank, // Use rank from matched staff profile
-                    staffName: `${staffMember.lastName}, ${staffMember.firstName}`, // Use name from matched staff profile
-                    squadron: staffMember.squadron || "N/A",
-                    currentRole: staffMember.role,
-                    courseName: accomplishment, // From CSV
-                    completionDate: completionDate, // From CSV
-                    qualificationAchieved: accomplishment, // From CSV (assume it's a qual)
-                    // Other fields default to empty/undefined
-                    instructorQualification: "",
-                    achievementDetails: "",
-                    certificateFileName: undefined,
-                    certificateDataUrl: undefined,
-                });
-            });
+      try {
+        const text = e.target?.result as string;
+        if (!text) {
+          toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+          return;
         }
-      }
 
-      let importedCount = 0;
-      if (newLogsToAdd.length > 0) {
-        // Add logs one by one using mutation
-        for (const log of newLogsToAdd) {
-           try {
-               await addLogMutation.mutateAsync(log);
-               importedCount++;
-           } catch (err: any) {
-               errors.push(`Failed to import accomplishment "${log.courseName}" for UID ${log.rank} ${log.staffName}: ${err.message}`);
+        const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
+        const errors: string[] = [];
+        const lines = text.split(/\r\n|\n/);
+
+        if (lines.length < 2) {
+          errors.push("CSV must have a header and at least one data row.");
+        } else {
+          const headerLine = lines[0].trim();
+          const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+          const expectedHeader = ["MemberUID", "Member Rank - Name", "EffectiveDate", "Accomplishment"];
+
+          const allHeadersPresent = expectedHeader.every(eh => header.includes(eh));
+
+          if (!allHeadersPresent) {
+              errors.push(`Invalid CSV header. Expected columns (any order): ${expectedHeader.join(', ')}. Got: ${header.join(',')}`);
+          } else {
+              const headerIndices: Record<string, number> = {};
+              expectedHeader.forEach(eh => {
+                  headerIndices[eh] = header.indexOf(eh);
+                  if (headerIndices[eh] === -1) {
+                    errors.push(`Critical Error: Missing expected header column: "${eh}" despite passing initial check.`);
+                  }
+              });
+
+              if (!allHeadersPresent) { // Stop if headers are fundamentally wrong
+                   toast({
+                      variant: "destructive",
+                      title: "CSV Import Failed: Header Mismatch",
+                      description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
+                      duration: 15000,
+                  });
+                  if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                  return;
+              }
+
+              const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
+              let preliminaryParsingOk = true;
+
+              for (let i = 1; i < lines.length; i++) {
+                  const line = lines[i].trim();
+                  if (!line) continue;
+
+                  const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                  if (values.length !== header.length) {
+                      errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line}"`);
+                      preliminaryParsingOk = false;
+                      continue;
+                  }
+
+                  const csvRowData: Record<string, string> = {};
+                  expectedHeader.forEach(eh => {
+                      csvRowData[eh] = values[headerIndices[eh]];
+                  });
+
+                  const serviceNumber = csvRowData["MemberUID"];
+
+                  if (!serviceNumber) {
+                      errors.push(`Row ${i + 1}: Missing "MemberUID".`);
+                      preliminaryParsingOk = false;
+                      continue;
+                  }
+
+                  // Find staff member using only MemberUID
+                  const matchedStaff = staffList.find(sm => sm.serviceNumber === serviceNumber);
+
+                  if (!matchedStaff) {
+                      errors.push(`Row ${i + 1}: Staff member with MemberUID "${serviceNumber}" not found. Please ensure a staff profile exists with this Service Number in Staff Management.`);
+                      preliminaryParsingOk = false;
+                  } else {
+                      // Optional: Validate Rank/Name from CSV against profile? For now, we trust the profile.
+                      const parsedRankName = parseMemberRankName(csvRowData["Member Rank - Name"]);
+                      if (!parsedRankName.rank || !parsedRankName.firstName || !parsedRankName.lastName) {
+                         console.warn(`Row ${i + 1}: Could not fully parse Rank/Name from CSV "${csvRowData["Member Rank - Name"]}", but proceeding with UID match.`);
+                         // Not treating this as a hard error since UID matched
+                      }
+
+                      membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1 });
+                  }
+              }
+
+              if (!preliminaryParsingOk) {
+                  toast({
+                      variant: "destructive",
+                      title: "CSV Import Failed: Data Issues",
+                      description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
+                      duration: 15000,
+                  });
+                  if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                  return;
+              }
+
+              membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
+                  const accomplishment = csvRowData["Accomplishment"];
+                  const effectiveDateStr = csvRowData["EffectiveDate"];
+
+                  if (!accomplishment) {
+                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Accomplishment".`);
+                      return;
+                  }
+                  if (!effectiveDateStr) {
+                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "EffectiveDate".`);
+                      return;
+                  }
+
+                  const completionDate = parseDate(effectiveDateStr);
+                  if (!completionDate) {
+                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
+                      return;
+                  }
+
+                  newLogsToAdd.push({
+                      rank: staffMember.rank, // Use rank from matched staff profile
+                      staffName: `${staffMember.lastName}, ${staffMember.firstName}`, // Use name from matched staff profile
+                      squadron: staffMember.squadron || "N/A",
+                      currentRole: staffMember.role,
+                      courseName: accomplishment, // From CSV
+                      completionDate: completionDate, // From CSV
+                      qualificationAchieved: accomplishment, // From CSV (assume it's a qual)
+                      // Other fields default to empty/undefined
+                      instructorQualification: "",
+                      achievementDetails: "",
+                      certificateFileName: undefined,
+                      certificateDataUrl: undefined,
+                  });
+              });
+          }
+        }
+
+        let importedCount = 0;
+        if (newLogsToAdd.length > 0) {
+          // Add logs one by one using mutation
+          for (const log of newLogsToAdd) {
+             try {
+                 await addLogMutation.mutateAsync(log);
+                 importedCount++;
+             } catch (err: any) {
+                 errors.push(`Failed to import accomplishment "${log.courseName}" for UID ${log.rank} ${log.staffName}: ${err.message}`);
+             }
+          }
+           if (importedCount > 0) {
+              toast({ title: "Import Processing Complete", description: `${importedCount} accomplishment(s) added.` });
            }
         }
-         if (importedCount > 0) {
-            toast({ title: "Import Processing Complete", description: `${importedCount} accomplishment(s) added.` });
-         }
-      }
 
-      // Consolidated error display
-      if (errors.length > 0) {
-        const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
-        const variant = importedCount > 0 ? "default" : "destructive";
-        const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
+        // Consolidated error display
+        if (errors.length > 0) {
+          const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
+          const variant = importedCount > 0 ? "default" : "destructive";
+          const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
 
-        let descriptionPrefix = "";
-        if (importedCount > 0 && errors.length > 0) {
-            descriptionPrefix = `${importedCount} records imported. Some rows had errors:\n`;
-        } else if (importedCount === 0 && errors.length > 0) {
-            descriptionPrefix = "No records imported. Errors found:\n";
+          let descriptionPrefix = "";
+          if (importedCount > 0 && errors.length > 0) {
+              descriptionPrefix = `${importedCount} records imported. Some rows had errors:\n`;
+          } else if (importedCount === 0 && errors.length > 0) {
+              descriptionPrefix = "No records imported. Errors found:\n";
+          }
+
+          toast({
+              variant: variant,
+              title: title,
+              description: (
+                <ScrollArea className="max-h-40">
+                  <pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}{errorMessages}</pre>
+                </ScrollArea>
+              ),
+              duration: 15000,
+          });
         }
-
-        toast({
-            variant: variant,
-            title: title,
-            description: (
-              <ScrollArea className="max-h-40">
-                <pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}{errorMessages}</pre>
-              </ScrollArea>
-            ),
-            duration: 15000,
-        });
-      }
-
-
-      if (accomplishmentCsvInputRef.current) {
-        accomplishmentCsvInputRef.current.value = "";
+      } catch (error: any) {
+        console.error("Error during CSV import processing:", error);
+        toast({ variant: "destructive", title: "Import Error", description: `An unexpected error occurred: ${error.message}` });
+      } finally {
+        if (accomplishmentCsvInputRef.current) {
+          accomplishmentCsvInputRef.current.value = "";
+        }
+        setIsImportingAccomplishments(false);
       }
     };
     reader.onerror = () => {
@@ -650,6 +657,7 @@ export default function TrainingPage() {
       if (accomplishmentCsvInputRef.current) {
         accomplishmentCsvInputRef.current.value = "";
       }
+      setIsImportingAccomplishments(false);
     };
     reader.readAsText(file);
   };
@@ -668,12 +676,12 @@ export default function TrainingPage() {
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addLogMutation.isPending}>
-                   {addLogMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addLogMutation.isPending || isImportingAccomplishments}>
+                   {(addLogMutation.isPending && !isImportingAccomplishments) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
                     Log Training Record
                 </Button>
-                <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoadingStaff}>
-                   {isLoadingStaff ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
+                <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoadingStaff || isImportingAccomplishments || addLogMutation.isPending || updateLogMutation.isPending || deleteLogMutation.isPending}>
+                   {isImportingAccomplishments || isLoadingStaff ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
                     Import Accomplishments
                 </Button>
                 <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
@@ -730,7 +738,7 @@ export default function TrainingPage() {
                           <CardTitle className="text-xl">{staffMemberGroup.rank} {staffMemberGroup.staffName}</CardTitle>
                           <CardDescription>{staffMemberGroup.logs.length} training record(s)</CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
+                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                           <Archive className="mr-2 h-4 w-4" /> Export All for Member
                         </Button>
                       </div>
@@ -766,22 +774,22 @@ export default function TrainingPage() {
                               <TableCell className="text-right">
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" className="h-8 w-8 p-0" disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
+                                    <Button variant="ghost" className="h-8 w-8 p-0" disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                                       <span className="sr-only">Open menu</span>
                                       <MoreHorizontal className="h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => handleViewDetails(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
+                                    <DropdownMenuItem onClick={() => handleViewDetails(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                                       <Info className="mr-2 h-4 w-4" />
                                       View Details
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleEdit(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
+                                    <DropdownMenuItem onClick={() => handleEdit(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                                       <Pencil className="mr-2 h-4 w-4" />
                                       Edit
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
+                                    <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                                       <Download className="mr-2 h-4 w-4" />
                                       Export Record
                                     </DropdownMenuItem>
@@ -789,7 +797,7 @@ export default function TrainingPage() {
                                     <DropdownMenuItem
                                       onClick={() => setLogToDelete(log)}
                                       className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                      disabled={deleteLogMutation.isPending || updateLogMutation.isPending}
+                                      disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}
                                     >
                                       <Trash2 className="mr-2 h-4 w-4" />
                                       Delete
@@ -924,10 +932,10 @@ export default function TrainingPage() {
                       if (viewingLog) {
                         handleEdit(viewingLog);
                       }
-                    }} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>
+                    }} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                         <Edit3 className="mr-2 h-4 w-4" /> Edit
                     </Button>
-                    <Button onClick={closeViewDialog} disabled={deleteLogMutation.isPending || updateLogMutation.isPending}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -944,13 +952,13 @@ export default function TrainingPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setLogToDelete(null)} disabled={deleteLogMutation.isPending}>
+              <AlertDialogCancel onClick={() => setLogToDelete(null)} disabled={deleteLogMutation.isPending || isImportingAccomplishments}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-                 disabled={deleteLogMutation.isPending}
+                 disabled={deleteLogMutation.isPending || isImportingAccomplishments}
               >
                 {deleteLogMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Delete
@@ -1010,3 +1018,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+
