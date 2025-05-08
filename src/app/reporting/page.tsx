@@ -104,7 +104,7 @@ const processComplianceReports = (
         .filter(log => criterion.identifier(log))
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
-      let isMet = false;
+      let isMet = false; // Default to Not Met
       let details = "Missing";
       let selectedLog: TrainingLog | undefined = undefined;
 
@@ -113,13 +113,16 @@ const processComplianceReports = (
         const completionDate = new Date(selectedLog.completionDate); // Ensure it's a Date object
 
         if (criterion.yearsToExpire) {
-          if (isValidDate(completionDate)) { // Add a validity check for completion date
+          if (isValidDate(completionDate)) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            if (isValidDate(expiryDate)) { // Check expiry date validity too
+            if (isValidDate(expiryDate)) {
               const today = new Date();
-              // Check if today is strictly before the expiry date
+              today.setHours(0, 0, 0, 0); // Set today's time to the beginning of the day for consistent comparison
+              expiryDate.setHours(23, 59, 59, 999); // Set expiry to the end of the day
+
+              // Correct Logic: The item is valid if today is *before* the expiry date.
               if (isBefore(today, expiryDate)) {
-                isMet = true;
+                isMet = true; // Set to Met if not expired
                 details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
               } else {
                 // isMet remains false (default)
@@ -132,21 +135,22 @@ const processComplianceReports = (
             details = "Invalid completion date in record."; // Handle invalid completion date
           }
         } else {
-          // Logic for non-expiring items
+          // Logic for non-expiring items (e.g., one-time checks)
           if (isValidDate(completionDate)) {
-            isMet = true;
+            isMet = true; // If a valid log exists, it's met
             details = `Completed: ${format(completionDate, "PP")}`;
           } else {
             details = "Invalid completion date in record.";
           }
         }
       }
+      // If relevantLogs.length === 0, isMet remains false and details remains "Missing"
 
 
       return {
         key: criterion.key,
         name: criterion.name,
-        isMet,
+        isMet, // Use the calculated isMet value
         details,
         relevantLog: selectedLog,
       };
@@ -201,7 +205,7 @@ export default function ReportingPage() {
 
   React.useEffect(() => {
     // Only process when both staff and logs data are available and not loading
-    if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs.length > 0) {
+    if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) { // Ensure trainingLogs is defined
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
@@ -310,16 +314,16 @@ export default function ReportingPage() {
                     <TableHead>Overall Status</TableHead>
                   </TableRow>
                 </TableHeader>
+                 {/* Use tbody directly here, Collapsible wraps the content inside */}
                 <TableBody>
-                  {/* Iterate over reports and create a tbody for each collapsible group */}
                   {complianceReports.map((report) => (
                     <Collapsible
-                      asChild // Use asChild to render the tbody directly
                       key={report.staffMemberId}
+                      asChild // Use asChild to pass props down
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
                     >
-                      <tbody>
+                       <React.Fragment key={report.staffMemberId}>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                           <TableCell>
@@ -368,7 +372,7 @@ export default function ReportingPage() {
                               </TableCell>
                            </TableRow>
                         </CollapsibleContent>
-                      </tbody>
+                      </React.Fragment>
                     </Collapsible>
                   ))}
                 </TableBody>
