@@ -148,21 +148,28 @@ const processComplianceReports = (
     };
   })
   .sort((a,b) => {
-    if (a.squadron.localeCompare(b.squadron) !== 0) {
-        return a.squadron.localeCompare(b.squadron);
+    const squadronCompare = (a.squadron || "ZZZ").localeCompare(b.squadron || "ZZZ"); // Sort "Unassigned" last
+    if (squadronCompare !== 0) {
+        return squadronCompare;
     }
+
     const rankOrder = RANKS;
     const rankAIndex = rankOrder.indexOf(a.staffMemberRank as typeof RANKS[number]);
     const rankBIndex = rankOrder.indexOf(b.staffMemberRank as typeof RANKS[number]);
 
-    if (rankAIndex === -1 && rankBIndex === -1) return a.staffMemberName.localeCompare(b.staffMemberName);
-    if (rankAIndex === -1) return 1;
-    if (rankBIndex === -1) return -1;
+     // Handle cases where rank might not be in RANKS (shouldn't happen with validation)
+    const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
+    const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
-    if (rankAIndex !== rankBIndex) {
-        return rankBIndex - rankAIndex;
+     // Sort descending by index (higher rank first)
+    if (effectiveRankAIndex !== effectiveRankBIndex) {
+        // Higher index means lower in the RANKS array, so sort numerically ascending index (higher rank first)
+        return effectiveRankAIndex - effectiveRankBIndex;
     }
-    return a.staffMemberName.localeCompare(b.staffMemberName);
+
+    // If ranks are the same, sort by name
+    const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName);
+    return lastNameCompare;
   });
 };
 
@@ -238,7 +245,7 @@ export default function ReportingPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0 sm:p-0 md:p-0 lg:p-0"> {/* Remove CardContent padding */}
           {isLoadingAny && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -254,91 +261,91 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length === 0 && staffList.length === 0 && (
-             <div className="flex flex-col items-center justify-center py-12 text-center">
+             <div className="flex flex-col items-center justify-center py-12 text-center px-6">
               <UserCheck className="h-16 w-16 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Data Available</h3>
               <p className="text-muted-foreground">Add staff members in the Staff Management section.</p>
             </div>
           )}
            {!isLoadingAny && !errorAny && complianceReports.length === 0 && staffList.length > 0 && (
-             <div className="flex flex-col items-center justify-center py-12 text-center">
+             <div className="flex flex-col items-center justify-center py-12 text-center px-6">
               <UserCheck className="h-16 w-16 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Compliance Data Processed</h3>
               <p className="text-muted-foreground">Ensure training logs are available or check data processing logic.</p>
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="max-h-[75vh]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[50px]"></TableHead> {}
-                  <TableHead>Squadron</TableHead>
-                  <TableHead>Staff Member</TableHead>
-                  <TableHead>Overall Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {complianceReports.map((report) => (
-                  <Collapsible key={report.staffMemberId} asChild open={openCollapsible === report.staffMemberId} onOpenChange={() => toggleCollapsible(report.staffMemberId)}>
-                    <>
-                      <TableRow className="cursor-pointer hover:bg-muted/50">
-                        <TableCell>
-                          <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" className="w-9 p-0">
-                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                <span className="sr-only">Toggle details</span>
-                              </Button>
-                          </CollapsibleTrigger>
-                        </TableCell>
-                        <TableCell>{report.squadron}</TableCell>
-                        <TableCell className="font-medium">
-                          {report.staffMemberRank} {report.staffMemberName}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                            {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                            {report.isCompliant ? "Compliant" : "Not Compliant"}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                      <CollapsibleContent asChild>
-                        <TableRow>
-                          <TableCell /> {}
-                          <TableCell colSpan={3} className="p-0">
-                            <div className="p-4 bg-muted/30 dark:bg-muted/20">
-                              <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                              <ul className="space-y-2">
-                                {report.criteriaChecks.map(criterion => (
-                                  <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                    <div className="flex items-center">
-                                      {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                      <div>
-                                        <span>{criterion.name}:</span>
-                                        <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                          {criterion.isMet ? "Met" : "Not Met"}
-                                        </span>
-                                        <p className="text-xs text-muted-foreground">{criterion.details}</p>
-                                      </div>
-                                    </div>
-                                    {getExpiryWarningBadge(criterion)}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
+            <ScrollArea className="h-[calc(100vh-250px)]"> {/* Adjust height as needed */}
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-10">
+                  <TableRow>
+                    <TableHead className="w-[50px]"></TableHead> {/* Spacer for collapsible trigger */}
+                    <TableHead>Squadron</TableHead>
+                    <TableHead>Staff Member</TableHead>
+                    <TableHead>Overall Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {complianceReports.map((report) => (
+                    <Collapsible key={report.staffMemberId} asChild open={openCollapsible === report.staffMemberId} onOpenChange={() => toggleCollapsible(report.staffMemberId)}>
+                      <>
+                        <TableRow className="cursor-pointer hover:bg-muted/50">
+                          <TableCell>
+                            <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" className="w-9 p-0">
+                                  {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                  <span className="sr-only">Toggle details</span>
+                                </Button>
+                            </CollapsibleTrigger>
+                          </TableCell>
+                          <TableCell>{report.squadron}</TableCell>
+                          <TableCell className="font-medium">
+                            {report.staffMemberRank} {report.staffMemberName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                              {report.isCompliant ? "Compliant" : "Not Compliant"}
+                            </Badge>
                           </TableCell>
                         </TableRow>
-                      </CollapsibleContent>
-                    </>
-                  </Collapsible>
-                ))}
-              </TableBody>
-            </Table>
+                        <CollapsibleContent asChild>
+                          <TableRow>
+                            <TableCell /> {/* Empty cell for alignment */}
+                            <TableCell colSpan={3} className="p-0">
+                              <div className="p-4 bg-muted/30 dark:bg-muted/20">
+                                <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                <ul className="space-y-2">
+                                  {report.criteriaChecks.map(criterion => (
+                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                      <div className="flex items-center">
+                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                        <div>
+                                          <span>{criterion.name}:</span>
+                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                            {criterion.isMet ? "Met" : "Not Met"}
+                                          </span>
+                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                        </div>
+                                      </div>
+                                      {getExpiryWarningBadge(criterion)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </CollapsibleContent>
+                      </>
+                    </Collapsible>
+                  ))}
+                </TableBody>
+              </Table>
             </ScrollArea>
           )}
         </CardContent>
         {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-          <CardFooter className="text-xs text-muted-foreground pt-4">
+          <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
             Displaying compliance reports for {complianceReports.length} staff member(s).
           </CardFooter>
         )}
@@ -382,4 +389,5 @@ export default function ReportingPage() {
     </div>
   );
 }
+
 
