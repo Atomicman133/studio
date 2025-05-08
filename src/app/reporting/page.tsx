@@ -25,7 +25,7 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"; // Ensure Collapsible can accept asChild
+} from "@/components/ui/collapsible"; // Keep for Trigger/Content if needed elsewhere, but not for wrapping TRs
 import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reporting-schema";
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
@@ -115,34 +115,22 @@ const processComplianceReports = (
           const today = new Date();
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
-          if (criterion.key === 'firstAid') {
-            const expiryDate = addYears(completionDate, 3);
-            const expiryDateStartOfDay = new Date(expiryDate);
-            expiryDateStartOfDay.setHours(0, 0, 0, 0);
-
-            // Check if today is on or before the expiry date
-            // !isAfter(today, expiryDateStartOfDay) is equivalent to today <= expiryDateStartOfDay
-            if (!isAfter(today, expiryDateStartOfDay)) {
-                 isMet = true;
-                 details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`; // Display calculated expiry
-             } else {
-                 // isMet remains false
-                 details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
-             }
-          } else if (criterion.yearsToExpire) {
-              // Standard expiry logic for other items WITH expiry years
+          if (criterion.yearsToExpire) {
+              // Standard expiry logic for items WITH expiry years
               const expiryDate = addYears(completionDate, criterion.yearsToExpire);
               const expiryDateStartOfDay = new Date(expiryDate);
               expiryDateStartOfDay.setHours(0, 0, 0, 0);
 
-              // Check if today is on or before the expiry date
-              if (!isAfter(today, expiryDateStartOfDay)) { // Valid ON the expiry day
+               // Check if today is strictly AFTER the expiry date
+               if (isAfter(today, expiryDateStartOfDay)) {
+                   // Expired
+                   // isMet remains false
+                  details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
+               } else {
+                  // Not expired (today is on or before the expiry date)
                   isMet = true;
                   details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
-              } else {
-                  // isMet remains false
-                  details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
-              }
+               }
           } else {
             // Logic for non-expiring items (WWCC, CoC, Psych)
             isMet = true; // If a valid log exists, it's met
@@ -240,11 +228,10 @@ export default function ReportingPage() {
     expiryDateStartOfDay.setHours(0, 0, 0, 0); // Start of expiry day
 
     // Return days left only if it's not expired yet (valid ON expiry day)
-    // !isAfter(today, expiryDateStartOfDay) means today <= expiryDateStartOfDay
-    if (!isAfter(today, expiryDateStartOfDay)) {
-        return differenceInDays(expiryDateStartOfDay, today);
-    }
-    return null; // Return null if expired
+     if (isAfter(today, expiryDateStartOfDay)) {
+         return null; // Return null if expired
+     }
+     return differenceInDays(expiryDateStartOfDay, today); // Days remaining including today
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -332,24 +319,15 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
-                    <Collapsible
-                      key={report.staffMemberId}
-                      asChild // Use asChild to allow direct rendering of Fragment
-                      open={openCollapsible === report.staffMemberId}
-                      onOpenChange={() => toggleCollapsible(report.staffMemberId)}
-                    >
-                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
-                      <React.Fragment>
+                      <React.Fragment key={report.staffMemberId}>
                          {/* Trigger Row */}
-                        <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
+                        <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => toggleCollapsible(report.staffMemberId)}>
                           <TableCell>
-                            <CollapsibleTrigger asChild>
-                               {/* The Button is the actual trigger now */}
-                               <Button variant="ghost" size="sm" className="w-9 p-0 data-[state=open]:rotate-180 transition-transform">
-                                <ChevronDown className="h-4 w-4" />
+                               {/* Using a button visually looks like a trigger */}
+                               <Button variant="ghost" size="sm" className="w-9 p-0" data-state={openCollapsible === report.staffMemberId ? 'open' : 'closed'}>
+                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                 <span className="sr-only">Toggle details for {report.staffMemberName}</span>
                               </Button>
-                            </CollapsibleTrigger>
                           </TableCell>
                           <TableCell>{report.squadron}</TableCell>
                           <TableCell className="font-medium">
@@ -362,11 +340,10 @@ export default function ReportingPage() {
                             </Badge>
                           </TableCell>
                         </TableRow>
-                         {/* Content Row */}
-                        <CollapsibleContent asChild>
-                           {/* Content needs to be wrapped in a TableRow with a single TableCell spanning columns */}
+                         {/* Content Row - Conditionally Rendered */}
+                         {openCollapsible === report.staffMemberId && (
                            <TableRow className="bg-muted/50 dark:bg-muted/30">
-                              <TableCell colSpan={4} className="p-0"> {/* Use colSpan */}
+                              <TableCell colSpan={4}> {/* Use colSpan */}
                                 <div className="p-4">
                                   <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                                   <ul className="space-y-2">
@@ -389,9 +366,8 @@ export default function ReportingPage() {
                                 </div>
                               </TableCell>
                            </TableRow>
-                        </CollapsibleContent>
+                         )}
                       </React.Fragment>
-                    </Collapsible>
                   ))}
                 </TableBody>
               </Table>
@@ -420,16 +396,14 @@ export default function ReportingPage() {
             {COMPLIANCE_CRITERIA_CONFIG.map(criterion => (
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
-                 {criterion.key === 'firstAid'
-                   ? ' (valid if completed within the last 3 years, check is inclusive of expiry date).'
-                   : criterion.yearsToExpire
-                     ? ` (valid for ${criterion.yearsToExpire} years from completion, check is inclusive of expiry date).`
-                     : ` (checked for existence).`
+                 {criterion.yearsToExpire
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years, check is exclusive of expiry date - expires *on* the date shown).`
+                   : ` (checked for existence).`
                  }
                  <br />
                  <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
                  {
-                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID..."' :
+                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' : // Removed trailing ...
                   criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
                   criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
                   criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment"' :
@@ -441,7 +415,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. The check includes the expiry date itself as valid. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
           </p>
         </CardContent>
       </Card>
