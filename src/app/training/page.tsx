@@ -812,7 +812,7 @@ export default function TrainingPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <ScrollArea className="max-h-[400px]"> {/* Add ScrollArea here */}
+                      <ScrollArea className="max-h-[400px]"> {/* Wrap the Table in ScrollArea */}
                         <Table>
                           <TableHeader>
                             <TableRow>
