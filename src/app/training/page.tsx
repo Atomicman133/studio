@@ -64,7 +64,7 @@ import { convertFileToDataUrl } from "@/lib/utils"; // Ensure this utility exist
 const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
 
 // Helper to convert Firestore Timestamps
-const convertLogTimestamps = (data: any): TrainingLog => {
+export const convertLogTimestamps = (data: any): TrainingLog => {
   return {
     ...data,
     completionDate: data.completionDate instanceof Timestamp ? data.completionDate.toDate() : data.completionDate,
@@ -97,10 +97,12 @@ async function addTrainingLog(newLogData: Omit<TrainingLog, 'id'>): Promise<stri
   };
   // Remove null fields before saving, as Firestore might prefer omission over null for some use cases
   Object.keys(dataToSave).forEach(key => {
-      if (dataToSave[key as keyof typeof dataToSave] === null || dataToSave[key as keyof typeof dataToSave] === undefined) {
-          delete dataToSave[key as keyof typeof dataToSave];
+      const typedKey = key as keyof typeof dataToSave;
+      if (dataToSave[typedKey] === null || dataToSave[typedKey] === undefined) {
+          delete dataToSave[typedKey];
       }
   });
+
 
   const docRef = await addDoc(collectionRef, dataToSave);
   return docRef.id;
@@ -124,8 +126,9 @@ async function updateTrainingLog(updatedLog: TrainingLog): Promise<void> {
 
   // Remove null fields before saving
   Object.keys(dataToSave).forEach(key => {
-      if (dataToSave[key as keyof typeof dataToSave] === null || dataToSave[key as keyof typeof dataToSave] === undefined) {
-          delete dataToSave[key as keyof typeof dataToSave];
+       const typedKey = key as keyof typeof dataToSave;
+      if (dataToSave[typedKey] === null || dataToSave[typedKey] === undefined) {
+          delete dataToSave[typedKey];
       }
   });
   await updateDoc(docRef, dataToSave);
@@ -262,11 +265,14 @@ export default function TrainingPage() {
             if (rankAIndex === -1) return 1;
             if (rankBIndex === -1) return -1;
 
-            const rankComparison = rankBIndex - rankAIndex;
+            // Corrected rank comparison: Higher rank (lower index) should come first.
+            const rankComparison = rankAIndex - rankBIndex;
             if (rankComparison !== 0) return rankComparison;
 
+            // If ranks are the same, sort by name
             return a.staffName.localeCompare(b.staffName);
           });
+
 
         return { squadronName, staffMembers };
       })
@@ -1082,5 +1088,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-
-    

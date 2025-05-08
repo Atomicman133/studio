@@ -55,15 +55,19 @@ import {
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
 import { RANKS } from "./staff-schema";
-import { format } from "date-fns";
+import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData'; // Import hooks
+import { useQuery, useQueryClient } from '@tanstack/react-query'; // Keep useQueryClient if needed
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
 
 // Import types for related data (actual data will be fetched or passed)
 // TODO: Fetch this data dynamically in the View Details dialog based on staff member ID
 import type { TrainingLog } from "../training/training-schema";
+import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page"; // Reuse conversion helper if applicable
 import type { Meeting } from "../meetings/meeting-schema";
 import type { DisciplineAction } from "../discipline/discipline-schema";
 import type { Pdp } from "../pdps/pdp-schema";
@@ -74,6 +78,40 @@ type StaffGroup = {
   squadronName: string;
   staffMembers: StaffMember[];
 };
+
+// --- Fetch Training Logs for a Specific Staff Member ---
+const STAFF_TRAINING_LOGS_QUERY_KEY = 'staffTrainingLogs';
+
+async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promise<TrainingLog[]> {
+  if (!staffMember) return []; // Return empty if no staff member selected
+
+  const logsCollectionRef = collection(db, 'trainingLogs');
+  // NOTE: Firestore requires an index for compound queries like this.
+  // If you haven't created one, the first query attempt might fail with a link
+  // in the console error message to create the index automatically.
+  // Filtering by staffName and rank - consider adding a dedicated staffId field to trainingLogs for more robust linking.
+  const q = query(
+    logsCollectionRef,
+    where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
+    where('rank', '==', staffMember.rank),
+    orderBy('completionDate', 'desc') // Order by completion date descending
+  );
+
+  try {
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...convertTrainingLogTimestamps(doc.data()), // Use the conversion function
+    })) as TrainingLog[];
+  } catch (error) {
+    console.error("Error fetching training logs for staff:", error);
+    // Depending on how you want to handle errors, you could throw it,
+    // return an empty array, or return a specific error indicator.
+    // Returning empty array for now to avoid breaking the UI.
+    return [];
+  }
+}
+
 
 // Helper function to parse MemberName - Keep this for CSV import logic
 function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
@@ -126,6 +164,22 @@ export default function StaffPage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const [isImportingCsv, setIsImportingCsv] = React.useState(false);
+
+
+  // --- Query for fetching training logs of the viewed staff member ---
+  const {
+    data: viewedStaffTrainingLogs = [],
+    isLoading: isLoadingViewedStaffLogs,
+    error: errorViewedStaffLogs
+  } = useQuery<TrainingLog[], Error>({
+    // Query key includes the staff member's ID (or another unique identifier)
+    // to ensure the query refetches when a *different* staff member is viewed.
+    // Using staffName + rank as a fallback if ID isn't consistently available.
+    queryKey: [STAFF_TRAINING_LOGS_QUERY_KEY, viewingStaffMember?.id || `${viewingStaffMember?.lastName}, ${viewingStaffMember?.firstName}_${viewingStaffMember?.rank}`],
+    queryFn: () => fetchTrainingLogsForStaff(viewingStaffMember),
+    enabled: !!viewingStaffMember, // Only run the query when a staff member is being viewed
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+  });
 
 
   // Grouping logic remains the same, but uses staffList from useStaff
@@ -201,12 +255,11 @@ export default function StaffPage() {
   };
 
   const handleViewDetails = (staffMember: StaffMember) => {
-    // TODO: Fetch related data (training, meetings, pdps, discipline, audits)
-    // based on staffMember.id and set it to respective states or pass to dialog.
-    // For now, the filtering logic below uses placeholder data.
+    // Set the viewing staff member, which will trigger the useQuery for their logs
     setViewingStaffMember(staffMember);
     setEditingStaff(null);
     setIsFormOpen(false);
+    // No need to manually filter here anymore, useQuery handles fetching
   };
 
   const closeViewDialog = () => {
@@ -246,6 +299,7 @@ export default function StaffPage() {
       const errors: string[] = [];
       const lines = text.split(/\r\n|\n/);
       let importedCount = 0; // Track successful additions
+      const queryClient = useQueryClient(); // Get query client instance
 
       try {
         if (lines.length < 2) {
@@ -415,7 +469,7 @@ export default function StaffPage() {
         }
         setIsImportingCsv(false);
         // Optionally trigger a refetch if needed, though mutations should handle cache updates
-        // queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+        queryClient.invalidateQueries({ queryKey: ['staff'] });
       }
     };
     reader.onerror = () => {
@@ -434,11 +488,6 @@ export default function StaffPage() {
   const staffNameForTrainingLog = viewingStaffMember ? `${viewingStaffMember.lastName}, ${viewingStaffMember.firstName}` : "";
 
   // TODO: Replace these with actual data fetching hooks or logic based on viewingStaffMember.id
-  const filteredTrainingLogs: TrainingLog[] = React.useMemo(() => {
-    if (!viewingStaffMember) return [];
-    console.warn("TODO: Implement backend fetch for training logs for staff member:", viewingStaffMember.id);
-    return [];
-  }, [viewingStaffMember]);
 
   const filteredMeetings: Meeting[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
@@ -525,7 +574,7 @@ export default function StaffPage() {
         </Card>
       )}
 
-      {!isLoading && !error && staffGroups.length > 0 && staffGroups.map(group => (
+      {!isLoading && !error && staffGroups.map(group => (
         <Card key={group.squadronName} className="shadow-xl mb-8">
           <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b">
             <CardTitle className="text-2xl">Squadron: {group.squadronName}</CardTitle>
@@ -693,20 +742,24 @@ export default function StaffPage() {
                       <AccordionItem value="training">
                         <AccordionTrigger>
                           <div className="flex items-center gap-2 text-lg">
-                            <GraduationCap className="h-5 w-5" /> Training Records ({filteredTrainingLogs.length}) {/* TODO: Implement dynamic count */}
+                            <GraduationCap className="h-5 w-5" /> Training Records ({isLoadingViewedStaffLogs ? '...' : viewedStaffTrainingLogs.length})
                           </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                          {/* TODO: Replace with fetched data based on viewingStaffMember.id */}
-                          {filteredTrainingLogs.length > 0 ? (
+                          {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+                          {errorViewedStaffLogs && <p className="text-sm text-destructive">Error loading training records: {errorViewedStaffLogs.message}</p>}
+                          {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
+                              <p className="text-sm text-muted-foreground">No training records found.</p>
+                          )}
+                          {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
                             <ul className="list-disc pl-5 space-y-1 text-sm">
-                              {filteredTrainingLogs.map(log => (
+                              {viewedStaffTrainingLogs.map(log => (
                                 <li key={log.id}>{log.courseName} - Completed: {format(log.completionDate, "PP")}
                                   {log.qualificationAchieved && ` (Qual: ${log.qualificationAchieved})`}
                                 </li>
                               ))}
                             </ul>
-                          ) : <p className="text-sm text-muted-foreground">No training records found.</p>}
+                          )}
                         </AccordionContent>
                       </AccordionItem>
 
@@ -726,7 +779,7 @@ export default function StaffPage() {
                                     </li>
                                 ))}
                                 </ul>
-                            ) : <p className="text-sm text-muted-foreground">No meeting records found.</p>}
+                            ) : <p className="text-sm text-muted-foreground">No meeting records found (fetching not implemented).</p>}
                         </AccordionContent>
                       </AccordionItem>
 
@@ -748,7 +801,7 @@ export default function StaffPage() {
                                     </li>
                                 ))}
                                 </ul>
-                            ) : <p className="text-sm text-muted-foreground">No PDPs found.</p>}
+                            ) : <p className="text-sm text-muted-foreground">No PDPs found (fetching not implemented).</p>}
                         </AccordionContent>
                       </AccordionItem>
 
@@ -769,7 +822,7 @@ export default function StaffPage() {
                                     </li>
                                 ))}
                                 </ul>
-                            ) : <p className="text-sm text-muted-foreground">No discipline actions found.</p>}
+                            ) : <p className="text-sm text-muted-foreground">No discipline actions found (fetching not implemented).</p>}
                         </AccordionContent>
                       </AccordionItem>
 
@@ -790,7 +843,7 @@ export default function StaffPage() {
                                     </li>
                                 ))}
                                 </ul>
-                            ) : <p className="text-sm text-muted-foreground">No safety audits found where this member was involved.</p>}
+                            ) : <p className="text-sm text-muted-foreground">No safety audits found where this member was involved (fetching not implemented).</p>}
                         </AccordionContent>
                       </AccordionItem>
                     </Accordion>
