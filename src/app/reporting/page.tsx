@@ -35,7 +35,7 @@ import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff d
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, format, differenceInDays, isValid as isValidDate } from "date-fns"; // Import isValidDate
+import { addYears, isBefore, format, differenceInDays, isValid as isValidDate, subYears } from "date-fns"; // Import isValidDate and subYears
 import { RANKS } from "../staff/staff-schema";
 
 
@@ -82,8 +82,6 @@ const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[
   }
 
   // Fallback if no exact match found in the current staff list
-  // This might happen if the training log is for a staff member not yet in the main list
-  // or if details slightly differ.
   console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}. Using log details as fallback identifier.`);
   return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
 };
@@ -112,43 +110,43 @@ const processComplianceReports = (
         selectedLog = relevantLogs[0];
         const completionDate = new Date(selectedLog.completionDate); // Ensure it's a Date object
 
-        if (criterion.yearsToExpire) {
-          if (isValidDate(completionDate)) {
-            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            if (isValidDate(expiryDate)) {
-              const today = new Date();
-              today.setHours(0, 0, 0, 0); // Start of today
+        if (!isValidDate(completionDate)) {
+          details = "Invalid completion date in record.";
+        } else {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
+          if (criterion.key === 'firstAid') {
+            // Specific logic for First Aid: Check if completion date is within the last 3 years
+            const threeYearsAgo = subYears(today, 3);
+            if (isBefore(threeYearsAgo, completionDate)) { // Check if completionDate is AFTER threeYearsAgo
+                isMet = true;
+                details = `Completed: ${format(completionDate, "PP")} (Valid for 3 years)`;
+            } else {
+                // isMet remains false
+                details = `Expired: Completed ${format(completionDate, "PP")} (More than 3 years ago)`;
+            }
+          } else if (criterion.yearsToExpire) {
+              // Standard expiry logic for other items WITH expiry years
+              const expiryDate = addYears(completionDate, criterion.yearsToExpire);
               const expiryDateEndOfDay = new Date(expiryDate);
               expiryDateEndOfDay.setHours(23, 59, 59, 999); // End of expiry day
 
-              // Check if today is BEFORE the end of the expiry day.
-              // This means it's considered valid ON the expiry day.
-              if (isBefore(today, expiryDateEndOfDay)) {
-                  isMet = true; // Set to Met if not expired
+              if (isBefore(today, expiryDateEndOfDay)) { // Valid ON the expiry day
+                  isMet = true;
                   details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
               } else {
-                  // isMet remains false (default)
+                  // isMet remains false
                   details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
               }
-            } else {
-              details = "Invalid expiry date calculated."; // Handle case where date calculation fails
-            }
           } else {
-            details = "Invalid completion date in record."; // Handle invalid completion date
-          }
-        } else {
-          // Logic for non-expiring items (e.g., one-time checks)
-          if (isValidDate(completionDate)) {
+            // Logic for non-expiring items (WWCC, CoC, Psych)
             isMet = true; // If a valid log exists, it's met
             details = `Completed: ${format(completionDate, "PP")}`;
-          } else {
-            details = "Invalid completion date in record.";
           }
         }
       }
       // If relevantLogs.length === 0, isMet remains false and details remains "Missing"
-
 
       return {
         key: criterion.key,
@@ -227,44 +225,48 @@ export default function ReportingPage() {
   };
 
   const getDaysToExpiry = (completionDate: Date, yearsToExpire: number): number | null => {
+    if (!isValidDate(completionDate)) return null;
     const expiryDate = addYears(completionDate, yearsToExpire);
+    if (!isValidDate(expiryDate)) return null;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Start of today
 
     const expiryDateEndOfDay = new Date(expiryDate);
     expiryDateEndOfDay.setHours(23, 59, 59, 999); // End of expiry day
 
+    // Return days left only if it's not expired yet (valid ON expiry day)
     if (isBefore(today, expiryDateEndOfDay)) {
-      return differenceInDays(expiryDate, new Date()); // Calculate difference based on nominal expiry date
+      return differenceInDays(expiryDate, new Date()); // Use original expiry date for difference calculation
     }
-    return null;
+    return null; // Return null if expired
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
-    if (!criterion.isMet || !criterion.relevantLog) {
-        return null; // Cannot calculate expiry without a met status and a log
-    }
+     // No badge if not met or no relevant log
+    if (!criterion.isMet || !criterion.relevantLog) return null;
 
+    // Find config for the criterion
     const config = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === criterion.key);
-    if (!config || !config.yearsToExpire) {
-        return null; // No expiry configured for this criterion
+
+    // No badge if no expiry years configured or completion date is invalid
+    if (!config || !config.yearsToExpire || !isValidDate(new Date(criterion.relevantLog.completionDate))) return null;
+
+    // Calculate days left based on completion date and configured years
+    const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
+
+    // Only show badge if not expired yet (daysLeft is not null and >= 0)
+    if (daysLeft !== null && daysLeft >= 0) {
+        if (daysLeft <= 30) {
+            return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
+        } else if (daysLeft <= 90) {
+            return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
+        }
     }
 
-    // Ensure completionDate is valid before calculating expiry
-    const completionDate = new Date(criterion.relevantLog.completionDate);
-    if (!isValidDate(completionDate)) return null; // Cannot calculate expiry with invalid date
-
-    const daysLeft = getDaysToExpiry(completionDate, config.yearsToExpire);
-
-    if (daysLeft !== null && daysLeft >= 0) { // Only show badge if not expired (daysLeft >= 0)
-      if (daysLeft <= 30) {
-        return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-      } else if (daysLeft <= 90) {
-        return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-      }
-    }
-    return null; // Return null if already expired or calculation fails
+    return null; // No badge if expired or calculation failed
   };
+
 
   const isLoadingAny = isLoadingStaff || isLoadingLogs;
   const errorAny = errorStaff || errorLogs;
@@ -410,23 +412,28 @@ export default function ReportingPage() {
             {COMPLIANCE_CRITERIA_CONFIG.map(criterion => (
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
-                {criterion.yearsToExpire ? ` (valid for ${criterion.yearsToExpire} years from completion).` : ` (checked for existence).`}
-                <br />
-                <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
-                {
-                 criterion.key === 'firstAid' ? '"First Aid", "HLTAID..."' :
-                 criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
-                 criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance"' :
-                 criterion.key === 'psychAssessment' ? '"Psychological Assessment"' :
-                 criterion.key === 'policeClearance' ? '"National Police Clearance", "Police Check", "NPC"' :
-                 criterion.key === 'youthSafety' ? '"Defence Youth Safety", "DYSAT"' : ''
-                }
-                </span>
+                 {criterion.key === 'firstAid'
+                   ? ' (valid if completed within the last 3 years).'
+                   : criterion.yearsToExpire
+                     ? ` (valid for ${criterion.yearsToExpire} years from completion).`
+                     : ` (checked for existence).`
+                 }
+                 <br />
+                 <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
+                 {
+                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID..."' :
+                  criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
+                  criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
+                  criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment"' :
+                  criterion.key === 'policeClearance' ? '"National Police Clearance", "Police Check", "NPC"' :
+                  criterion.key === 'youthSafety' ? '"Defence Youth Safety", "DYSAT"' : ''
+                 }
+                 </span>
               </li>
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log. Items without specified expiry are considered 'current' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
+            Note: For items with expiry (except First Aid), the system uses the completion date of the most recent relevant training log. First Aid checks if the completion date is within the last 3 years. Items without specified expiry are considered 'current' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
           </p>
         </CardContent>
       </Card>
