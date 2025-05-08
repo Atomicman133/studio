@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -35,7 +34,7 @@ import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff d
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, format, differenceInDays, isValid as isValidDate, subYears } from "date-fns"; // Import date-fns functions
+import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, subYears } from "date-fns"; // Import date-fns functions
 import { RANKS } from "../staff/staff-schema";
 
 
@@ -117,13 +116,13 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
           if (criterion.key === 'firstAid') {
-            // Corrected logic for First Aid: Certificate is valid if today is BEFORE the expiry date (completion + 3 years).
             const expiryDate = addYears(completionDate, 3);
-            // Set expiryDate comparison to the END of the day for inclusivity
-            const expiryDateEndOfDay = new Date(expiryDate);
-            expiryDateEndOfDay.setHours(23, 59, 59, 999);
+            const expiryDateStartOfDay = new Date(expiryDate);
+            expiryDateStartOfDay.setHours(0, 0, 0, 0);
 
-            if (isBefore(today, expiryDateEndOfDay)) { // Is today BEFORE the end of the expiry day?
+            // Check if today is on or before the expiry date
+            // !isAfter(today, expiryDateStartOfDay) is equivalent to today <= expiryDateStartOfDay
+            if (!isAfter(today, expiryDateStartOfDay)) {
                  isMet = true;
                  details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`; // Display calculated expiry
              } else {
@@ -133,10 +132,11 @@ const processComplianceReports = (
           } else if (criterion.yearsToExpire) {
               // Standard expiry logic for other items WITH expiry years
               const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-              const expiryDateEndOfDay = new Date(expiryDate);
-              expiryDateEndOfDay.setHours(23, 59, 59, 999); // End of expiry day
+              const expiryDateStartOfDay = new Date(expiryDate);
+              expiryDateStartOfDay.setHours(0, 0, 0, 0);
 
-              if (isBefore(today, expiryDateEndOfDay)) { // Valid ON the expiry day
+              // Check if today is on or before the expiry date
+              if (!isAfter(today, expiryDateStartOfDay)) { // Valid ON the expiry day
                   isMet = true;
                   details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
               } else {
@@ -236,15 +236,13 @@ export default function ReportingPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Start of today
 
-    const expiryDateEndOfDay = new Date(expiryDate);
-    expiryDateEndOfDay.setHours(23, 59, 59, 999); // End of expiry day
+    const expiryDateStartOfDay = new Date(expiryDate);
+    expiryDateStartOfDay.setHours(0, 0, 0, 0); // Start of expiry day
 
     // Return days left only if it's not expired yet (valid ON expiry day)
-    if (isBefore(today, expiryDateEndOfDay)) {
-      // Calculate difference from today to the *start* of the expiry date for days remaining
-      const expiryDateStartOfDay = new Date(expiryDate);
-      expiryDateStartOfDay.setHours(0,0,0,0);
-      return differenceInDays(expiryDateStartOfDay, today);
+    // !isAfter(today, expiryDateStartOfDay) means today <= expiryDateStartOfDay
+    if (!isAfter(today, expiryDateStartOfDay)) {
+        return differenceInDays(expiryDateStartOfDay, today);
     }
     return null; // Return null if expired
   };
@@ -322,7 +320,7 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md"> {/* Add border and ensure height */}
+            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md"> {/* Ensure ScrollArea has a defined height */}
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                   <TableRow>
@@ -336,7 +334,7 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
-                      asChild // Important: Render Collapsible directly under tbody if possible, or use Fragment if needed
+                      asChild // Use asChild to allow direct rendering of Fragment
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
                     >
@@ -423,9 +421,9 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.key === 'firstAid'
-                   ? ' (valid if completed within the last 3 years).'
+                   ? ' (valid if completed within the last 3 years, check is inclusive of expiry date).'
                    : criterion.yearsToExpire
-                     ? ` (valid for ${criterion.yearsToExpire} years from completion).`
+                     ? ` (valid for ${criterion.yearsToExpire} years from completion, check is inclusive of expiry date).`
                      : ` (checked for existence).`
                  }
                  <br />
@@ -443,7 +441,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry (except First Aid), the system uses the completion date of the most recent relevant training log. First Aid checks if the completion date is within the last 3 years. Items without specified expiry are considered 'current' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. The check includes the expiry date itself as valid. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
           </p>
         </CardContent>
       </Card>
@@ -451,4 +449,3 @@ export default function ReportingPage() {
   );
 
 }
-
