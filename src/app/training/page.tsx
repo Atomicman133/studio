@@ -66,7 +66,7 @@ const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
 const convertLogTimestamps = (data: any): TrainingLog => {
   return {
     ...data,
-    completionDate: (data.completionDate as Timestamp).toDate(),
+    completionDate: data.completionDate instanceof Timestamp ? data.completionDate.toDate() : data.completionDate,
   };
 };
 
@@ -444,7 +444,8 @@ export default function TrainingPage() {
 
 
   const parseDate = (dateString: string): Date | null => {
-    const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd"];
+    // Add 'dd/MM/yy' to the list of formats to try
+    const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd", "dd/MM/yy"];
     for (const fmt of formatsToTry) {
       const parsed = parseDateFns(dateString, fmt, new Date());
       if (isValidDate(parsed)) return parsed;
@@ -613,7 +614,7 @@ export default function TrainingPage() {
 
                   const completionDate = parseDate(effectiveDateStr);
                   if (!completionDate) {
-                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD.`);
+                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.`);
                       return;
                   }
 
@@ -867,7 +868,7 @@ export default function TrainingPage() {
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>MemberUID</code> (Text, Required. This is the Staff Member&apos;s Service Number, e.g., &quot;8001234&quot;)</li>
             <li><code>Member Rank - Name</code> (Text, Required. Format: &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")}.)</li>
-            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD. This will be the completion date of the training.)</li>
+            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY. This will be the completion date of the training.)</li>
             <li><code>Accomplishment</code> (Text, Required. This will be used as the Course Name and Qualification Achieved for the training log.)</li>
           </ul>
           <p className="mt-2 text-xs">
@@ -1051,3 +1052,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+
