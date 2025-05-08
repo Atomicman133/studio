@@ -285,16 +285,19 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
+                     // Use React.Fragment or map directly without a Fragment here
+                     // Each Collapsible renders its own wrapper (div by default)
+                     // and contains its trigger Row and content Row
                     <Collapsible
                       key={report.staffMemberId}
-                      asChild // Use asChild to prevent Collapsible rendering a div
+                      // Removed asChild from Collapsible wrapper
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
+                      // Collapsible renders a div here by default, wrapping the two TRs
+                      // This is technically invalid HTML (div inside tbody), but a common workaround
                     >
-                      {/* No React Fragment needed here */}
-                      <TableRow className="cursor-pointer hover:bg-muted/50">
+                      <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                         <TableCell>
-                          {/* CollapsibleTrigger now inside TableCell */}
                           <CollapsibleTrigger asChild>
                             <Button variant="ghost" size="sm" className="w-9 p-0">
                               {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -313,12 +316,12 @@ export default function ReportingPage() {
                           </Badge>
                         </TableCell>
                       </TableRow>
-                      {/* CollapsibleContent wraps the details TableRow */}
                       <CollapsibleContent asChild>
-                        <TableRow>
-                          <TableCell /> {/* Empty cell for alignment */}
-                          <TableCell colSpan={3} className="p-0">
-                            <div className="p-4 bg-muted/30 dark:bg-muted/20">
+                        {/* This TableRow will be rendered directly by CollapsibleContent */}
+                        <TableRow className="bg-muted/50 dark:bg-muted/30">
+                          {/* Adjusted colSpan to match the number of columns (4) */}
+                          <TableCell colSpan={4} className="p-0">
+                            <div className="p-4">
                               <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                               <ul className="space-y-2">
                                 {report.criteriaChecks.map(criterion => (
