@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -137,18 +136,18 @@ export default function DisciplinePage() {
     queryKey: [ACTIONS_QUERY_KEY],
     queryFn: fetchDisciplineActions,
   });
-  const addActionMutation = useAddMutation(addDisciplineAction, ACTIONS_QUERY_KEY, "Discipline action recorded.");
-  const updateActionMutation = useUpdateMutation(updateDisciplineAction, ACTIONS_QUERY_KEY, "Discipline action updated.");
-  const deleteActionMutation = useDeleteMutation(deleteDisciplineAction, ACTIONS_QUERY_KEY, "Discipline action deleted.");
+  const addActionMutation = useAddMutation(addDisciplineAction, [ACTIONS_QUERY_KEY], "Discipline action recorded.");
+  const updateActionMutation = useUpdateMutation(updateDisciplineAction, [ACTIONS_QUERY_KEY], "Discipline action updated.");
+  const deleteActionMutation = useDeleteMutation(deleteDisciplineAction, [ACTIONS_QUERY_KEY], "Discipline action deleted.");
 
   // --- React Query for Records of Conversation ---
   const { data: conversationsList = [], isLoading: isLoadingConversations, error: errorConversations } = useQuery<RecordOfConversation[], Error>({
     queryKey: [CONVERSATIONS_QUERY_KEY],
     queryFn: fetchRecordsOfConversation,
   });
-  const addConversationMutation = useAddMutation(addRecordOfConversation, CONVERSATIONS_QUERY_KEY, "Record of conversation created.");
-  const updateConversationMutation = useUpdateMutation(updateRecordOfConversation, CONVERSATIONS_QUERY_KEY, "Record of conversation updated.");
-  const deleteConversationMutation = useDeleteMutation(deleteRecordOfConversation, CONVERSATIONS_QUERY_KEY, "Record of conversation deleted.");
+  const addConversationMutation = useAddMutation(addRecordOfConversation, [CONVERSATIONS_QUERY_KEY], "Record of conversation created.");
+  const updateConversationMutation = useUpdateMutation(updateRecordOfConversation, [CONVERSATIONS_QUERY_KEY], "Record of conversation updated.");
+  const deleteConversationMutation = useDeleteMutation(deleteRecordOfConversation, [CONVERSATIONS_QUERY_KEY], "Record of conversation deleted.");
 
   // --- Generic Mutation Hooks (to reduce boilerplate) ---
   function useAddMutation<TData extends { id?: string }, TVariables extends Omit<TData, 'id'>>(

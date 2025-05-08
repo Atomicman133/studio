@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -31,8 +30,6 @@ import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reportin
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
-// import { initialTrainingLogs } from "../training/page"; // Removed static import
-// import { initialStaff } from "../staff/page"; // Removed static import, causes the error
 import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff data
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
@@ -279,7 +276,7 @@ export default function ReportingPage() {
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
-                    <TableHead className="w-[50px]"></TableHead> {/* Spacer for collapsible trigger */}
+                    <TableHead className="w-[50px]"></TableHead>
                     <TableHead>Squadron</TableHead>
                     <TableHead>Staff Member</TableHead>
                     <TableHead>Overall Status</TableHead>
@@ -389,5 +386,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-
-

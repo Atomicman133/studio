@@ -181,7 +181,7 @@ export default function MeetingsPage() {
         } catch (err) {
             console.error("Error converting agenda document file:", err);
             toast({ variant: "destructive", title: "File Error", description: "Could not process agenda document." });
-            return; 
+            return;
         }
     } else if (formData.agendaDocumentFileName === undefined && editingMeeting) {
         // This case signifies explicit removal of an existing document during edit
@@ -206,7 +206,7 @@ export default function MeetingsPage() {
         : (editingMeeting ? editingMeeting.agendaDocumentDataUrl : undefined),
       id: editingMeeting ? editingMeeting.id : undefined, // Include ID if editing
     };
-    
+
     if (editingMeeting && editingMeeting.id) {
         updateMeetingMutation.mutate(meetingDataPayload as Meeting); // Cast because ID is now included
     } else {
@@ -561,4 +561,3 @@ export default function MeetingsPage() {
     </div>
   );
 }
-

@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -246,6 +245,7 @@ export default function StaffPage() {
       const membersToParse: Omit<StaffMember, 'id'>[] = [];
       const errors: string[] = [];
       const lines = text.split(/\r\n|\n/);
+      let importedCount = 0; // Track successful additions
 
       try {
         if (lines.length < 2) {
@@ -256,15 +256,23 @@ export default function StaffPage() {
         const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Clean header
         const expectedHeader = ["MemberUID", "MemberName", "PrimaryUnit", "Appointment", "EmailAddress", "PhoneNumber", "Address"];
 
-        const headersMatchOrder = JSON.stringify(csvHeader) === JSON.stringify(expectedHeader);
-
-        if (!headersMatchOrder) {
-          throw new Error(`Invalid CSV header or order. Expected: "${expectedHeader.join(',')}" (in this exact order). Got: "${csvHeader.join(',')}"`);
+        // Check if all expected headers are present (order doesn't matter for this check)
+        const hasAllHeaders = expectedHeader.every(eh => csvHeader.includes(eh));
+        if (!hasAllHeaders) {
+           throw new Error(`Invalid CSV header. Expected columns (any order): "${expectedHeader.join(', ')}". Got: "${csvHeader.join(',')}"`);
         }
+
+        // Find the indices of the expected headers
+        const headerIndices: Record<string, number> = {};
+        expectedHeader.forEach(eh => {
+          headerIndices[eh] = csvHeader.indexOf(eh);
+        });
+
 
         const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
         const existingEmails = new Set(staffList.map(s => s.email));
-        let importedCount = 0;
+
+        const addPromises: Promise<void>[] = []; // Store promises for concurrent additions
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
@@ -298,8 +306,9 @@ export default function StaffPage() {
           }
 
           const csvData: Record<string, string> = {};
-          csvHeader.forEach((header, index) => {
-            csvData[header] = values[index].replace(/^"|"$/g, '');
+          expectedHeader.forEach(eh => {
+              const index = headerIndices[eh];
+              csvData[eh] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
           });
 
           const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
@@ -346,21 +355,26 @@ export default function StaffPage() {
             joinDate: undefined,
           };
 
-           // Immediately try to add the parsed member
-           try {
-             await addStaffMutation.mutateAsync(memberToAdd);
-             membersToParse.push(memberToAdd); // Track successful additions for final count
-             importedCount++;
-             // Update local sets to prevent duplicates within the same file run
-             existingStaffNumbers.add(serviceNumber);
-             existingEmails.add(email);
-           } catch (addError: any) {
-             errors.push(`Row ${i + 1}: Failed to add staff member (UID: ${serviceNumber}) to database: ${addError.message}`);
-           }
+          membersToParse.push(memberToAdd); // Track for duplicate check within file
+
+           // Add to promises array
+           addPromises.push(
+              addStaffMutation.mutateAsync(memberToAdd).then(() => {
+                 importedCount++; // Increment on success
+                 // Update local sets immediately to prevent race conditions in concurrent additions
+                 existingStaffNumbers.add(serviceNumber);
+                 existingEmails.add(email);
+              }).catch((addError: any) => {
+                 errors.push(`Row ${i + 1}: Failed to add staff member (UID: ${serviceNumber}) to database: ${addError.message}`);
+              })
+            );
 
         } // End of line processing loop
 
+        // Wait for all add operations to complete
+        await Promise.all(addPromises);
 
+        // --- Display Results ---
         if (importedCount > 0 && errors.length === 0) {
           toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
         } else if (importedCount > 0 && errors.length > 0) {
@@ -387,6 +401,8 @@ export default function StaffPage() {
                 ),
                 duration: 15000,
             });
+        } else if (importedCount === 0 && errors.length === 0 && lines.length > 1) {
+           toast({ title: "Import Complete", description: "No new staff members were found to import (all might already exist or file was empty)." });
         }
 
 
@@ -398,6 +414,8 @@ export default function StaffPage() {
           fileInputRef.current.value = ""; // Reset file input
         }
         setIsImportingCsv(false);
+        // Optionally trigger a refetch if needed, though mutations should handle cache updates
+        // queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
       }
     };
     reader.onerror = () => {
@@ -593,7 +611,7 @@ export default function StaffPage() {
         <UploadCloud className="h-4 w-4" />
         <AlertTitle>CSV Import Instructions</AlertTitle>
         <AlertDescription>
-          To bulk import staff members, upload a CSV file with the following columns in order:
+          To bulk import staff members, upload a CSV file with the following columns (header row required, order does not matter as long as headers are correct):
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>MemberUID</code> (Text, Required, e.g., &quot;8001234&quot;)</li>
             <li><code>MemberName</code> (Text, Required. Format: &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")}.)</li>
@@ -603,8 +621,7 @@ export default function StaffPage() {
             <li><code>PhoneNumber</code> (Text, Optional, e.g., &quot;0400123456&quot;)</li>
             <li><code>Address</code> (Text, Optional. Not currently stored but include column for future compatibility)</li>
           </ul>
-          The first row must be a header row with these exact names. MemberUID and EmailAddress must be unique per staff member.
-          Join Date is not part of this import format and will be unassigned.
+          MemberUID and EmailAddress must be unique per staff member. Join Date is not part of this import format and will be unassigned. Rows with missing required fields, invalid formats, or duplicate UID/Email will be skipped.
         </AlertDescription>
       </Alert>
 
