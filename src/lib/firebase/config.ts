@@ -11,7 +11,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyCxGglrCkjQnEZZ1T4i79x6F0JC34kaNQo",
   authDomain: "squadron-manager-ekm3y.firebaseapp.com",
   projectId: "squadron-manager-ekm3y",
-  storageBucket: "squadron-manager-ekm3y.appspot.com", // Corrected domain for storage bucket
+  storageBucket: "squadron-manager-ekm3y.firebasestorage.app",
   messagingSenderId: "108573147047",
   appId: "1:108573147047:web:0fb238bfab1f516d338082"
   // measurementId: "YOUR_MEASUREMENT_ID" // Measurement ID is optional

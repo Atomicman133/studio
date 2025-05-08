@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -144,14 +145,7 @@ export default function StaffPage() {
       .map(([squadronName, staffMembers]) => ({
         squadronName,
         // Sorting logic remains the same
-        staffMembers: staffMembers.sort((a, b) => {
-          const rankAIndex = RANKS.indexOf(a.rank);
-          const rankBIndex = RANKS.indexOf(b.rank);
-          if (rankAIndex !== rankBIndex) {
-            return rankBIndex - rankAIndex;
-          }
-          return a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName);
-        }),
+        staffMembers: staffMembers // Sorting is now handled by the fetchStaff query
       }))
       .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
   }, [staffList]);
@@ -242,165 +236,158 @@ export default function StaffPage() {
 
     const reader = new FileReader();
     reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      if (!text) {
+        toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+        setIsImportingCsv(false);
+        return;
+      }
+
+      const membersToParse: Omit<StaffMember, 'id'>[] = [];
+      const errors: string[] = [];
+      const lines = text.split(/\r\n|\n/);
+
       try {
-        const text = e.target?.result as string;
-        if (!text) {
-          toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
-          setIsImportingCsv(false);
-          return;
-        }
-
-        const membersToParse: Omit<StaffMember, 'id'>[] = [];
-        const errors: string[] = [];
-        const lines = text.split(/\r\n|\n/);
-
         if (lines.length < 2) {
-          errors.push("CSV must have a header and at least one data row.");
-        } else {
-          const headerLine = lines[0].trim();
-          const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Clean header
-          const expectedHeader = ["MemberUID", "MemberName", "PrimaryUnit", "Appointment", "EmailAddress", "PhoneNumber", "Address"];
-
-          // Check if all expected headers are present, order doesn't strictly matter for this check
-          // but we will enforce order for value extraction.
-          const allExpectedHeadersPresent = expectedHeader.every(eh => csvHeader.includes(eh));
-          const headersMatchOrder = JSON.stringify(csvHeader) === JSON.stringify(expectedHeader);
-
-
-          if (!headersMatchOrder) { // Strict check for order and content
-              errors.push(`Invalid CSV header or order. Expected: "${expectedHeader.join(',')}" (in this exact order). Got: "${csvHeader.join(',')}"`);
-          } else {
-              const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
-              const existingEmails = new Set(staffList.map(s => s.email));
-
-              for (let i = 1; i < lines.length; i++) {
-                  const line = lines[i].trim();
-                  if (!line) continue;
-
-                  // Robust CSV line parser
-                  const values = [];
-                  let currentVal = '';
-                  let inQuotes = false;
-                  for (let charIndex = 0; charIndex < line.length; charIndex++) {
-                      const char = line[charIndex];
-                      if (char === '"' && (charIndex === 0 || line[charIndex-1] !== '"')) { // Handle " at start or non-escaped "
-                          if (inQuotes && charIndex + 1 < line.length && line[charIndex+1] === '"') { // Escaped double quote ""
-                              currentVal += '"';
-                              charIndex++; // Skip next quote
-                          } else {
-                              inQuotes = !inQuotes;
-                          }
-                      } else if (char === ',' && !inQuotes) {
-                          values.push(currentVal.trim());
-                          currentVal = '';
-                      } else {
-                          currentVal += char;
-                      }
-                  }
-                  values.push(currentVal.trim()); // Add last value
-
-                  if (values.length !== csvHeader.length) {
-                      errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
-                      continue;
-                  }
-
-                  const csvData: Record<string, string> = {};
-                  csvHeader.forEach((header, index) => {
-                      csvData[header] = values[index].replace(/^"|"$/g, ''); // Also remove quotes from values
-                  });
-
-
-                  const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
-
-                  if (!rank) {
-                    errors.push(`Row ${i + 1}: Could not parse rank from MemberName "${csvData.MemberName}". Ensure it starts with a valid rank (e.g., ${RANKS[RANKS.length-1]}). Valid ranks: ${RANKS.join(", ")}`);
-                    continue;
-                  }
-                  if (!firstName || !lastName) {
-                    errors.push(`Row ${i + 1}: Could not parse first and last name from MemberName "${csvData.MemberName}". Expected format "RANK FirstName LastName". Received: "${csvData.MemberName}". Parsed Name Part: "${csvData.MemberName.substring(rank.length).trim()}"`);
-                    continue;
-                  }
-
-                  const serviceNumber = csvData.MemberUID;
-                  const email = csvData.EmailAddress;
-                  const role = csvData.Appointment;
-                  const squadron = csvData.PrimaryUnit || undefined;
-                  const phone = csvData.PhoneNumber || undefined;
-
-                  if (!serviceNumber || !email || !role) {
-                      errors.push(`Row ${i + 1}: Missing required fields (MemberUID, EmailAddress, Appointment).`);
-                      continue;
-                  }
-
-                  if (!/^\S+@\S+\.\S+$/.test(email)) {
-                      errors.push(`Row ${i+1}: Invalid email format for "${email}".`);
-                      continue;
-                  }
-
-                  if (existingStaffNumbers.has(serviceNumber) || existingEmails.has(email) || membersToParse.some(m => m.serviceNumber === serviceNumber || m.email === email)) {
-                      errors.push(`Row ${i + 1}: Duplicate MemberUID or EmailAddress for "${serviceNumber}/${email}". Skipped.`);
-                      continue;
-                  }
-
-                  // Add to list of members to be added to Firestore
-                  membersToParse.push({
-                      serviceNumber: serviceNumber,
-                      rank: rank,
-                      firstName: firstName,
-                      lastName: lastName,
-                      email: email,
-                      phone: phone,
-                      role: role,
-                      squadron: squadron,
-                      joinDate: undefined, // Join date not in CSV
-                  });
-              }
-          }
+          throw new Error("CSV must have a header and at least one data row.");
         }
+
+        const headerLine = lines[0].trim();
+        const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Clean header
+        const expectedHeader = ["MemberUID", "MemberName", "PrimaryUnit", "Appointment", "EmailAddress", "PhoneNumber", "Address"];
+
+        const headersMatchOrder = JSON.stringify(csvHeader) === JSON.stringify(expectedHeader);
+
+        if (!headersMatchOrder) {
+          throw new Error(`Invalid CSV header or order. Expected: "${expectedHeader.join(',')}" (in this exact order). Got: "${csvHeader.join(',')}"`);
+        }
+
+        const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
+        const existingEmails = new Set(staffList.map(s => s.email));
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          // Robust CSV line parser
+          const values = [];
+          let currentVal = '';
+          let inQuotes = false;
+          for (let charIndex = 0; charIndex < line.length; charIndex++) {
+            const char = line[charIndex];
+            if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) {
+              if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
+                currentVal += '"';
+                charIndex++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              values.push(currentVal.trim());
+              currentVal = '';
+            } else {
+              currentVal += char;
+            }
+          }
+          values.push(currentVal.trim());
+
+          if (values.length !== csvHeader.length) {
+            errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
+            continue;
+          }
+
+          const csvData: Record<string, string> = {};
+          csvHeader.forEach((header, index) => {
+            csvData[header] = values[index].replace(/^"|"$/g, '');
+          });
+
+          const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
+
+          if (!rank) {
+            errors.push(`Row ${i + 1}: Could not parse rank from MemberName "${csvData.MemberName}". Ensure it starts with a valid rank. Valid ranks: ${RANKS.join(", ")}`);
+            continue;
+          }
+          if (!firstName || !lastName) {
+            errors.push(`Row ${i + 1}: Could not parse first and last name from MemberName "${csvData.MemberName}". Expected format "RANK FirstName LastName".`);
+            continue;
+          }
+
+          const serviceNumber = csvData.MemberUID;
+          const email = csvData.EmailAddress;
+          const role = csvData.Appointment;
+          const squadron = csvData.PrimaryUnit || undefined;
+          const phone = csvData.PhoneNumber || undefined;
+
+          if (!serviceNumber || !email || !role) {
+            errors.push(`Row ${i + 1}: Missing required fields (MemberUID, EmailAddress, Appointment).`);
+            continue;
+          }
+
+          if (!/^\S+@\S+\.\S+$/.test(email)) {
+            errors.push(`Row ${i + 1}: Invalid email format for "${email}".`);
+            continue;
+          }
+
+          if (existingStaffNumbers.has(serviceNumber) || existingEmails.has(email) || membersToParse.some(m => m.serviceNumber === serviceNumber || m.email === email)) {
+            errors.push(`Row ${i + 1}: Duplicate MemberUID or EmailAddress for "${serviceNumber}/${email}". Skipped.`);
+            continue;
+          }
+
+          membersToParse.push({
+            serviceNumber: serviceNumber,
+            rank: rank,
+            firstName: firstName,
+            lastName: lastName,
+            email: email,
+            phone: phone,
+            role: role,
+            squadron: squadron,
+            joinDate: undefined,
+          });
+        } // End of line processing loop
 
         let importedCount = 0;
-        if (membersToParse.length > 0 && errors.length === 0) { // Only proceed if no initial parsing errors
+        if (membersToParse.length > 0 && errors.length === 0) {
+          // Batch add or add one by one
+          // Adding one by one for simpler error handling per record
           for (const member of membersToParse) {
-             try {
-                 // Use the mutation to add each member to Firestore
-                 await addStaffMutation.mutateAsync(member);
-                 importedCount++;
-             } catch (err: any) {
-                 errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}) to database: ${err.message}`);
-                 // Decide if you want to stop the import on first error or continue
-                 // break; // Uncomment to stop on first error
-             }
+            try {
+              await addStaffMutation.mutateAsync(member);
+              importedCount++;
+            } catch (addError: any) {
+              errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}) to database: ${addError.message}`);
+            }
           }
-           if (importedCount > 0) {
-              toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
-           }
+
+          if (importedCount > 0) {
+            toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
+          }
         }
 
         if (errors.length > 0) {
-          const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-          const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
-          const variant = importedCount > 0 ? "default" : "destructive";
-          toast({
-              variant: variant,
-              title: title,
-              description: (
-                <ScrollArea className="max-h-40">
-                  <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
-                </ScrollArea>
-              ),
-              duration: 15000,
-          });
+            const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
+            const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
+            const variant = importedCount > 0 ? "default" : "destructive";
+            toast({
+                variant: variant,
+                title: title,
+                description: (
+                    <ScrollArea className="max-h-40">
+                    <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
+                    </ScrollArea>
+                ),
+                duration: 15000,
+            });
         }
 
-
-      } catch (error: any) {
+      } catch (error: any) { // Catch errors from initial checks (header, line count)
         console.error("Error during CSV import processing:", error);
-        toast({ variant: "destructive", title: "Import Error", description: `An unexpected error occurred: ${error.message}` });
+        toast({ variant: "destructive", title: "Import Error", description: error.message || "An unexpected error occurred during processing." });
       } finally {
         if (fileInputRef.current) {
-          fileInputRef.current.value = "";
+          fileInputRef.current.value = ""; // Reset file input
         }
-        setIsImportingCsv(false); // Ensure state is reset
+        setIsImportingCsv(false);
       }
     };
     reader.onerror = () => {
@@ -408,7 +395,7 @@ export default function StaffPage() {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
-      setIsImportingCsv(false); // Ensure state is reset
+      setIsImportingCsv(false);
     };
     reader.readAsText(file);
   };
@@ -500,7 +487,7 @@ export default function StaffPage() {
       )}
 
       {/* Staff List Display */}
-      {!isLoading && !error && staffGroups.length === 0 && (
+      {!isLoading && !error && staffGroups.length === 0 && staffList.length === 0 && (
         <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
@@ -675,6 +662,7 @@ export default function StaffPage() {
                       </Card>
 
                     {/* Accordion for related data */}
+                    {/* Note: The `collapsible` prop is not needed for AccordionItem */}
                     <Accordion type="multiple" className="w-full" defaultValue={["training"]}>
                       <AccordionItem value="training">
                         <AccordionTrigger>

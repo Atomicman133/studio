@@ -2,7 +2,7 @@
 "use client"; // Required for React Query hooks
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { db } from '@/lib/firebase/config';
+// Removed onSnapshot as it's not used in the primary useStaff hook
 import {
   collection,
   getDocs,
@@ -13,8 +13,9 @@ import {
   Timestamp,
   query,
   orderBy,
-  where, // If needed for filtering/querying
+  // where, // If needed for filtering/querying
 } from 'firebase/firestore';
+import { db } from '@/lib/firebase/config';
 import type { StaffMember } from '@/app/staff/staff-schema';
 import { staffMemberSchema, RANKS } from '@/app/staff/staff-schema';
 
@@ -25,50 +26,64 @@ const convertTimestamps = (data: any): StaffMember => {
   const validatedData = staffMemberSchema.parse({
     ...data,
     // Ensure null joinDate from Firestore is converted to undefined for Zod
-    joinDate: data.joinDate instanceof Timestamp 
-      ? data.joinDate.toDate() 
+    joinDate: data.joinDate instanceof Timestamp
+      ? data.joinDate.toDate()
       : (data.joinDate === null ? undefined : data.joinDate),
   });
   return validatedData;
 };
 
+
 // --- Fetch Staff ---
+// Fetch staff data once using getDocs
 async function fetchStaff(): Promise<StaffMember[]> {
-  const staffCollectionRef = collection(db, 'staff');
-  // Example: Order by rank index (descending) then last name
-  // Requires creating composite indexes in Firestore if combining multiple orderBy/where clauses
-  // For simplicity, sorting is done client-side after fetching for now.
-  const q = query(staffCollectionRef /*, orderBy('lastName') */); // Basic query
-  const querySnapshot = await getDocs(q);
+    const staffCollectionRef = collection(db, 'staff');
+    // Example: Order by squadron, then rank, then name (client-side sorting is also applied)
+    // You might adjust the Firestore query for better performance if needed.
+    const q = query(staffCollectionRef, orderBy('squadron'), orderBy('lastName')); // Basic ordering
+    const querySnapshot = await getDocs(q);
+    const staffList = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...convertTimestamps(doc.data()),
+    }));
 
-  const staffList = querySnapshot.docs.map(doc => ({
-    id: doc.id,
-    ...convertTimestamps(doc.data()),
-  }));
+     // Client-side sorting (matches previous logic, ensures rank order)
+    staffList.sort((a, b) => {
+        const sqnCompare = (a.squadron || "Unassigned").localeCompare(b.squadron || "Unassigned");
+        if (sqnCompare !== 0) return sqnCompare;
 
-  // Client-side sorting (matches previous logic)
-  staffList.sort((a, b) => {
-     if (a.squadron && b.squadron && a.squadron.localeCompare(b.squadron) !== 0) {
-        return a.squadron.localeCompare(b.squadron);
-    }
-    const rankAIndex = RANKS.indexOf(a.rank);
-    const rankBIndex = RANKS.indexOf(b.rank);
-    if (rankAIndex !== rankBIndex) {
-      return rankBIndex - rankAIndex; // Higher rank first
-    }
-    return a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName);
-  });
+        const rankAIndex = RANKS.indexOf(a.rank);
+        const rankBIndex = RANKS.indexOf(b.rank);
 
-  return staffList;
+        // Handle cases where rank might not be in RANKS (shouldn't happen with validation)
+        const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
+        const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
+
+        // Sort descending by index (higher rank first)
+        if (effectiveRankAIndex !== effectiveRankBIndex) {
+            return effectiveRankBIndex - effectiveRankAIndex;
+        }
+
+        // If ranks are the same, sort by name
+        const lastNameCompare = a.lastName.localeCompare(b.lastName);
+        if (lastNameCompare !== 0) return lastNameCompare;
+        return a.firstName.localeCompare(b.firstName);
+    });
+
+
+    return staffList;
 }
 
+// Hook to fetch staff data using React Query
 export function useStaff() {
   return useQuery<StaffMember[], Error>({
     queryKey: [STAFF_QUERY_KEY],
-    queryFn: fetchStaff,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    queryFn: fetchStaff, // Use the fetchStaff function here
+     // Add staleTime or other options as needed
+     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
+
 
 // --- Add Staff ---
 async function addStaff(newStaffData: Omit<StaffMember, 'id'>): Promise<string> {
@@ -146,4 +161,3 @@ export function useDeleteStaff() {
     },
   });
 }
-
