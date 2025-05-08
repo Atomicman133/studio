@@ -544,7 +544,7 @@ export default function TrainingPage() {
               let preliminaryParsingOk = true;
 
               for (let i = 1; i < csvLines.length; i++) {
-                  let line = csvLines[i].trim(); // Use let for line to allow modification if needed within the loop
+                  let line = csvLines[i].trim(); // Use let for line modification
                   if (!line) continue;
 
                   // Handle commas within quoted fields (basic CSV parsing)
@@ -552,22 +552,14 @@ export default function TrainingPage() {
                   let currentVal = '';
                   let inQuotes = false;
                   for (let charIndex = 0; charIndex < line.length; charIndex++) {
-                    let char = line[charIndex];
-                      if (char === '"' && !inQuotes) {
-                           if (charIndex > 0 && line[charIndex - 1] === '"') {
-                              // This is an escaped double quote ""
-                              currentVal += '"';
-                          } else {
-                            inQuotes = true;
-                          }
-                      } else if (char === '"' && inQuotes) {
-                          if (charIndex + 1 < line.length && line[charIndex + 1] === '"') {
-                              // This is an escaped double quote "", treat first " as content
+                      let char = line[charIndex];
+                      if (char === '"') {
+                          // Check for escaped double quote ""
+                          if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
                               currentVal += '"';
                               charIndex++; // Skip the next quote
                           } else {
-                              // This is the closing quote
-                              inQuotes = false;
+                              inQuotes = !inQuotes; // Toggle quote state
                           }
                       } else if (char === ',' && !inQuotes) {
                           values.push(currentVal.trim());
@@ -587,7 +579,13 @@ export default function TrainingPage() {
 
                   const csvRowData: Record<string, string> = {};
                    expectedHeader.forEach(eh => {
-                      csvRowData[eh] = values[headerIndices[eh]].replace(/^"|"$/g, ''); // Remove surrounding quotes if present
+                       // Remove surrounding quotes only if they exist as a pair
+                       let val = values[headerIndices[eh]];
+                       if (val.startsWith('"') && val.endsWith('"')) {
+                           val = val.substring(1, val.length - 1);
+                       }
+                       // Replace escaped double quotes "" with a single double quote "
+                       csvRowData[eh] = val.replace(/""/g, '"');
                   });
 
                   const serviceNumber = csvRowData["MemberUID"];
@@ -808,71 +806,73 @@ export default function TrainingPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Course/Training</TableHead>
-                            <TableHead className="hidden md:table-cell">Role at Training</TableHead>
-                            <TableHead>Completion</TableHead>
-                            <TableHead className="hidden lg:table-cell">Qualification</TableHead>
-                            <TableHead className="hidden xl:table-cell">Certificate</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {staffMemberGroup.logs.map((log) => (
-                            <TableRow key={log.id}>
-                              <TableCell className="font-medium">{log.courseName}</TableCell>
-                              <TableCell className="hidden md:table-cell">{log.currentRole}</TableCell>
-                              <TableCell>{format(log.completionDate, "PP")}</TableCell>
-                              <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
-                               <TableCell className="hidden xl:table-cell">
-                                {log.certificateFileName && log.certificateDataUrl ? (
-                                  <a href={log.certificateDataUrl} download={log.certificateFileName} className="text-primary hover:underline flex items-center">
-                                    <Paperclip className="mr-1 h-4 w-4" /> {log.certificateFileName}
-                                  </a>
-                                ) : (
-                                  "None"
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" className="h-8 w-8 p-0" disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
-                                      <span className="sr-only">Open menu</span>
-                                      <MoreHorizontal className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => handleViewDetails(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
-                                      <Info className="mr-2 h-4 w-4" />
-                                      View Details
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleEdit(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
-                                      <Pencil className="mr-2 h-4 w-4" />
-                                      Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
-                                      <Download className="mr-2 h-4 w-4" />
-                                      Export Record
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onClick={() => setLogToDelete(log)}
-                                      className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                      disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}
-                                    >
-                                      <Trash2 className="mr-2 h-4 w-4" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </TableCell>
+                      <ScrollArea className="max-h-[400px]"> {/* Add ScrollArea here */}
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Course/Training</TableHead>
+                              <TableHead className="hidden md:table-cell">Role at Training</TableHead>
+                              <TableHead>Completion</TableHead>
+                              <TableHead className="hidden lg:table-cell">Qualification</TableHead>
+                              <TableHead className="hidden xl:table-cell">Certificate</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {staffMemberGroup.logs.map((log) => (
+                              <TableRow key={log.id}>
+                                <TableCell className="font-medium">{log.courseName}</TableCell>
+                                <TableCell className="hidden md:table-cell">{log.currentRole}</TableCell>
+                                <TableCell>{format(log.completionDate, "PP")}</TableCell>
+                                <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                                 <TableCell className="hidden xl:table-cell">
+                                  {log.certificateFileName && log.certificateDataUrl ? (
+                                    <a href={log.certificateDataUrl} download={log.certificateFileName} className="text-primary hover:underline flex items-center">
+                                      <Paperclip className="mr-1 h-4 w-4" /> {log.certificateFileName}
+                                    </a>
+                                  ) : (
+                                    "None"
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" className="h-8 w-8 p-0" disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
+                                        <span className="sr-only">Open menu</span>
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                      <DropdownMenuItem onClick={() => handleViewDetails(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
+                                        <Info className="mr-2 h-4 w-4" />
+                                        View Details
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleEdit(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
+                                        <Pencil className="mr-2 h-4 w-4" />
+                                        Edit
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Export Record
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => setLogToDelete(log)}
+                                        className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                        disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}
+                                      >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </ScrollArea> {/* End ScrollArea */}
                     </CardContent>
                   </Card>
                 ))}

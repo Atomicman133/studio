@@ -144,8 +144,8 @@ export default function StaffPage() {
     return Object.entries(groups)
       .map(([squadronName, staffMembers]) => ({
         squadronName,
-        // Sorting logic remains the same
-        staffMembers: staffMembers // Sorting is now handled by the fetchStaff query
+        // Sorting is now handled by the fetchStaff query
+        staffMembers: staffMembers
       }))
       .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
   }, [staffList]);
@@ -264,6 +264,7 @@ export default function StaffPage() {
 
         const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
         const existingEmails = new Set(staffList.map(s => s.email));
+        let importedCount = 0;
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
@@ -333,7 +334,7 @@ export default function StaffPage() {
             continue;
           }
 
-          membersToParse.push({
+          const memberToAdd: Omit<StaffMember, 'id'> = {
             serviceNumber: serviceNumber,
             rank: rank,
             firstName: firstName,
@@ -343,34 +344,42 @@ export default function StaffPage() {
             role: role,
             squadron: squadron,
             joinDate: undefined,
-          });
+          };
+
+           // Immediately try to add the parsed member
+           try {
+             await addStaffMutation.mutateAsync(memberToAdd);
+             membersToParse.push(memberToAdd); // Track successful additions for final count
+             importedCount++;
+             // Update local sets to prevent duplicates within the same file run
+             existingStaffNumbers.add(serviceNumber);
+             existingEmails.add(email);
+           } catch (addError: any) {
+             errors.push(`Row ${i + 1}: Failed to add staff member (UID: ${serviceNumber}) to database: ${addError.message}`);
+           }
+
         } // End of line processing loop
 
-        let importedCount = 0;
-        if (membersToParse.length > 0 && errors.length === 0) {
-          // Batch add or add one by one
-          // Adding one by one for simpler error handling per record
-          for (const member of membersToParse) {
-            try {
-              await addStaffMutation.mutateAsync(member);
-              importedCount++;
-            } catch (addError: any) {
-              errors.push(`Failed to import ${member.rank} ${member.firstName} ${member.lastName} (UID: ${member.serviceNumber}) to database: ${addError.message}`);
-            }
-          }
 
-          if (importedCount > 0) {
-            toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
-          }
-        }
-
-        if (errors.length > 0) {
+        if (importedCount > 0 && errors.length === 0) {
+          toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
+        } else if (importedCount > 0 && errors.length > 0) {
             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-            const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
-            const variant = importedCount > 0 ? "default" : "destructive";
-            toast({
-                variant: variant,
-                title: title,
+             toast({
+                variant: "default", // Still partially successful
+                title: "CSV Import Partially Successful",
+                description: (
+                    <ScrollArea className="max-h-40">
+                    <pre className="whitespace-pre-wrap text-xs">{`${importedCount} imported. Errors:\n${errorMessages}`}</pre>
+                    </ScrollArea>
+                ),
+                duration: 15000,
+            });
+        } else if (importedCount === 0 && errors.length > 0) {
+             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
+             toast({
+                variant: "destructive",
+                title: "CSV Import Failed",
                 description: (
                     <ScrollArea className="max-h-40">
                     <pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre>
@@ -379,6 +388,7 @@ export default function StaffPage() {
                 duration: 15000,
             });
         }
+
 
       } catch (error: any) { // Catch errors from initial checks (header, line count)
         console.error("Error during CSV import processing:", error);
@@ -507,7 +517,7 @@ export default function StaffPage() {
             {group.staffMembers.length === 0 ? (
               <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
             ) : (
-              <ScrollArea className="max-h-[600px]"> {/* Add ScrollArea for long lists within a squadron */}
+              <ScrollArea className="max-h-[600px] w-full"> {/* Ensure ScrollArea takes full width */}
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -525,7 +535,7 @@ export default function StaffPage() {
                         <TableCell>{staff.serviceNumber}</TableCell>
                         <TableCell>{staff.rank}</TableCell>
                         <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                        <TableCell className="hidden md:table-cell">{staff.role}</TableCell>
+                        <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role}</TableCell> {/* Added truncate and max-width */}
                         <TableCell className="hidden lg:table-cell">
                           {staff.joinDate ? format(staff.joinDate, "PP") : "N/A"}
                         </TableCell>
@@ -662,7 +672,6 @@ export default function StaffPage() {
                       </Card>
 
                     {/* Accordion for related data */}
-                    {/* Note: The `collapsible` prop is not needed for AccordionItem */}
                     <Accordion type="multiple" className="w-full" defaultValue={["training"]}>
                       <AccordionItem value="training">
                         <AccordionTrigger>
