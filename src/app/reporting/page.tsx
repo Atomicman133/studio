@@ -35,7 +35,7 @@ import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff d
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, format, differenceInDays, isValid as isValidDate, subYears } from "date-fns"; // Import isValidDate and subYears
+import { addYears, isBefore, format, differenceInDays, isValid as isValidDate, subYears } from "date-fns"; // Import date-fns functions
 import { RANKS } from "../staff/staff-schema";
 
 
@@ -117,15 +117,19 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
           if (criterion.key === 'firstAid') {
-            // Specific logic for First Aid: Check if completion date is within the last 3 years
-            const threeYearsAgo = subYears(today, 3);
-            if (isBefore(threeYearsAgo, completionDate)) { // Check if completionDate is AFTER threeYearsAgo
-                isMet = true;
-                details = `Completed: ${format(completionDate, "PP")} (Valid for 3 years)`;
-            } else {
-                // isMet remains false
-                details = `Expired: Completed ${format(completionDate, "PP")} (More than 3 years ago)`;
-            }
+            // Corrected logic for First Aid: Certificate is valid if today is BEFORE the expiry date (completion + 3 years).
+            const expiryDate = addYears(completionDate, 3);
+            // Set expiryDate comparison to the END of the day for inclusivity
+            const expiryDateEndOfDay = new Date(expiryDate);
+            expiryDateEndOfDay.setHours(23, 59, 59, 999);
+
+            if (isBefore(today, expiryDateEndOfDay)) { // Is today BEFORE the end of the expiry day?
+                 isMet = true;
+                 details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`; // Display calculated expiry
+             } else {
+                 // isMet remains false
+                 details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
+             }
           } else if (criterion.yearsToExpire) {
               // Standard expiry logic for other items WITH expiry years
               const expiryDate = addYears(completionDate, criterion.yearsToExpire);
@@ -237,7 +241,10 @@ export default function ReportingPage() {
 
     // Return days left only if it's not expired yet (valid ON expiry day)
     if (isBefore(today, expiryDateEndOfDay)) {
-      return differenceInDays(expiryDate, new Date()); // Use original expiry date for difference calculation
+      // Calculate difference from today to the *start* of the expiry date for days remaining
+      const expiryDateStartOfDay = new Date(expiryDate);
+      expiryDateStartOfDay.setHours(0,0,0,0);
+      return differenceInDays(expiryDateStartOfDay, today);
     }
     return null; // Return null if expired
   };
@@ -315,9 +322,9 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="h-[calc(100vh-300px)]"> {/* Adjusted height */}
+            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md"> {/* Add border and ensure height */}
               <Table>
-                <TableHeader className="sticky top-0 bg-background z-10">
+                <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                   <TableRow>
                     <TableHead className="w-[50px]"></TableHead>
                     <TableHead>Squadron</TableHead>
@@ -329,17 +336,19 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
+                      asChild // Important: Render Collapsible directly under tbody if possible, or use Fragment if needed
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
-                      asChild // Use asChild to render Fragment directly under tbody
                     >
+                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
                       <React.Fragment>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                           <TableCell>
                             <CollapsibleTrigger asChild>
-                               <Button variant="ghost" size="sm" className="w-9 p-0">
-                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                               {/* The Button is the actual trigger now */}
+                               <Button variant="ghost" size="sm" className="w-9 p-0 data-[state=open]:rotate-180 transition-transform">
+                                <ChevronDown className="h-4 w-4" />
                                 <span className="sr-only">Toggle details for {report.staffMemberName}</span>
                               </Button>
                             </CollapsibleTrigger>
@@ -357,8 +366,9 @@ export default function ReportingPage() {
                         </TableRow>
                          {/* Content Row */}
                         <CollapsibleContent asChild>
+                           {/* Content needs to be wrapped in a TableRow with a single TableCell spanning columns */}
                            <TableRow className="bg-muted/50 dark:bg-muted/30">
-                              <TableCell colSpan={4} className="p-0"> {/* Adjust colSpan */}
+                              <TableCell colSpan={4} className="p-0"> {/* Use colSpan */}
                                 <div className="p-4">
                                   <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                                   <ul className="space-y-2">
@@ -441,3 +451,4 @@ export default function ReportingPage() {
   );
 
 }
+
