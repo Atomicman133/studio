@@ -117,16 +117,19 @@ const processComplianceReports = (
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
             if (isValidDate(expiryDate)) {
               const today = new Date();
-              today.setHours(0, 0, 0, 0); // Set today's time to the beginning of the day for consistent comparison
-              expiryDate.setHours(23, 59, 59, 999); // Set expiry to the end of the day
+              today.setHours(0, 0, 0, 0); // Start of today
 
-              // Correct Logic: The item is valid if today is *before* the expiry date.
-              if (isBefore(today, expiryDate)) {
-                isMet = true; // Set to Met if not expired
-                details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
+              const expiryDateEndOfDay = new Date(expiryDate);
+              expiryDateEndOfDay.setHours(23, 59, 59, 999); // End of expiry day
+
+              // Check if today is BEFORE the end of the expiry day.
+              // This means it's considered valid ON the expiry day.
+              if (isBefore(today, expiryDateEndOfDay)) {
+                  isMet = true; // Set to Met if not expired
+                  details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
               } else {
-                // isMet remains false (default)
-                details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
+                  // isMet remains false (default)
+                  details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
               }
             } else {
               details = "Invalid expiry date calculated."; // Handle case where date calculation fails
@@ -225,8 +228,14 @@ export default function ReportingPage() {
 
   const getDaysToExpiry = (completionDate: Date, yearsToExpire: number): number | null => {
     const expiryDate = addYears(completionDate, yearsToExpire);
-    if (isBefore(new Date(), expiryDate)) {
-      return differenceInDays(expiryDate, new Date());
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Start of today
+
+    const expiryDateEndOfDay = new Date(expiryDate);
+    expiryDateEndOfDay.setHours(23, 59, 59, 999); // End of expiry day
+
+    if (isBefore(today, expiryDateEndOfDay)) {
+      return differenceInDays(expiryDate, new Date()); // Calculate difference based on nominal expiry date
     }
     return null;
   };
@@ -247,7 +256,7 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(completionDate, config.yearsToExpire);
 
-    if (daysLeft !== null) {
+    if (daysLeft !== null && daysLeft >= 0) { // Only show badge if not expired (daysLeft >= 0)
       if (daysLeft <= 30) {
         return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
       } else if (daysLeft <= 90) {
@@ -314,16 +323,15 @@ export default function ReportingPage() {
                     <TableHead>Overall Status</TableHead>
                   </TableRow>
                 </TableHeader>
-                 {/* Use tbody directly here, Collapsible wraps the content inside */}
                 <TableBody>
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
-                      asChild // Use asChild to pass props down
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
+                      asChild // Use asChild to render Fragment directly under tbody
                     >
-                       <React.Fragment key={report.staffMemberId}>
+                      <React.Fragment>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                           <TableCell>
