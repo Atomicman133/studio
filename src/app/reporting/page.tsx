@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -34,7 +35,7 @@ import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff d
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, subYears } from "date-fns"; // Import date-fns functions
+import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual } from "date-fns"; // Import date-fns functions, added isEqual
 import { RANKS } from "../staff/staff-schema";
 
 
@@ -116,25 +117,25 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
           if (criterion.yearsToExpire) {
-              // Standard expiry logic for items WITH expiry years
               const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-              const expiryDateStartOfDay = new Date(expiryDate);
+              const expiryDateStartOfDay = new Date(expiryDate); // Keep original expiry date for display
               expiryDateStartOfDay.setHours(0, 0, 0, 0);
 
-               // Check if today is strictly AFTER the expiry date
-               if (isAfter(today, expiryDateStartOfDay)) {
-                   // Expired
-                   // isMet remains false
-                  details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
-               } else {
-                  // Not expired (today is on or before the expiry date)
+              // Check if today is strictly BEFORE the calculated expiry date
+              // The item is compliant if today is before the expiry date. It expires ON the expiry date.
+              if (isBefore(today, expiryDateStartOfDay)) {
                   isMet = true;
-                  details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
-               }
+                  // Use Australian date format dd/MM/yyyy
+                  details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}, Expires: ${format(expiryDate, 'dd/MM/yyyy')}`;
+              } else {
+                  // Expired (today is on or after the expiry date)
+                  // isMet remains false
+                  details = `Expired: ${format(expiryDate, 'dd/MM/yyyy')} (Completed: ${format(completionDate, 'dd/MM/yyyy')})`;
+              }
           } else {
             // Logic for non-expiring items (WWCC, CoC, Psych)
             isMet = true; // If a valid log exists, it's met
-            details = `Completed: ${format(completionDate, "PP")}`;
+            details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
         }
       }
@@ -227,11 +228,11 @@ export default function ReportingPage() {
     const expiryDateStartOfDay = new Date(expiryDate);
     expiryDateStartOfDay.setHours(0, 0, 0, 0); // Start of expiry day
 
-    // Return days left only if it's not expired yet (valid ON expiry day)
-     if (isAfter(today, expiryDateStartOfDay)) {
-         return null; // Return null if expired
+    // Return days left only if it's not expired yet (today is strictly BEFORE expiry day)
+     if (isBefore(today, expiryDateStartOfDay)) {
+        return differenceInDays(expiryDateStartOfDay, today); // Days remaining including today until expiry
      }
-     return differenceInDays(expiryDateStartOfDay, today); // Days remaining including today
+     return null; // Return null if expired (today is on or after expiry day)
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -319,55 +320,63 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
-                      <React.Fragment key={report.staffMemberId}>
-                         {/* Trigger Row */}
-                        <TableRow className="cursor-pointer hover:bg-muted/50" onClick={() => toggleCollapsible(report.staffMemberId)}>
-                          <TableCell>
-                               {/* Using a button visually looks like a trigger */}
-                               <Button variant="ghost" size="sm" className="w-9 p-0" data-state={openCollapsible === report.staffMemberId ? 'open' : 'closed'}>
-                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                <span className="sr-only">Toggle details for {report.staffMemberName}</span>
-                              </Button>
-                          </TableCell>
-                          <TableCell>{report.squadron}</TableCell>
-                          <TableCell className="font-medium">
-                            {report.staffMemberRank} {report.staffMemberName}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                              {report.isCompliant ? "Compliant" : "Not Compliant"}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                         {/* Content Row - Conditionally Rendered */}
-                         {openCollapsible === report.staffMemberId && (
-                           <TableRow className="bg-muted/50 dark:bg-muted/30">
-                              <TableCell colSpan={4}> {/* Use colSpan */}
-                                <div className="p-4">
-                                  <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                                  <ul className="space-y-2">
-                                    {report.criteriaChecks.map(criterion => (
-                                      <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                        <div className="flex items-center">
-                                          {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                          <div>
-                                            <span>{criterion.name}:</span>
-                                            <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                              {criterion.isMet ? "Met" : "Not Met"}
-                                            </span>
-                                            <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                      <Collapsible
+                        key={report.staffMemberId}
+                        asChild // Pass asChild to Collapsible Root
+                        open={openCollapsible === report.staffMemberId}
+                        onOpenChange={() => toggleCollapsible(report.staffMemberId)}
+                      >
+                        <React.Fragment>
+                           {/* Trigger Row */}
+                          <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
+                            <TableCell>
+                              <CollapsibleTrigger asChild>
+                                 <Button variant="ghost" size="sm" className="w-9 p-0" data-state={openCollapsible === report.staffMemberId ? 'open' : 'closed'}>
+                                  {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                  <span className="sr-only">Toggle details for {report.staffMemberName}</span>
+                                </Button>
+                              </CollapsibleTrigger>
+                            </TableCell>
+                            <TableCell>{report.squadron}</TableCell>
+                            <TableCell className="font-medium">
+                              {report.staffMemberRank} {report.staffMemberName}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                                {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                                {report.isCompliant ? "Compliant" : "Not Compliant"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                           {/* Content Row */}
+                           <CollapsibleContent asChild>
+                              <TableRow className="bg-muted/50 dark:bg-muted/30">
+                                <TableCell colSpan={4}> {/* Use colSpan */}
+                                  <div className="p-4">
+                                    <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                    <ul className="space-y-2">
+                                      {report.criteriaChecks.map(criterion => (
+                                        <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                          <div className="flex items-center">
+                                            {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                            <div>
+                                              <span>{criterion.name}:</span>
+                                              <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                                {criterion.isMet ? "Met" : "Not Met"}
+                                              </span>
+                                              <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                            </div>
                                           </div>
-                                        </div>
-                                        {getExpiryWarningBadge(criterion)}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              </TableCell>
-                           </TableRow>
-                         )}
-                      </React.Fragment>
+                                          {getExpiryWarningBadge(criterion)}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </TableCell>
+                             </TableRow>
+                           </CollapsibleContent>
+                        </React.Fragment>
+                      </Collapsible>
                   ))}
                 </TableBody>
               </Table>
@@ -397,13 +406,13 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years, check is exclusive of expiry date - expires *on* the date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years. Expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
                  <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
                  {
-                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' : // Removed trailing ...
+                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' :
                   criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
                   criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
                   criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment"' :
@@ -423,3 +432,6 @@ export default function ReportingPage() {
   );
 
 }
+
+
+    
