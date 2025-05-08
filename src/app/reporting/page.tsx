@@ -35,7 +35,7 @@ import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff d
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual } from "date-fns"; // Import date-fns functions, added isEqual
+import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns"; // Import date-fns functions, added isEqual and subYears
 import { RANKS } from "../staff/staff-schema";
 
 
@@ -117,20 +117,17 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
           if (criterion.yearsToExpire) {
-              const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-              const expiryDateStartOfDay = new Date(expiryDate); // Keep original expiry date for display
-              expiryDateStartOfDay.setHours(0, 0, 0, 0);
-
-              // Check if today is strictly BEFORE the calculated expiry date
-              // The item is compliant if today is before the expiry date. It expires ON the expiry date.
-              if (isBefore(today, expiryDateStartOfDay)) {
+              // Calculate the cutoff date (today minus validity period)
+              const cutoffDate = subYears(today, criterion.yearsToExpire);
+              // Check if the completion date is ON or AFTER the cutoff date
+              if (!isBefore(completionDate, cutoffDate)) { // completionDate >= cutoffDate means it's still valid
                   isMet = true;
                   // Use Australian date format dd/MM/yyyy
-                  details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}, Expires: ${format(expiryDate, 'dd/MM/yyyy')}`;
+                  details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
               } else {
-                  // Expired (today is on or after the expiry date)
+                  // Expired (completion date is before the cutoff date)
                   // isMet remains false
-                  details = `Expired: ${format(expiryDate, 'dd/MM/yyyy')} (Completed: ${format(completionDate, 'dd/MM/yyyy')})`;
+                  details = `Out of Date (Completed: ${format(completionDate, 'dd/MM/yyyy')})`;
               }
           } else {
             // Logic for non-expiring items (WWCC, CoC, Psych)
@@ -320,63 +317,65 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
-                      <Collapsible
-                        key={report.staffMemberId}
-                        asChild // Pass asChild to Collapsible Root
-                        open={openCollapsible === report.staffMemberId}
-                        onOpenChange={() => toggleCollapsible(report.staffMemberId)}
-                      >
-                        <React.Fragment>
-                           {/* Trigger Row */}
-                          <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
-                            <TableCell>
-                              <CollapsibleTrigger asChild>
-                                 <Button variant="ghost" size="sm" className="w-9 p-0" data-state={openCollapsible === report.staffMemberId ? 'open' : 'closed'}>
-                                  {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                  <span className="sr-only">Toggle details for {report.staffMemberName}</span>
-                                </Button>
-                              </CollapsibleTrigger>
-                            </TableCell>
-                            <TableCell>{report.squadron}</TableCell>
-                            <TableCell className="font-medium">
-                              {report.staffMemberRank} {report.staffMemberName}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                                {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                                {report.isCompliant ? "Compliant" : "Not Compliant"}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                           {/* Content Row */}
-                           <CollapsibleContent asChild>
-                              <TableRow className="bg-muted/50 dark:bg-muted/30">
-                                <TableCell colSpan={4}> {/* Use colSpan */}
-                                  <div className="p-4">
-                                    <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                                    <ul className="space-y-2">
-                                      {report.criteriaChecks.map(criterion => (
-                                        <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                          <div className="flex items-center">
-                                            {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                            <div>
-                                              <span>{criterion.name}:</span>
-                                              <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                                {criterion.isMet ? "Met" : "Not Met"}
-                                              </span>
-                                              <p className="text-xs text-muted-foreground">{criterion.details}</p>
-                                            </div>
+                    <Collapsible
+                      key={report.staffMemberId}
+                      asChild // Pass asChild to Collapsible Root
+                      open={openCollapsible === report.staffMemberId}
+                      onOpenChange={() => toggleCollapsible(report.staffMemberId)}
+                    >
+                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
+                      <React.Fragment>
+                         {/* Trigger Row */}
+                        <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
+                          <TableCell>
+                            {/* CollapsibleTrigger now inside TableCell */}
+                            <CollapsibleTrigger asChild>
+                               <Button variant="ghost" size="sm" className="w-9 p-0" data-state={openCollapsible === report.staffMemberId ? 'open' : 'closed'}>
+                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                <span className="sr-only">Toggle details for {report.staffMemberName}</span>
+                              </Button>
+                            </CollapsibleTrigger>
+                          </TableCell>
+                          <TableCell>{report.squadron}</TableCell>
+                          <TableCell className="font-medium">
+                            {report.staffMemberRank} {report.staffMemberName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                              {report.isCompliant ? "Compliant" : "Not Compliant"}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                         {/* Content Row */}
+                         <CollapsibleContent asChild>
+                            <TableRow className="bg-muted/50 dark:bg-muted/30">
+                              <TableCell colSpan={4}> {/* Use colSpan */}
+                                <div className="p-4">
+                                  <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                  <ul className="space-y-2">
+                                    {report.criteriaChecks.map(criterion => (
+                                      <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                        <div className="flex items-center">
+                                          {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                          <div>
+                                            <span>{criterion.name}:</span>
+                                            <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                              {criterion.isMet ? "Met" : "Not Met"}
+                                            </span>
+                                            <p className="text-xs text-muted-foreground">{criterion.details}</p>
                                           </div>
-                                          {getExpiryWarningBadge(criterion)}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                </TableCell>
-                             </TableRow>
-                           </CollapsibleContent>
-                        </React.Fragment>
-                      </Collapsible>
+                                        </div>
+                                        {getExpiryWarningBadge(criterion)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </TableCell>
+                           </TableRow>
+                         </CollapsibleContent>
+                      </React.Fragment>
+                    </Collapsible>
                   ))}
                 </TableBody>
               </Table>
@@ -406,7 +405,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years. Expires *on* the date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -434,4 +433,5 @@ export default function ReportingPage() {
 }
 
 
+    
     
