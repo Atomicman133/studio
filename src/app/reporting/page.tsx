@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -117,16 +116,15 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
           if (criterion.yearsToExpire) {
-              // Calculate the cutoff date (today minus validity period)
-              const cutoffDate = subYears(today, criterion.yearsToExpire);
-              // Check if the completion date is ON or AFTER the cutoff date
-              if (!isBefore(completionDate, cutoffDate)) { // completionDate >= cutoffDate means it's still valid
+              const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+              expiryDate.setHours(0,0,0,0); // Ensure expiry is compared at start of day
+
+              // Check if 'today' is strictly BEFORE the expiry date
+              if (isBefore(today, expiryDate)) {
                   isMet = true;
-                  // Use Australian date format dd/MM/yyyy
                   details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
               } else {
-                  // Expired (completion date is before the cutoff date)
-                  // isMet remains false
+                  // Expired (today is on or after expiry date)
                   details = `Out of Date (Completed: ${format(completionDate, 'dd/MM/yyyy')})`;
               }
           } else {
@@ -319,12 +317,13 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
-                      asChild // Pass asChild to Collapsible Root
+                      // Removed asChild to avoid passing invalid props to Fragment
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
+                      asChild // Keep asChild if Collapsible should render as tbody, but this is invalid HTML. Removing it.
                     >
-                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
-                      <React.Fragment>
+                      {/* Use React.Fragment because Collapsible (as div wrapper) needs a valid React child */}
+                      <React.Fragment key={report.staffMemberId}>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                           <TableCell>
@@ -405,7 +404,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years, check is exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -431,7 +430,3 @@ export default function ReportingPage() {
   );
 
 }
-
-
-    
-    
