@@ -28,7 +28,8 @@ if (!getApps().length) {
   console.log("Firebase app already exists.");
 }
 
-const db: Firestore = getFirestore(app);
+// Connect to the specified Firestore database instance "dataset1"
+const db: Firestore = getFirestore(app, "dataset1");
 // const auth = getAuth(app); // Uncomment if using Firebase Auth
 // const storage = getStorage(app); // Uncomment if using Firebase Storage
 

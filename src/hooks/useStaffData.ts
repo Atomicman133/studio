@@ -35,8 +35,9 @@ const convertTimestamps = (data: any): StaffMember => {
 
 
 // --- Fetch Staff ---
-// Fetch staff data once using getDocs
+// Fetch staff data once using getDocs from the 'staff' collection
 async function fetchStaff(): Promise<StaffMember[]> {
+    // Use the db instance (potentially pointing to 'dataset1') and the 'staff' collection
     const staffCollectionRef = collection(db, 'staff');
     // Example: Order by squadron, then rank, then name (client-side sorting is also applied)
     // You might adjust the Firestore query for better performance if needed.
@@ -61,7 +62,7 @@ async function fetchStaff(): Promise<StaffMember[]> {
 
         // Sort descending by index (higher rank first)
         if (effectiveRankAIndex !== effectiveRankBIndex) {
-            return effectiveRankBIndex - effectiveRankAIndex;
+            return rankBIndex - effectiveRankAIndex; // Higher index (lower rank in array) comes first
         }
 
         // If ranks are the same, sort by name
