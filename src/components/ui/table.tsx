@@ -55,13 +55,13 @@ const TableRow = React.forwardRef<
   HTMLTableRowElement,
   React.HTMLAttributes<HTMLTableRowElement>
 >(({ className, ...props }, ref) => (
-  <tr
+  <tr // Ensure no leading/trailing whitespace inside this tag
     ref={ref}
     className={cn(
       "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
       className
     )}
-    {...props}
+    {...props} // Props should not introduce whitespace either
   />
 ))
 TableRow.displayName = "TableRow"

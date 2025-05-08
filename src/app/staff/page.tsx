@@ -64,8 +64,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'; // Keep useQue
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
 
-// Import types for related data (actual data will be fetched or passed)
-// TODO: Fetch this data dynamically in the View Details dialog based on staff member ID
+// Import types for related data
 import type { TrainingLog } from "../training/training-schema";
 import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page"; // Reuse conversion helper if applicable
 import type { Meeting } from "../meetings/meeting-schema";
@@ -172,13 +171,10 @@ export default function StaffPage() {
     isLoading: isLoadingViewedStaffLogs,
     error: errorViewedStaffLogs
   } = useQuery<TrainingLog[], Error>({
-    // Query key includes the staff member's ID (or another unique identifier)
-    // to ensure the query refetches when a *different* staff member is viewed.
-    // Using staffName + rank as a fallback if ID isn't consistently available.
     queryKey: [STAFF_TRAINING_LOGS_QUERY_KEY, viewingStaffMember?.id || `${viewingStaffMember?.lastName}, ${viewingStaffMember?.firstName}_${viewingStaffMember?.rank}`],
     queryFn: () => fetchTrainingLogsForStaff(viewingStaffMember),
-    enabled: !!viewingStaffMember, // Only run the query when a staff member is being viewed
-    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+    enabled: !!viewingStaffMember,
+    staleTime: 1000 * 60 * 2,
   });
 
 
@@ -255,11 +251,9 @@ export default function StaffPage() {
   };
 
   const handleViewDetails = (staffMember: StaffMember) => {
-    // Set the viewing staff member, which will trigger the useQuery for their logs
     setViewingStaffMember(staffMember);
     setEditingStaff(null);
     setIsFormOpen(false);
-    // No need to manually filter here anymore, useQuery handles fetching
   };
 
   const closeViewDialog = () => {
@@ -298,8 +292,8 @@ export default function StaffPage() {
       const membersToParse: Omit<StaffMember, 'id'>[] = [];
       const errors: string[] = [];
       const lines = text.split(/\r\n|\n/);
-      let importedCount = 0; // Track successful additions
-      const queryClient = useQueryClient(); // Get query client instance
+      let importedCount = 0;
+      const queryClient = useQueryClient();
 
       try {
         if (lines.length < 2) {
@@ -307,32 +301,28 @@ export default function StaffPage() {
         }
 
         const headerLine = lines[0].trim();
-        const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, '')); // Clean header
+        const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         const expectedHeader = ["MemberUID", "MemberName", "PrimaryUnit", "Appointment", "EmailAddress", "PhoneNumber", "Address"];
 
-        // Check if all expected headers are present (order doesn't matter for this check)
         const hasAllHeaders = expectedHeader.every(eh => csvHeader.includes(eh));
         if (!hasAllHeaders) {
            throw new Error(`Invalid CSV header. Expected columns (any order): "${expectedHeader.join(', ')}". Got: "${csvHeader.join(',')}"`);
         }
 
-        // Find the indices of the expected headers
         const headerIndices: Record<string, number> = {};
         expectedHeader.forEach(eh => {
           headerIndices[eh] = csvHeader.indexOf(eh);
         });
 
-
         const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
         const existingEmails = new Set(staffList.map(s => s.email));
 
-        const addPromises: Promise<void>[] = []; // Store promises for concurrent additions
+        const addPromises: Promise<void>[] = [];
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
 
-          // Robust CSV line parser
           const values = [];
           let currentVal = '';
           let inQuotes = false;
@@ -409,13 +399,11 @@ export default function StaffPage() {
             joinDate: undefined,
           };
 
-          membersToParse.push(memberToAdd); // Track for duplicate check within file
+          membersToParse.push(memberToAdd);
 
-           // Add to promises array
            addPromises.push(
               addStaffMutation.mutateAsync(memberToAdd).then(() => {
-                 importedCount++; // Increment on success
-                 // Update local sets immediately to prevent race conditions in concurrent additions
+                 importedCount++;
                  existingStaffNumbers.add(serviceNumber);
                  existingEmails.add(email);
               }).catch((addError: any) => {
@@ -468,7 +456,6 @@ export default function StaffPage() {
           fileInputRef.current.value = ""; // Reset file input
         }
         setIsImportingCsv(false);
-        // Optionally trigger a refetch if needed, though mutations should handle cache updates
         queryClient.invalidateQueries({ queryKey: ['staff'] });
       }
     };
@@ -752,13 +739,24 @@ export default function StaffPage() {
                               <p className="text-sm text-muted-foreground">No training records found.</p>
                           )}
                           {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
-                            <ul className="list-disc pl-5 space-y-1 text-sm">
-                              {viewedStaffTrainingLogs.map(log => (
-                                <li key={log.id}>{log.courseName} - Completed: {format(log.completionDate, "PP")}
-                                  {log.qualificationAchieved && ` (Qual: ${log.qualificationAchieved})`}
-                                </li>
-                              ))}
-                            </ul>
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Course Name</TableHead>
+                                  <TableHead>Completion Date</TableHead>
+                                  <TableHead>Qualification</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {viewedStaffTrainingLogs.map(log => (
+                                  <TableRow key={log.id}>
+                                    <TableCell>{log.courseName}</TableCell>
+                                    <TableCell>{format(log.completionDate, "PP")}</TableCell>
+                                    <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
                           )}
                         </AccordionContent>
                       </AccordionItem>
