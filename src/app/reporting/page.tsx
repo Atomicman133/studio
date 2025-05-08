@@ -119,6 +119,7 @@ const processComplianceReports = (
             details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
           }
         } else {
+          // For criteria without expiry, just check existence
           isMet = true;
           details = `Completed: ${format(completionDate, "PP")}`;
         }
@@ -158,9 +159,8 @@ const processComplianceReports = (
     const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
     const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
-     // Sort descending by index (higher rank first)
+     // Sort numerically ascending index (higher rank first)
     if (effectiveRankAIndex !== effectiveRankBIndex) {
-        // Higher index means lower in the RANKS array, so sort numerically ascending index (higher rank first)
         return effectiveRankAIndex - effectiveRankBIndex;
     }
 
@@ -182,15 +182,16 @@ export default function ReportingPage() {
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    // Only process when both staff and logs data are available
-    if (staffList.length > 0 && trainingLogs.length > 0) {
+    // Only process when both staff and logs data are available and not loading
+    if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs.length > 0) {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      // If loading is finished but data is empty, clear reports
+      // If loading is finished but data is empty or incomplete, clear reports
       setComplianceReports([]);
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]); // Depend on fetched data and loading states
+
 
   const toggleCollapsible = (staffMemberId: string) => {
     setOpenCollapsible(prev => (prev === staffMemberId ? null : staffMemberId));
@@ -242,7 +243,7 @@ export default function ReportingPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0 sm:p-0 md:p-0 lg:p-0"> {/* Remove CardContent padding */}
+        <CardContent className="p-0">
           {isLoadingAny && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -272,7 +273,7 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="h-[calc(100vh-250px)]"> {/* Adjust height as needed */}
+            <ScrollArea className="h-[calc(100vh-300px)]"> {/* Adjusted height */}
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
