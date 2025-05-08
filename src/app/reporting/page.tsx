@@ -293,17 +293,17 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
-                      asChild // Use asChild to prevent wrapping div
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
+                      asChild // Add asChild to ensure Collapsible renders its child directly
                     >
-                      <React.Fragment>
+                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
+                       <React.Fragment>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                           <TableCell>
-                             {/* CollapsibleTrigger now inside TableCell */}
                             <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" className="w-9 p-0">
+                               <Button variant="ghost" size="sm" className="w-9 p-0">
                                 {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                 <span className="sr-only">Toggle details for {report.staffMemberName}</span>
                               </Button>

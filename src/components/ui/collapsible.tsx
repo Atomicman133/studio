@@ -5,13 +5,12 @@ import * as React from "react"
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible"
 import { Slot } from "@radix-ui/react-slot" // Import Slot
 
-// Modified Collapsible to accept and forward asChild
+// Collapsible Root does NOT forward asChild - it renders its own div which can handle data-state
 const CollapsibleRoot = React.forwardRef<
   React.ElementRef<typeof CollapsiblePrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof CollapsiblePrimitive.Root> & { asChild?: boolean }
->(({ asChild, ...props }, ref) => {
-  // Pass asChild to the Radix Primitive Root
-  return <CollapsiblePrimitive.Root ref={ref} asChild={asChild} {...props} />;
+  React.ComponentPropsWithoutRef<typeof CollapsiblePrimitive.Root>
+>(({ ...props }, ref) => {
+  return <CollapsiblePrimitive.Root ref={ref} {...props} />;
 });
 CollapsibleRoot.displayName = "Collapsible";
 
