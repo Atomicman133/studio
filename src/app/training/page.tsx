@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -87,7 +88,20 @@ async function addTrainingLog(newLogData: Omit<TrainingLog, 'id'>): Promise<stri
   const dataToSave = {
     ...newLogData,
     completionDate: Timestamp.fromDate(newLogData.completionDate),
+    // Ensure optional fields that might be missing are handled (Firestore omits them)
+    qualificationAchieved: newLogData.qualificationAchieved || null,
+    instructorQualification: newLogData.instructorQualification || null,
+    achievementDetails: newLogData.achievementDetails || null,
+    certificateFileName: newLogData.certificateFileName || null,
+    certificateDataUrl: newLogData.certificateDataUrl || null,
   };
+  // Remove null fields before saving, as Firestore might prefer omission over null for some use cases
+  Object.keys(dataToSave).forEach(key => {
+      if (dataToSave[key as keyof typeof dataToSave] === null || dataToSave[key as keyof typeof dataToSave] === undefined) {
+          delete dataToSave[key as keyof typeof dataToSave];
+      }
+  });
+
   const docRef = await addDoc(collectionRef, dataToSave);
   return docRef.id;
 }
@@ -100,7 +114,20 @@ async function updateTrainingLog(updatedLog: TrainingLog): Promise<void> {
   const dataToSave = {
     ...dataToUpdate,
     completionDate: Timestamp.fromDate(dataToUpdate.completionDate),
+     // Ensure optional fields are explicitly set to null if empty/undefined before saving
+     qualificationAchieved: dataToUpdate.qualificationAchieved || null,
+     instructorQualification: dataToUpdate.instructorQualification || null,
+     achievementDetails: dataToUpdate.achievementDetails || null,
+     certificateFileName: dataToUpdate.certificateFileName || null,
+     certificateDataUrl: dataToUpdate.certificateDataUrl || null,
   };
+
+  // Remove null fields before saving
+  Object.keys(dataToSave).forEach(key => {
+      if (dataToSave[key as keyof typeof dataToSave] === null || dataToSave[key as keyof typeof dataToSave] === undefined) {
+          delete dataToSave[key as keyof typeof dataToSave];
+      }
+  });
   await updateDoc(docRef, dataToSave);
 }
 
@@ -258,6 +285,7 @@ export default function TrainingPage() {
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
+        return; // Prevent submission if file conversion fails
       }
     }
 
@@ -288,6 +316,7 @@ export default function TrainingPage() {
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
+        return; // Prevent submission if file conversion fails
       }
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
       // File was explicitly removed
@@ -618,20 +647,20 @@ export default function TrainingPage() {
                       return;
                   }
 
-                  newLogsToAdd.push({
-                      rank: staffMember.rank, // Use rank from matched staff profile
-                      staffName: `${staffMember.lastName}, ${staffMember.firstName}`, // Use name from matched staff profile
-                      squadron: staffMember.squadron || "N/A",
-                      currentRole: staffMember.role,
-                      courseName: accomplishment, // From CSV
-                      completionDate: completionDate, // From CSV
-                      qualificationAchieved: accomplishment, // From CSV (assume it's a qual)
-                      // Other fields default to empty/undefined
-                      instructorQualification: "",
-                      achievementDetails: "",
-                      certificateFileName: undefined,
-                      certificateDataUrl: undefined,
-                  });
+                  // Create the log object, omitting certificate fields as they are not in the CSV
+                  const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
+                    rank: staffMember.rank,
+                    staffName: `${staffMember.lastName}, ${staffMember.firstName}`,
+                    squadron: staffMember.squadron || "N/A",
+                    currentRole: staffMember.role,
+                    courseName: accomplishment,
+                    completionDate: completionDate,
+                    qualificationAchieved: accomplishment, // Assuming accomplishment is the qualification
+                    instructorQualification: "", // Default empty
+                    achievementDetails: "", // Default empty
+                  };
+
+                  newLogsToAdd.push(newLog as Omit<TrainingLog, 'id'>); // Cast needed as we omitted fields
               });
           }
         }
@@ -644,7 +673,7 @@ export default function TrainingPage() {
                  await addLogMutation.mutateAsync(log);
                  importedCount++;
              } catch (err: any) {
-                 errors.push(`Failed to import accomplishment "${log.courseName}" for UID ${log.rank} ${log.staffName}: ${err.message}`);
+                 errors.push(`Failed to import accomplishment "${log.courseName}" for ${log.rank} ${log.staffName}: ${err.message}`);
              }
           }
            if (importedCount > 0) {
@@ -735,9 +764,10 @@ export default function TrainingPage() {
       )}
       {errorLogs && !isLoadingLogs && (
          <Card className="border-destructive">
+           <CardHeader>
+                <CardTitle className="text-destructive flex items-center gap-2"><AlertTriangle /> Error Loading Training Records</CardTitle>
+            </CardHeader>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-             <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
-             <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Training Records</h3>
             <p className="text-destructive mb-4">{errorLogs.message}</p>
           </CardContent>
         </Card>
@@ -1053,3 +1083,4 @@ export default function TrainingPage() {
   );
 }
 
+    
