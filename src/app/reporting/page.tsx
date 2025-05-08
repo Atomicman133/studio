@@ -35,7 +35,7 @@ import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff d
 import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
 import { db } from '@/lib/firebase/config'; // Import db config
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, format, differenceInDays } from "date-fns";
+import { addYears, isBefore, format, differenceInDays, isValid as isValidDate } from "date-fns"; // Import isValidDate
 import { RANKS } from "../staff/staff-schema";
 
 
@@ -110,21 +110,38 @@ const processComplianceReports = (
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
-        const completionDate = new Date(selectedLog.completionDate);
+        const completionDate = new Date(selectedLog.completionDate); // Ensure it's a Date object
+
         if (criterion.yearsToExpire) {
-          const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-          if (isBefore(new Date(), expiryDate)) {
-            isMet = true;
-            details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
+          if (isValidDate(completionDate)) { // Add a validity check for completion date
+            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+            if (isValidDate(expiryDate)) { // Check expiry date validity too
+              const today = new Date();
+              // Check if today is strictly before the expiry date
+              if (isBefore(today, expiryDate)) {
+                isMet = true;
+                details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
+              } else {
+                // isMet remains false (default)
+                details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
+              }
+            } else {
+              details = "Invalid expiry date calculated."; // Handle case where date calculation fails
+            }
           } else {
-            details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
+            details = "Invalid completion date in record."; // Handle invalid completion date
           }
         } else {
-          // For criteria without expiry, just check existence
-          isMet = true;
-          details = `Completed: ${format(completionDate, "PP")}`;
+          // Logic for non-expiring items
+          if (isValidDate(completionDate)) {
+            isMet = true;
+            details = `Completed: ${format(completionDate, "PP")}`;
+          } else {
+            details = "Invalid completion date in record.";
+          }
         }
       }
+
 
       return {
         key: criterion.key,
@@ -220,7 +237,11 @@ export default function ReportingPage() {
         return null; // No expiry configured for this criterion
     }
 
-    const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
+    // Ensure completionDate is valid before calculating expiry
+    const completionDate = new Date(criterion.relevantLog.completionDate);
+    if (!isValidDate(completionDate)) return null; // Cannot calculate expiry with invalid date
+
+    const daysLeft = getDaysToExpiry(completionDate, config.yearsToExpire);
 
     if (daysLeft !== null) {
       if (daysLeft <= 30) {
@@ -289,65 +310,68 @@ export default function ReportingPage() {
                     <TableHead>Overall Status</TableHead>
                   </TableRow>
                 </TableHeader>
-                {/* Iterate over reports and create a tbody for each collapsible group */}
-                {complianceReports.map((report) => (
-                  <tbody key={report.staffMemberId}>
+                <TableBody>
+                  {/* Iterate over reports and create a tbody for each collapsible group */}
+                  {complianceReports.map((report) => (
                     <Collapsible
-                      // Collapsible now wraps the two TableRow elements within the tbody
+                      asChild // Use asChild to render the tbody directly
+                      key={report.staffMemberId}
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
                     >
-                      {/* Trigger Row */}
-                      <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
-                        <TableCell>
-                          <CollapsibleTrigger asChild>
-                             <Button variant="ghost" size="sm" className="w-9 p-0">
-                              {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                              <span className="sr-only">Toggle details for {report.staffMemberName}</span>
-                            </Button>
-                          </CollapsibleTrigger>
-                        </TableCell>
-                        <TableCell>{report.squadron}</TableCell>
-                        <TableCell className="font-medium">
-                          {report.staffMemberRank} {report.staffMemberName}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                            {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                            {report.isCompliant ? "Compliant" : "Not Compliant"}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                       {/* Content Row */}
-                      <CollapsibleContent asChild>
-                         <TableRow className="bg-muted/50 dark:bg-muted/30">
-                            <TableCell colSpan={4} className="p-0"> {/* Adjust colSpan */}
-                              <div className="p-4">
-                                <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                                <ul className="space-y-2">
-                                  {report.criteriaChecks.map(criterion => (
-                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                      <div className="flex items-center">
-                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                        <div>
-                                          <span>{criterion.name}:</span>
-                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                            {criterion.isMet ? "Met" : "Not Met"}
-                                          </span>
-                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                      <tbody>
+                         {/* Trigger Row */}
+                        <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
+                          <TableCell>
+                            <CollapsibleTrigger asChild>
+                               <Button variant="ghost" size="sm" className="w-9 p-0">
+                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                <span className="sr-only">Toggle details for {report.staffMemberName}</span>
+                              </Button>
+                            </CollapsibleTrigger>
+                          </TableCell>
+                          <TableCell>{report.squadron}</TableCell>
+                          <TableCell className="font-medium">
+                            {report.staffMemberRank} {report.staffMemberName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                              {report.isCompliant ? "Compliant" : "Not Compliant"}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                         {/* Content Row */}
+                        <CollapsibleContent asChild>
+                           <TableRow className="bg-muted/50 dark:bg-muted/30">
+                              <TableCell colSpan={4} className="p-0"> {/* Adjust colSpan */}
+                                <div className="p-4">
+                                  <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                  <ul className="space-y-2">
+                                    {report.criteriaChecks.map(criterion => (
+                                      <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                        <div className="flex items-center">
+                                          {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                          <div>
+                                            <span>{criterion.name}:</span>
+                                            <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                              {criterion.isMet ? "Met" : "Not Met"}
+                                            </span>
+                                            <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                          </div>
                                         </div>
-                                      </div>
-                                      {getExpiryWarningBadge(criterion)}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </TableCell>
-                         </TableRow>
-                      </CollapsibleContent>
+                                        {getExpiryWarningBadge(criterion)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </TableCell>
+                           </TableRow>
+                        </CollapsibleContent>
+                      </tbody>
                     </Collapsible>
-                  </tbody>
-                ))}
+                  ))}
+                </TableBody>
               </Table>
             </ScrollArea>
           )}
@@ -397,3 +421,4 @@ export default function ReportingPage() {
     </div>
   );
 
+}
