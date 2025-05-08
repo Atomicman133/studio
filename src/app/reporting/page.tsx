@@ -291,56 +291,59 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
-                    <Collapsible key={report.staffMemberId} asChild open={openCollapsible === report.staffMemberId} onOpenChange={() => toggleCollapsible(report.staffMemberId)}>
-                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
-                      <React.Fragment>
-                        <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
-                          <TableCell>
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" className="w-9 p-0">
-                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                <span className="sr-only">Toggle details</span>
-                              </Button>
-                            </CollapsibleTrigger>
-                          </TableCell>
-                          <TableCell>{report.squadron}</TableCell>
-                          <TableCell className="font-medium">
-                            {report.staffMemberRank} {report.staffMemberName}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                              {report.isCompliant ? "Compliant" : "Not Compliant"}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                        <CollapsibleContent asChild>
-                          <TableRow className="bg-muted/50 dark:bg-muted/30">
-                            <TableCell colSpan={4} className="p-0"> {/* Adjust colSpan */}
-                              <div className="p-4">
-                                <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                                <ul className="space-y-2">
-                                  {report.criteriaChecks.map(criterion => (
-                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                      <div className="flex items-center">
-                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                        <div>
-                                          <span>{criterion.name}:</span>
-                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                            {criterion.isMet ? "Met" : "Not Met"}
-                                          </span>
-                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
-                                        </div>
-                                      </div>
-                                      {getExpiryWarningBadge(criterion)}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
+                    // Note: Collapsible no longer uses `asChild` here
+                    <Collapsible key={report.staffMemberId} open={openCollapsible === report.staffMemberId} onOpenChange={() => toggleCollapsible(report.staffMemberId)}>
+                        {/* We still wrap the two TableRows in a Fragment for React's key requirements */}
+                        <React.Fragment>
+                          <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
+                            <TableCell>
+                              {/* CollapsibleTrigger now inside TableCell */}
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" className="w-9 p-0">
+                                  {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                  <span className="sr-only">Toggle details for {report.staffMemberName}</span>
+                                </Button>
+                              </CollapsibleTrigger>
+                            </TableCell>
+                            <TableCell>{report.squadron}</TableCell>
+                            <TableCell className="font-medium">
+                              {report.staffMemberRank} {report.staffMemberName}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                                {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                                {report.isCompliant ? "Compliant" : "Not Compliant"}
+                              </Badge>
                             </TableCell>
                           </TableRow>
-                        </CollapsibleContent>
-                      </React.Fragment>
+                          {/* CollapsibleContent needs to be wrapped in a TableRow and TableCell spanning columns */}
+                          <CollapsibleContent asChild>
+                             <TableRow className="bg-muted/50 dark:bg-muted/30">
+                                <TableCell colSpan={4} className="p-0"> {/* Adjust colSpan */}
+                                  <div className="p-4">
+                                    <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                    <ul className="space-y-2">
+                                      {report.criteriaChecks.map(criterion => (
+                                        <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                          <div className="flex items-center">
+                                            {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                            <div>
+                                              <span>{criterion.name}:</span>
+                                              <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                                {criterion.isMet ? "Met" : "Not Met"}
+                                              </span>
+                                              <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                            </div>
+                                          </div>
+                                          {getExpiryWarningBadge(criterion)}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </TableCell>
+                             </TableRow>
+                          </CollapsibleContent>
+                        </React.Fragment>
                     </Collapsible>
                   ))}
                 </TableBody>
@@ -393,4 +396,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-
