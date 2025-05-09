@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -226,7 +225,7 @@ export default function TrainingPage() {
   const [editingLog, setEditingLog] = React.useState<TrainingLog | null>(null);
   const [logToDelete, setLogToDelete] = React.useState<TrainingLog | null>(null);
   const [viewingLog, setViewingLog] = React.useState<TrainingLog | null>(null);
-  const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null);
+  const [accomplishmentCsvInputRef, setAccomplishmentCsvInputRef] = React.useState<HTMLInputElement | null>(null);
   const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false);
 
 
@@ -541,7 +540,7 @@ export default function TrainingPage() {
                       description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
                       duration: 15000,
                   });
-                  if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                  if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
                   setIsImportingAccomplishments(false); // Reset loading state
                   return;
               }
@@ -587,7 +586,7 @@ export default function TrainingPage() {
                    expectedHeader.forEach(eh => {
                        // Remove surrounding quotes only if they exist as a pair
                        let val = values[headerIndices[eh]];
-                       if (val.startsWith('"') && val.endsWith('"')) {
+                       if (val && val.startsWith('"') && val.endsWith('"')) {
                            val = val.substring(1, val.length - 1);
                        }
                        // Replace escaped double quotes "" with a single double quote "
@@ -627,7 +626,7 @@ export default function TrainingPage() {
                       description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
                       duration: 15000,
                   });
-                  if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+                  if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
                   setIsImportingAccomplishments(false); // Reset loading state
                   return;
               }
@@ -713,16 +712,16 @@ export default function TrainingPage() {
         console.error("Error during CSV import processing:", error);
         toast({ variant: "destructive", title: "Import Error", description: `An unexpected error occurred: ${error.message}` });
       } finally {
-        if (accomplishmentCsvInputRef.current) {
-          accomplishmentCsvInputRef.current.value = "";
+        if (accomplishmentCsvInputRef) {
+          accomplishmentCsvInputRef.value = "";
         }
         setIsImportingAccomplishments(false);
       }
     };
     reader.onerror = () => {
       toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
-      if (accomplishmentCsvInputRef.current) {
-        accomplishmentCsvInputRef.current.value = "";
+      if (accomplishmentCsvInputRef) {
+        accomplishmentCsvInputRef.value = "";
       }
       setIsImportingAccomplishments(false);
     };
@@ -747,11 +746,11 @@ export default function TrainingPage() {
                    {(addLogMutation.isPending && !isImportingAccomplishments) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
                     Log Training Record
                 </Button>
-                <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoadingStaff || isImportingAccomplishments || addLogMutation.isPending || updateLogMutation.isPending || deleteLogMutation.isPending}>
+                <Button onClick={() => accomplishmentCsvInputRef?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoadingStaff || isImportingAccomplishments || addLogMutation.isPending || updateLogMutation.isPending || deleteLogMutation.isPending}>
                    {isImportingAccomplishments || isLoadingStaff ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
                     Import Accomplishments
                 </Button>
-                <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
+                <input type="file" ref={(el) => setAccomplishmentCsvInputRef(el)} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
             </div>
           </div>
         </CardHeader>
@@ -812,7 +811,7 @@ export default function TrainingPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <ScrollArea className="max-h-[400px] w-full"> {/* Ensure ScrollArea wraps the Table */}
+                      <ScrollArea className="max-h-[400px] w-full border rounded-md"> {/* Ensure ScrollArea wraps the Table */}
                         <Table>
                           <TableHeader>
                             <TableRow>
