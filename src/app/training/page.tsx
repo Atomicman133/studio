@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -811,7 +812,7 @@ export default function TrainingPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <ScrollArea className="max-h-[700px] w-full border rounded-md">
+                      <ScrollArea className="max-h-[400px] w-full border rounded-md">
                         <Table>
                           <TableHeader>
                             <TableRow>
