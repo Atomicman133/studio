@@ -289,13 +289,12 @@ export default function StaffPage() {
         return;
       }
 
-      const membersToParse: Omit<StaffMember, 'id'>[] = [];
       const errors: string[] = [];
-      const lines = text.split(/\r\n|\n/);
       let importedCount = 0;
-      const queryClient = useQueryClient();
+      const queryClient = useQueryClient(); // Use queryClient from useQueryClient hook
 
       try {
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim()); // Filter empty lines
         if (lines.length < 2) {
           throw new Error("CSV must have a header and at least one data row.");
         }
@@ -314,14 +313,16 @@ export default function StaffPage() {
           headerIndices[eh] = csvHeader.indexOf(eh);
         });
 
-        const existingStaffNumbers = new Set(staffList.map(s => s.serviceNumber));
-        const existingEmails = new Set(staffList.map(s => s.email));
+        // Fetch current staff outside the loop for better performance
+        const currentStaffList = queryClient.getQueryData<StaffMember[]>([STAFF_QUERY_KEY]) || [];
+        const existingStaffNumbers = new Set(currentStaffList.map(s => s.serviceNumber));
+        const existingEmails = new Set(currentStaffList.map(s => s.email));
 
         const addPromises: Promise<void>[] = [];
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
-          if (!line) continue;
+          if (!line) continue; // Skip empty lines just in case filter didn't catch all
 
           const values = [];
           let currentVal = '';
@@ -352,8 +353,17 @@ export default function StaffPage() {
           const csvData: Record<string, string> = {};
           expectedHeader.forEach(eh => {
               const index = headerIndices[eh];
+              // Ensure index is valid before accessing values
+              if (index === -1 || index >= values.length) {
+                  errors.push(`Row ${i + 1}: Header "${eh}" found but corresponding column is missing in data.`);
+                  return; // Skip processing this row further
+              }
               csvData[eh] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
           });
+
+           // Continue only if csvData could be populated correctly
+          if (errors.length > 0 && errors[errors.length-1].startsWith(`Row ${i+1}`)) continue;
+
 
           const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
 
@@ -382,7 +392,7 @@ export default function StaffPage() {
             continue;
           }
 
-          if (existingStaffNumbers.has(serviceNumber) || existingEmails.has(email) || membersToParse.some(m => m.serviceNumber === serviceNumber || m.email === email)) {
+          if (existingStaffNumbers.has(serviceNumber) || existingEmails.has(email) ) {
             errors.push(`Row ${i + 1}: Duplicate MemberUID or EmailAddress for "${serviceNumber}/${email}". Skipped.`);
             continue;
           }
@@ -399,13 +409,12 @@ export default function StaffPage() {
             joinDate: undefined,
           };
 
-          membersToParse.push(memberToAdd);
-
+           // Add to promises and update sets to prevent duplicate adds within the same batch
            addPromises.push(
               addStaffMutation.mutateAsync(memberToAdd).then(() => {
                  importedCount++;
-                 existingStaffNumbers.add(serviceNumber);
-                 existingEmails.add(email);
+                 existingStaffNumbers.add(serviceNumber); // Add locally to prevent batch duplicates
+                 existingEmails.add(email);      // Add locally to prevent batch duplicates
               }).catch((addError: any) => {
                  errors.push(`Row ${i + 1}: Failed to add staff member (UID: ${serviceNumber}) to database: ${addError.message}`);
               })
@@ -456,7 +465,7 @@ export default function StaffPage() {
           fileInputRef.current.value = ""; // Reset file input
         }
         setIsImportingCsv(false);
-        queryClient.invalidateQueries({ queryKey: ['staff'] });
+        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); // Refetch after import attempt
       }
     };
     reader.onerror = () => {
@@ -645,7 +654,7 @@ export default function StaffPage() {
       {/* CSV Import Instructions */}
       <Alert className="mt-8">
         <UploadCloud className="h-4 w-4" />
-        <AlertTitle>CSV Import Instructions</AlertTitle>
+        <AlertTitle>Staff CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import staff members, upload a CSV file with the following columns (header row required, order does not matter as long as headers are correct):
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
@@ -719,7 +728,7 @@ export default function StaffPage() {
                             </div>
                             <div>
                                 <p className="font-semibold">Join Date</p>
-                                <p className="text-muted-foreground">{viewingStaffMember.joinDate ? format(viewingStaffMember.joinDate, "PPP") : "N/A"}</p>
+                                <p className="text-muted-foreground">{viewingStaffMember.joinDate ? format(viewingStaffMember.joinDate, "PP") : "N/A"}</p>
                             </div>
                           </CardContent>
                       </Card>
@@ -733,31 +742,33 @@ export default function StaffPage() {
                           </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                          {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
-                          {errorViewedStaffLogs && <p className="text-sm text-destructive">Error loading training records: {errorViewedStaffLogs.message}</p>}
-                          {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
-                              <p className="text-sm text-muted-foreground">No training records found.</p>
-                          )}
-                          {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Course Name</TableHead>
-                                  <TableHead>Completion Date</TableHead>
-                                  <TableHead>Qualification</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {viewedStaffTrainingLogs.map(log => (
-                                  <TableRow key={log.id}>
-                                    <TableCell>{log.courseName}</TableCell>
-                                    <TableCell>{format(log.completionDate, "PP")}</TableCell>
-                                    <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                          <ScrollArea className="max-h-[300px] border rounded-md"> {/* Added ScrollArea */}
+                            {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+                            {errorViewedStaffLogs && <p className="text-sm text-destructive">Error loading training records: {errorViewedStaffLogs.message}</p>}
+                            {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
+                                <p className="text-sm text-muted-foreground p-4">No training records found.</p>
+                            )}
+                            {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Course Name</TableHead>
+                                    <TableHead>Completion Date</TableHead>
+                                    <TableHead>Qualification</TableHead>
                                   </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          )}
+                                </TableHeader>
+                                <TableBody>
+                                  {viewedStaffTrainingLogs.map(log => (
+                                    <TableRow key={log.id}>
+                                      <TableCell>{log.courseName}</TableCell>
+                                      <TableCell>{format(log.completionDate, "PP")}</TableCell>
+                                      <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            )}
+                          </ScrollArea> {/* End ScrollArea */}
                         </AccordionContent>
                       </AccordionItem>
 
