@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -702,9 +701,7 @@ export default function TrainingPage() {
               variant: variant,
               title: title,
               description: (
-                <ScrollArea className="max-h-40">
-                  <pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}{errorMessages}</pre>
-                </ScrollArea>
+                <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}{errorMessages}</pre></ScrollArea>
               ),
               duration: 15000,
           });
@@ -812,7 +809,7 @@ export default function TrainingPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <ScrollArea className="max-h-[400px] w-full border rounded-md">
+                      <ScrollArea className="h-[400px] w-full border rounded-md">
                         <Table>
                           <TableHeader>
                             <TableRow>
