@@ -54,13 +54,13 @@ import {
 } from "@/components/ui/accordion";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
-import { RANKS } from "./staff-schema";
+import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
 import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData'; // Import hooks
-import { useQuery, useQueryClient } from '@tanstack/react-query'; // Keep useQueryClient if needed
+import { useQuery, useQueryClient } from '@tanstack/react-query'; 
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
 
@@ -93,6 +93,7 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
     logsCollectionRef,
     where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
     where('rank', '==', staffMember.rank),
+    where('squadron', '==', staffMember.squadron),
     orderBy('completionDate', 'desc') // Order by completion date descending
   );
 
@@ -153,6 +154,7 @@ export default function StaffPage() {
   const addStaffMutation = useAddStaff();
   const updateStaffMutation = useUpdateStaff();
   const deleteStaffMutation = useDeleteStaff();
+  const queryClient = useQueryClient(); // Moved useQueryClient hook call here
   // --- End React Query Hooks ---
 
   // State for managing UI elements (forms, dialogs)
@@ -291,7 +293,7 @@ export default function StaffPage() {
 
       const errors: string[] = [];
       let importedCount = 0;
-      const queryClient = useQueryClient(); // Use queryClient from useQueryClient hook
+      
 
       try {
         const lines = text.split(/\r\n|\n/).filter(line => line.trim()); // Filter empty lines
