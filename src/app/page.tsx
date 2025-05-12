@@ -4,42 +4,36 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CalendarClock, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Users, Loader2 } from "lucide-react";
-import { addYears, isBefore, differenceInDays, format, addDays, isAfter } from "date-fns";
+import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2 } from "lucide-react";
+import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
-// import { initialStaff } from "./staff/page"; // Use fetched data
 import type { TrainingLog } from "./training/training-schema";
-// import { initialTrainingLogs } from "./training/page"; // Use fetched data
 import { COMPLIANCE_CRITERIA_CONFIG, type StaffComplianceReport, type ComplianceCriterionCheck } from "./reporting/reporting-schema";
-import type { Meeting } from "./meetings/meeting-schema";
-// import { initialMeetings } from "./meetings/page"; // No longer used directly
-import type { SafetyAudit, AuditFinding } from "./audits/audit-schema";
-// import { initialAudits } from "./audits/page"; // Use fetched data
+// import type { Meeting } from "./meetings/meeting-schema"; // Not used in dashboard calculations
+import type { SafetyAudit } from "./audits/audit-schema";
 import type { SquadronVisit, VisitActionItem } from "./squadron-visits/squadron-visit-schema";
-// import { initialSquadronVisits } from "./squadron-visits/page"; // Use fetched data
 
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { useStaff } from "@/hooks/useStaffData"; // Hook for staff data
+import { useStaff } from "@/hooks/useStaffData";
 import { useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 
-// --- Fetch Training Logs (similar to training page, simplified for dashboard) ---
+// --- Fetch Training Logs ---
 async function fetchTrainingLogs(): Promise<TrainingLog[]> {
-  const collectionRef = collection(db, 'trainingLogs'); // Assuming 'trainingLogs' collection
+  const collectionRef = collection(db, 'trainingLogs');
   const q = query(collectionRef, orderBy('completionDate', 'desc'));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({
     id: doc.id,
     ...doc.data(),
     completionDate: (doc.data().completionDate as Timestamp).toDate(),
-    // Handle potential certificate data (might not be needed for dashboard calc)
   })) as TrainingLog[];
 }
 
-// --- Fetch Audits (similar to audits page) ---
+// --- Fetch Audits ---
 async function fetchAudits(): Promise<SafetyAudit[]> {
   const auditsCollectionRef = collection(db, 'safetyAudits');
   const q = query(auditsCollectionRef, orderBy('auditDate', 'desc'));
@@ -52,13 +46,14 @@ async function fetchAudits(): Promise<SafetyAudit[]> {
         auditDate: (data.auditDate as Timestamp).toDate(),
         findings: data.findings?.map((finding: any) => ({
           ...finding,
+          id: finding.id || crypto.randomUUID(),
           dueDate: finding.dueDate instanceof Timestamp ? finding.dueDate.toDate() : finding.dueDate,
         })) || [],
       }
   }) as SafetyAudit[];
 }
 
-// --- Fetch Squadron Visits (similar to visits page) ---
+// --- Fetch Squadron Visits ---
 async function fetchVisits(): Promise<SquadronVisit[]> {
   const collectionRef = collection(db, 'squadronVisits');
   const q = query(collectionRef, orderBy('visitDate', 'desc'));
@@ -71,25 +66,30 @@ async function fetchVisits(): Promise<SquadronVisit[]> {
         visitDate: (data.visitDate as Timestamp).toDate(),
         actionItems: data.actionItems?.map((item: any) => ({
         ...item,
+        id: item.id || crypto.randomUUID(),
         dueDate: item.dueDate instanceof Timestamp ? item.dueDate.toDate() : item.dueDate,
         })) || [],
     }
   }) as SquadronVisit[];
 }
 
-
-// Helper function from reporting page (adapted)
 const getStaffIdentifier = (staffMember: StaffMember): string => {
+  if (!staffMember.serviceNumber) {
+    console.warn(`Staff member ${staffMember.firstName} ${staffMember.lastName} is missing a service number.`);
+    return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_MISSING_SN`;
+  }
   return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
 };
 
 const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[]): string => {
-  const matchedStaff = staffList.find(sm => sm.rank === log.rank && `${sm.lastName}, ${sm.firstName}` === log.staffName);
-  if (matchedStaff) {
-    return getStaffIdentifier(matchedStaff);
-  }
-  // Fallback if no exact match on service number, use name and rank as a less reliable key
-  return `${log.staffName}_${log.rank}_UNKNOWN_SN`;
+  const matchedStaff = staffList.find(sm =>
+    sm.rank === log.rank &&
+    `${sm.lastName}, ${sm.firstName}` === log.staffName &&
+    sm.squadron === log.squadron
+  );
+  if (matchedStaff) return getStaffIdentifier(matchedStaff);
+  console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}. Using log details as fallback identifier.`);
+  return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
 };
 
 const processComplianceReportsForDashboard = (
@@ -98,7 +98,6 @@ const processComplianceReportsForDashboard = (
 ): StaffComplianceReport[] => {
   return staffList.map((staff) => {
     const staffId = getStaffIdentifier(staff);
-    // Pass staffList to getTrainingLogStaffIdentifier
     const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log, staffList) === staffId);
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
@@ -113,17 +112,24 @@ const processComplianceReportsForDashboard = (
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
         const completionDate = new Date(selectedLog.completionDate);
-        if (criterion.yearsToExpire) {
-          const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-          if (isBefore(new Date(), expiryDate)) {
-            isMet = true;
-            details = `Completed: ${format(completionDate, "PP")}, Expires: ${format(expiryDate, "PP")}`;
+        if (!isValidDate(completionDate)) {
+          details = "Invalid completion date in record.";
+        } else {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          if (criterion.yearsToExpire) {
+            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+            if (isBefore(today, expiryDate)) { // Check if today is strictly before the expiry date
+              isMet = true;
+              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
+            } else {
+              details = `Out of Date (Completed: ${format(completionDate, "dd/MM/yyyy")})`;
+            }
           } else {
-            details = `Expired: ${format(expiryDate, "PP")} (Completed: ${format(completionDate, "PP")})`;
+            isMet = true;
+            details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
           }
-        } else { // For criteria without expiry, e.g., WWCC, Psych, CoC if they are one-time checks.
-          isMet = true;
-          details = `Completed: ${format(completionDate, "PP")}`;
         }
       }
       return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
@@ -141,7 +147,6 @@ const processComplianceReportsForDashboard = (
   });
 };
 
-
 interface ExpiringAccomplishment {
   staffName: string;
   staffRank: string;
@@ -156,16 +161,15 @@ interface UpcomingActionItem {
   description: string;
   responsible: string;
   dueDate: Date;
-  source: string; // e.g., "Audit", "Squadron Visit"
-  sourceId: string; // ID of the audit or visit
+  source: string;
+  sourceId: string;
   daysLeft: number;
 }
 
 const chartConfig = {
-  compliant: { label: "Compliant", color: "hsl(var(--chart-1))" }, // Use a green/blueish theme color
+  compliant: { label: "Compliant", color: "hsl(var(--chart-1))" },
   nonCompliant: { label: "Non-Compliant", color: "hsl(var(--destructive))" },
 } satisfies ChartConfig;
-
 
 export default function DashboardPage() {
   const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
@@ -186,85 +190,119 @@ export default function DashboardPage() {
   const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
   const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
 
-  React.useEffect(() => {
-    // Only process data once all sources are loaded and ready
-    if (staffList && staffList.length > 0 && trainingLogs && audits && visits) {
-      // Process Compliance Data
-      const reports = processComplianceReportsForDashboard(staffList, trainingLogs);
-      const compliantCount = reports.filter(r => r.isCompliant).length;
-      const nonCompliantCount = reports.length - compliantCount;
-      setComplianceData({ compliant: compliantCount, nonCompliant: nonCompliantCount });
-
-      // Process Expiring Accomplishments
-      const today = new Date();
-      const thirtyDaysFromNow = addDays(today, 30);
-      const expiring: ExpiringAccomplishment[] = [];
-
-      trainingLogs.forEach(log => {
-        COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
-          if (criterion.identifier(log) && criterion.yearsToExpire) {
-            const completionDate = new Date(log.completionDate);
-            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            if (isAfter(expiryDate, today) && isBefore(expiryDate, thirtyDaysFromNow)) {
-              const staffMember = staffList.find(s => s.rank === log.rank && `${s.lastName}, ${s.firstName}` === log.staffName && s.squadron === log.squadron);
-              expiring.push({
-                staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
-                staffRank: log.rank,
-                squadron: log.squadron,
-                courseName: `${criterion.name} (${log.courseName})`,
-                expiryDate: expiryDate,
-                daysLeft: differenceInDays(expiryDate, today)
-              });
-            }
-          }
-        });
-      });
-      setExpiringAccomplishments(expiring.sort((a,b) => a.daysLeft - b.daysLeft));
-
-      // Process Upcoming Action Items
-      const fourteenDaysFromNow = addDays(today, 14);
-      const actions: UpcomingActionItem[] = [];
-
-      audits.forEach(audit => {
-        audit.findings?.forEach(finding => {
-          if (finding.dueDate && (finding.status === "Open" || finding.status === "In Progress")) {
-            const dueDate = new Date(finding.dueDate);
-            if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
-              actions.push({
-                id: finding.id || crypto.randomUUID(),
-                description: finding.description,
-                responsible: finding.assignedTo || "Unassigned",
-                dueDate: dueDate,
-                source: `Audit: ${audit.auditTitle}`,
-                sourceId: audit.id || crypto.randomUUID(),
-                daysLeft: differenceInDays(dueDate, today)
-              });
-            }
-          }
-        });
-      });
-
-      visits.forEach(visit => {
-        visit.actionItems?.forEach(item => {
-          if (item.dueDate && (item.status === "Open" || item.status === "In Progress")) {
-            const dueDate = new Date(item.dueDate);
-            if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
-              actions.push({
-                id: item.id || crypto.randomUUID(),
-                description: item.description,
-                responsible: item.responsible,
-                dueDate: dueDate,
-                source: `Visit: ${visit.squadronName}`,
-                sourceId: visit.id || crypto.randomUUID(),
-                daysLeft: differenceInDays(dueDate, today)
-              });
-            }
-          }
-        });
-      });
-      setUpcomingActionItems(actions.sort((a,b) => a.daysLeft - b.daysLeft));
+  const processedReports = React.useMemo(() => {
+    if (staffList && staffList.length > 0 && trainingLogs) {
+      return processComplianceReportsForDashboard(staffList, trainingLogs);
     }
-  }, [staffList, trainingLogs, audits, visits]); // Depend on fetched data
+    return null;
+  }, [staffList, trainingLogs]);
+
+  React.useEffect(() => {
+    if (processedReports) {
+      const compliantCount = processedReports.filter(r => r.isCompliant).length;
+      const nonCompliantCount = processedReports.length - compliantCount;
+      setComplianceData(prevData => {
+        if (prevData && prevData.compliant === compliantCount && prevData.nonCompliant === nonCompliantCount) {
+          return prevData;
+        }
+        return { compliant: compliantCount, nonCompliant: nonCompliantCount };
+      });
+    } else {
+      setComplianceData(null); // Reset if reports are not available
+    }
+  }, [processedReports]);
+
+  const calculatedExpiringAccomplishments = React.useMemo(() => {
+    if (!staffList || !trainingLogs) return [];
+    const today = new Date();
+    const thirtyDaysFromNow = addDays(today, 30);
+    const expiring: ExpiringAccomplishment[] = [];
+    trainingLogs.forEach(log => {
+      COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
+        if (criterion.identifier(log) && criterion.yearsToExpire) {
+          const completionDate = new Date(log.completionDate);
+          if (!isValidDate(completionDate)) return;
+          const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+          if (isAfter(expiryDate, today) && isBefore(expiryDate, thirtyDaysFromNow)) {
+            const staffMember = staffList.find(s => s.rank === log.rank && `${s.lastName}, ${s.firstName}` === log.staffName && s.squadron === log.squadron);
+            expiring.push({
+              staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
+              staffRank: log.rank,
+              squadron: log.squadron,
+              courseName: `${criterion.name} (${log.courseName})`,
+              expiryDate: expiryDate,
+              daysLeft: differenceInDays(expiryDate, today)
+            });
+          }
+        }
+      });
+    });
+    return expiring.sort((a,b) => a.daysLeft - b.daysLeft);
+  }, [staffList, trainingLogs]);
+
+  React.useEffect(() => {
+    setExpiringAccomplishments(prev => {
+        // Simple check, could be deeper if needed
+        if (JSON.stringify(prev) === JSON.stringify(calculatedExpiringAccomplishments)) return prev;
+        return calculatedExpiringAccomplishments;
+    });
+  }, [calculatedExpiringAccomplishments]);
+
+
+  const calculatedUpcomingActionItems = React.useMemo(() => {
+    if (!audits || !visits) return [];
+    const today = new Date();
+    const fourteenDaysFromNow = addDays(today, 14);
+    const actions: UpcomingActionItem[] = [];
+
+    audits.forEach(audit => {
+      audit.findings?.forEach(finding => {
+        if (finding.dueDate && (finding.status === "Open" || finding.status === "In Progress")) {
+          const dueDate = new Date(finding.dueDate);
+          if (!isValidDate(dueDate)) return;
+          if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
+            actions.push({
+              id: finding.id || crypto.randomUUID(),
+              description: finding.description,
+              responsible: finding.assignedTo || "Unassigned",
+              dueDate: dueDate,
+              source: `Audit: ${audit.auditTitle}`,
+              sourceId: audit.id || crypto.randomUUID(),
+              daysLeft: differenceInDays(dueDate, today)
+            });
+          }
+        }
+      });
+    });
+
+    visits.forEach(visit => {
+      visit.actionItems?.forEach(item => {
+        if (item.dueDate && (item.status === "Open" || item.status === "In Progress")) {
+          const dueDate = new Date(item.dueDate);
+          if (!isValidDate(dueDate)) return;
+          if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
+            actions.push({
+              id: item.id || crypto.randomUUID(),
+              description: item.description,
+              responsible: item.responsible,
+              dueDate: dueDate,
+              source: `Visit: ${visit.squadronName}`,
+              sourceId: visit.id || crypto.randomUUID(),
+              daysLeft: differenceInDays(dueDate, today)
+            });
+          }
+        }
+      });
+    });
+    return actions.sort((a,b) => a.daysLeft - b.daysLeft);
+  }, [audits, visits]);
+
+  React.useEffect(() => {
+    setUpcomingActionItems(prev => {
+        if (JSON.stringify(prev) === JSON.stringify(calculatedUpcomingActionItems)) return prev;
+        return calculatedUpcomingActionItems;
+    });
+  }, [calculatedUpcomingActionItems]);
 
   const pieData = complianceData
     ? [
@@ -293,7 +331,6 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                   <p>Failed to load necessary data for the dashboard. Please try again later.</p>
-                  {/* Optionally display specific error messages */}
                   {errorStaff && <p className="text-xs mt-2">Staff Error: {errorStaff.message}</p>}
                   {errorLogs && <p className="text-xs mt-2">Training Log Error: {errorLogs.message}</p>}
                   {errorAudits && <p className="text-xs mt-2">Audit Error: {errorAudits.message}</p>}
@@ -355,7 +392,7 @@ export default function DashboardPage() {
                 </ChartContainer>
               </>
             ) : (
-              <p className="text-muted-foreground">Processing compliance data...</p> // Changed from Loading
+              <p className="text-muted-foreground">Processing compliance data...</p>
             )}
           </CardContent>
         </Card>
