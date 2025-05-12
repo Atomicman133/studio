@@ -20,8 +20,8 @@ import { useStaff } from "@/hooks/useStaffData";
 import { useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
-import { useAuth } from "@/contexts/auth-context"; // Added for auth check
-import { useRouter } from "next/navigation"; // Added for redirection
+import { useAuth } from "@/contexts/auth-context";
+import { useRouter } from "next/navigation";
 
 // --- Fetch Training Logs ---
 async function fetchTrainingLogs(): Promise<TrainingLog[]> {
@@ -177,18 +177,24 @@ export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
+  const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff(); // useStaff already handles enabled based on auth
+
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
     queryKey: ['trainingLogsDashboard'],
     queryFn: fetchTrainingLogs,
+    enabled: !!user && !authLoading, // Ensure query only runs when user is authenticated
   });
+
   const { data: audits = [], isLoading: isLoadingAudits, error: errorAudits } = useQuery<SafetyAudit[], Error>({
     queryKey: ['safetyAuditsDashboard'],
     queryFn: fetchAudits,
+    enabled: !!user && !authLoading, // Ensure query only runs when user is authenticated
   });
+
   const { data: visits = [], isLoading: isLoadingVisits, error: errorVisits } = useQuery<SquadronVisit[], Error>({
     queryKey: ['squadronVisitsDashboard'],
     queryFn: fetchVisits,
+    enabled: !!user && !authLoading, // Ensure query only runs when user is authenticated
   });
 
   const [complianceData, setComplianceData] = React.useState<{ compliant: number; nonCompliant: number } | null>(null);
@@ -202,7 +208,7 @@ export default function DashboardPage() {
   }, [user, authLoading, router]);
 
   const processedReports = React.useMemo(() => {
-    if (staffList && staffList.length > 0 && trainingLogs) {
+    if (staffList && staffList.length > 0 && trainingLogs && trainingLogs.length > 0) {
       return processComplianceReportsForDashboard(staffList, trainingLogs);
     }
     return null;
@@ -219,7 +225,7 @@ export default function DashboardPage() {
         return { compliant: compliantCount, nonCompliant: nonCompliantCount };
       });
     } else {
-      setComplianceData(null); // Reset if reports are not available
+      setComplianceData(null); 
     }
   }, [processedReports]);
 
@@ -253,7 +259,6 @@ export default function DashboardPage() {
 
   React.useEffect(() => {
     setExpiringAccomplishments(prev => {
-        // Simple check, could be deeper if needed
         if (JSON.stringify(prev) === JSON.stringify(calculatedExpiringAccomplishments)) return prev;
         return calculatedExpiringAccomplishments;
     });
@@ -322,10 +327,10 @@ export default function DashboardPage() {
       ]
     : [];
 
-  const isLoadingAny = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits;
-  const hasError = errorStaff || errorLogs || errorAudits || errorVisits;
+  const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits;
+  const hasAnyError = errorStaff || errorLogs || errorAudits || errorVisits;
 
-  if (authLoading || (!authLoading && !user)) {
+  if (authLoading) { // Primary loading state for auth
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -334,7 +339,18 @@ export default function DashboardPage() {
     );
   }
   
-  if (isLoadingAny) {
+  if (!user) { // If not loading auth, and no user, means user needs to login (or was redirected by useEffect)
+    // This state might be brief if redirection is quick, or if user accesses dashboard directly without login
+    return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+            <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+            <p className="text-muted-foreground">Please log in to view the dashboard.</p>
+        </div>
+    );
+  }
+
+  // User is authenticated, now check for data loading/errors
+  if (isLoadingAnyData) {
       return (
           <div className="flex flex-col items-center justify-center min-h-[60vh]">
               <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -343,7 +359,7 @@ export default function DashboardPage() {
       );
   }
 
-  if (hasError) {
+  if (hasAnyError) {
       return (
           <Card className="border-destructive">
               <CardHeader>
@@ -376,7 +392,7 @@ export default function DashboardPage() {
             <UserCheck className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {complianceData ? (
+            {complianceData && (staffList && staffList.length > 0) ? (
               <>
                 <div className="text-2xl font-bold mb-2">
                   {((complianceData.compliant / (complianceData.compliant + complianceData.nonCompliant || 1)) * 100).toFixed(1)}%
@@ -412,7 +428,7 @@ export default function DashboardPage() {
                 </ChartContainer>
               </>
             ) : (
-              <p className="text-muted-foreground">Processing compliance data...</p>
+              <p className="text-muted-foreground">No compliance data available or staff list is empty.</p>
             )}
           </CardContent>
         </Card>
