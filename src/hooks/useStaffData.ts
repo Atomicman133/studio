@@ -1,3 +1,4 @@
+
 "use client"; 
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -14,17 +15,15 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { StaffMember } from '@/app/staff/staff-schema';
-import { staffMemberSchema, RANKS } from '@/app/staff/staff-schema';
-import { useAuth } from '@/contexts/auth-context'; // Import useAuth
-
-const STAFF_QUERY_KEY = 'staff';
+import { staffMemberSchema, RANKS, STAFF_QUERY_KEY } from '@/app/staff/staff-schema'; // Import STAFF_QUERY_KEY
+import { useAuth } from '@/contexts/auth-context';
 
 const convertTimestamps = (data: any): StaffMember => {
   const validatedData = staffMemberSchema.parse({
     ...data,
     joinDate: data.joinDate instanceof Timestamp
       ? data.joinDate.toDate()
-      : (data.joinDate === null ? undefined : data.joinDate),
+      : (data.joinDate === null ? null : data.joinDate), // Keep null as null, handle undefined if necessary
   });
   return validatedData;
 };
@@ -66,7 +65,7 @@ export function useStaff() {
   return useQuery<StaffMember[], Error>({
     queryKey: [STAFF_QUERY_KEY],
     queryFn: fetchStaff,
-    enabled: !!user && !authLoading, // Only enable query when user is authenticated and auth is not loading
+    enabled: !!user && !authLoading && !!user.email && user.email.endsWith('@airforcecadets.gov.au'), // Only enable query when user is authenticated and auth is not loading
     staleTime: 1000 * 60 * 5, 
   });
 }

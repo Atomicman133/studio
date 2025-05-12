@@ -28,8 +28,10 @@ export const staffMemberSchema = z.object({
   email: z.string().email("Invalid email address").min(1, "Email is required"),
   phone: z.string().optional(),
   role: z.string().min(1, "Role is required"),
-  joinDate: z.date().optional(),
+  joinDate: z.date().optional().nullable(), // Allow null for joinDate
   squadron: z.string().optional(), // Added for CSV import and direct association
 });
 
 export type StaffMember = z.infer<typeof staffMemberSchema>;
+
+export const STAFF_QUERY_KEY = 'staff';
