@@ -10,16 +10,18 @@ import {
   ShieldCheck,
   Settings,
   Users,
-  LogIn, // Added LogIn icon
-  LogOut, // Added LogOut icon
+  LogIn, 
+  LogOut, 
   LayoutDashboard,
   Plane,
   FileSearch,
   ClipboardList, 
   UserCircle,
+  Sun, // Added Sun
+  Moon, // Added Moon
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation"; // Added useRouter
+import { usePathname, useRouter } from "next/navigation"; 
 import {
   SidebarProvider,
   Sidebar,
@@ -46,7 +48,7 @@ import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import * as React from "react"; 
-import { useAuth } from "@/contexts/auth-context"; // Import useAuth
+import { useAuth } from "@/contexts/auth-context"; 
 
 interface NavItem {
   href: string;
@@ -99,7 +101,7 @@ function UserNav() {
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
 
-  if (!mounted || loading) { // Show placeholder if not mounted or auth state is loading
+  if (!mounted || loading) { 
     return <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />;
   }
 
@@ -196,18 +198,17 @@ function NavMenuItemContent({
 
 
 function AppLayoutInternal({ children }: { children: React.ReactNode }) {
-  const { isMobile, open: isSidebarOpen } = useSidebar();
+  const { isMobile, open: isSidebarOpen, state: sidebarState } = useSidebar();
   const { user, loading: authLoading } = useAuth();
   const pathname = usePathname();
 
-  // Don't render sidebar if on the /auth page or if auth is loading
   const hideSidebarAndHeader = pathname === '/auth';
 
   if (hideSidebarAndHeader) {
     return <main>{children}</main>;
   }
 
-  const isCollapsed = !isMobile && !isSidebarOpen;
+  const isCollapsed = sidebarState === "collapsed";
 
 
   return (
@@ -294,18 +295,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (!isMounted) {
-    // Basic SSR fallback, especially for the auth page
     if (pathname === '/auth') {
       return <main>{children}</main>;
     }
     return (
       <div className="flex min-h-screen w-full">
         <div className="hidden md:flex md:flex-col md:w-[16rem] border-r bg-background shadow-sm">
-          {/* Static Sidebar Placeholder for SSR */}
         </div>
         <div className="flex-1 flex flex-col min-w-0">
           <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 sm:px-6 shadow-sm">
-            {/* Static Header Placeholder for SSR */}
           </header>
           <main className="flex-1 p-4 sm:p-6 lg:p-8 bg-muted/20 dark:bg-muted/10">
             {children}
@@ -315,7 +313,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   
-  // If on /auth page, render children directly without SidebarProvider to avoid context errors
   if (pathname === '/auth') {
     return <main>{children}</main>;
   }
@@ -326,3 +323,4 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
+
