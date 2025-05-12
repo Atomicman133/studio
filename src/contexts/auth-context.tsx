@@ -1,7 +1,6 @@
-
 "use client";
 
-import type { User as FirebaseUser, ParsedToken } from 'firebase/auth';
+import type { User as FirebaseUser, ParsedToken, IdTokenResult } from 'firebase/auth';
 import {
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -16,10 +15,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 
 interface User extends FirebaseUser {
-  // You can extend the FirebaseUser type with custom properties if needed
-  // For example: idTokenResult?: IdTokenResult;
-  // For simplicity, we'll use the base FirebaseUser type
-  // but you might want to store idToken or custom claims here.
   customClaims?: ParsedToken;
 }
 
@@ -43,15 +38,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   React.useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Optionally get custom claims or ID token result
-        // const idTokenResult = await firebaseUser.getIdTokenResult();
-        // setUser({ ...firebaseUser, customClaims: idTokenResult.claims });
-
-        setUser(firebaseUser as User); // Cast for now, extend User type if needed
+        try {
+            const idTokenResult: IdTokenResult = await firebaseUser.getIdTokenResult(true); // force refresh
+            // Ensure email is available and set it on the user object for consistency
+            const userEmailFromToken = idTokenResult.claims.email as string | undefined;
+            
+            setUser({
+                ...firebaseUser,
+                // Prioritize email from token if available, fallback to firebaseUser.email
+                email: userEmailFromToken || firebaseUser.email, 
+                customClaims: idTokenResult.claims 
+            } as User);
+        } catch (tokenError) {
+            console.error("Error getting ID token result:", tokenError);
+            // Fallback: use firebaseUser directly, email might be null or not yet fully propagated
+            setUser(firebaseUser as User); 
+        }
       } else {
         setUser(null);
       }
-      setLoading(false);
+      setLoading(false); // setLoading should be here, after user state is fully determined
     });
 
     return () => unsubscribe();
@@ -62,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithPopup(auth, provider);
       toast({ title: 'Success', description: 'Signed in with Google.' });
-      router.push('/'); // Redirect to dashboard after successful login
+      router.push('/'); 
     } catch (error: any) {
       console.error('Google sign-in error:', error);
       toast({ variant: 'destructive', title: 'Google Sign-In Error', description: error.message });
@@ -73,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await createUserWithEmailAndPassword(auth, email, pass);
       toast({ title: 'Success', description: 'Account created successfully.' });
-      router.push('/'); // Redirect to dashboard
+      router.push('/'); 
     } catch (error: any) {
       console.error('Sign up error:', error);
       toast({ variant: 'destructive', title: 'Sign Up Error', description: error.message });
@@ -84,7 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithEmailAndPassword(auth, email, pass);
       toast({ title: 'Success', description: 'Signed in successfully.' });
-      router.push('/'); // Redirect to dashboard
+      router.push('/'); 
     } catch (error: any) {
       console.error('Sign in error:', error);
       toast({ variant: 'destructive', title: 'Sign In Error', description: error.message });
@@ -95,7 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signOut(auth);
       toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
-      router.push('/auth'); // Redirect to auth page after logout
+      router.push('/auth'); 
     } catch (error: any) {
       console.error('Logout error:', error);
       toast({ variant: 'destructive', title: 'Logout Error', description: error.message });
