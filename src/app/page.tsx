@@ -122,7 +122,7 @@ const processComplianceReportsForDashboard = (
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            if (isBefore(today, expiryDate)) { // Check if today is strictly before the expiry date
+            if (isBefore(today, expiryDate)) { 
               isMet = true;
               details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
             } else {
@@ -177,24 +177,24 @@ export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff(); // useStaff already handles enabled based on auth
+  const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff(); 
 
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
     queryKey: ['trainingLogsDashboard'],
     queryFn: fetchTrainingLogs,
-    enabled: !!user && !authLoading, // Ensure query only runs when user is authenticated
+    enabled: !!user && !authLoading, 
   });
 
   const { data: audits = [], isLoading: isLoadingAudits, error: errorAudits } = useQuery<SafetyAudit[], Error>({
     queryKey: ['safetyAuditsDashboard'],
     queryFn: fetchAudits,
-    enabled: !!user && !authLoading, // Ensure query only runs when user is authenticated
+    enabled: !!user && !authLoading, 
   });
 
   const { data: visits = [], isLoading: isLoadingVisits, error: errorVisits } = useQuery<SquadronVisit[], Error>({
     queryKey: ['squadronVisitsDashboard'],
     queryFn: fetchVisits,
-    enabled: !!user && !authLoading, // Ensure query only runs when user is authenticated
+    enabled: !!user && !authLoading, 
   });
 
   const [complianceData, setComplianceData] = React.useState<{ compliant: number; nonCompliant: number } | null>(null);
@@ -329,8 +329,9 @@ export default function DashboardPage() {
 
   const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits;
   const hasAnyError = errorStaff || errorLogs || errorAudits || errorVisits;
+  const isUserEmailInvalidForRules = user && (!user.email || !user.email.endsWith('@airforcecadets.gov.au'));
 
-  if (authLoading) { // Primary loading state for auth
+  if (authLoading) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -339,8 +340,7 @@ export default function DashboardPage() {
     );
   }
   
-  if (!user) { // If not loading auth, and no user, means user needs to login (or was redirected by useEffect)
-    // This state might be brief if redirection is quick, or if user accesses dashboard directly without login
+  if (!user && !authLoading) { 
     return (
         <div className="flex flex-col items-center justify-center min-h-[60vh]">
             <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
@@ -348,9 +348,31 @@ export default function DashboardPage() {
         </div>
     );
   }
+  
+  if (user && isUserEmailInvalidForRules && hasAnyError) {
+    return (
+      <Card className="border-destructive">
+        <CardHeader>
+          <CardTitle className="text-destructive flex items-center gap-2">
+            <AlertTriangle /> Authentication Issue
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-2">
+            You are logged in, but your email address (<strong>{user.email || "not available"}</strong>)
+            may not meet the access requirements for this application (must end with @airforcecadets.gov.au).
+          </p>
+          <p>This is likely causing the "Missing or insufficient permissions" errors from the data sources:</p>
+          {errorStaff && <p className="text-xs mt-2">Staff Error: {errorStaff.message}</p>}
+          {errorLogs && <p className="text-xs mt-2">Training Log Error: {errorLogs.message}</p>}
+          {errorAudits && <p className="text-xs mt-2">Audit Error: {errorAudits.message}</p>}
+          {errorVisits && <p className="text-xs mt-2">Visit Error: {errorVisits.message}</p>}
+        </CardContent>
+      </Card>
+    );
+  }
 
-  // User is authenticated, now check for data loading/errors
-  if (isLoadingAnyData) {
+  if (isLoadingAnyData && !isUserEmailInvalidForRules) {
       return (
           <div className="flex flex-col items-center justify-center min-h-[60vh]">
               <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -359,7 +381,7 @@ export default function DashboardPage() {
       );
   }
 
-  if (hasAnyError) {
+  if (hasAnyError && !isUserEmailInvalidForRules) {
       return (
           <Card className="border-destructive">
               <CardHeader>
