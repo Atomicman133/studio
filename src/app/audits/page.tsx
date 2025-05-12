@@ -1,8 +1,7 @@
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, ShieldCheck, ListChecks, FilePlus2, Activity, FileText, Edit3, Info, Camera, Loader2, AlertTriangle } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, ShieldCheck, ListChecks, FilePlus2, Activity, FileText, Edit3, Info, Camera, Loader2, AlertTriangle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -55,6 +54,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
+import jsPDF from 'jspdf';
 
 const AUDITS_QUERY_KEY = 'safetyAudits';
 
@@ -237,6 +237,112 @@ export default function AuditsPage() {
     return "All Clear";
   }
 
+  const handleExportAuditAsPdf = (audit: SafetyAudit) => {
+    const doc = new jsPDF();
+    const auditDateFormatted = format(audit.auditDate, "yyyy-MM-dd");
+    const filename = `safety_audit_${audit.auditTitle.replace(/\s+/g, '_')}_${auditDateFormatted}.pdf`;
+
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxLineWidth = pageWidth - (margin * 2);
+
+    const checkPageBreak = (neededHeight: number) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+            doc.addPage();
+            yPos = margin;
+        }
+    };
+    
+    const addTextSection = (title: string, text?: string | null, isBold = false, customIndent = indent, titleFontSize = 12, textFontSize = 10) => {
+      if (!text || text.trim() === "") return;
+      checkPageBreak(lineSpacing * 2); // Estimate for title + a bit of text
+      
+      doc.setFontSize(titleFontSize);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing;
+
+      doc.setFontSize(textFontSize);
+      doc.setFont(undefined, isBold ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      doc.text(lines, margin + customIndent, yPos);
+      yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3); // Spacing after text block
+    };
+
+    // --- PDF Header ---
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Safety Audit Report: ${audit.auditTitle}`, margin, yPos);
+    yPos += sectionSpacing * 1.2;
+
+    // --- Basic Audit Information ---
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    addTextSection("Date of Audit:", format(audit.auditDate, "PPP"), false, 0);
+    addTextSection("Auditor(s):", audit.auditorName, false, 0);
+    addTextSection("Type of Audit:", audit.auditType, false, 0);
+    addTextSection("Scope of Audit:", audit.scope, false, 0);
+    yPos += sectionSpacing * 0.5;
+
+    // --- Overall Summary ---
+    if (audit.summary) {
+      addTextSection("Overall Summary:", audit.summary, false, 0, 14);
+      yPos += sectionSpacing * 0.5;
+    }
+
+    // --- Findings ---
+    if (audit.findings && audit.findings.length > 0) {
+      checkPageBreak(sectionSpacing);
+      doc.setFontSize(16);
+      doc.setFont(undefined, 'bold');
+      doc.text("Findings / Corrective Actions", margin, yPos);
+      yPos += sectionSpacing;
+
+      audit.findings.forEach((finding, index) => {
+        checkPageBreak(lineSpacing * 6); // Estimate space for a finding
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Finding ${index + 1}:`, margin, yPos);
+        yPos += lineSpacing * 0.5;
+
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'normal');
+        addTextSection("Description:", finding.description, false, indent);
+        addTextSection("Severity:", finding.severity, false, indent);
+        if (finding.recommendedAction) {
+          addTextSection("Recommended Action:", finding.recommendedAction, false, indent);
+        }
+        if (finding.assignedTo) {
+          addTextSection("Assigned To:", finding.assignedTo, false, indent);
+        }
+        if (finding.dueDate) {
+          addTextSection("Due Date:", format(finding.dueDate, "PPP"), false, indent);
+        }
+        addTextSection("Status:", finding.status, false, indent);
+        
+        yPos += lineSpacing * 0.7; // Space between findings
+        if (index < audit.findings!.length - 1) {
+            checkPageBreak(lineSpacing * 0.5);
+            doc.setDrawColor(200); // Light grey line
+            doc.line(margin, yPos, pageWidth - margin, yPos);
+            yPos += lineSpacing * 0.5;
+        }
+      });
+    } else {
+      checkPageBreak(sectionSpacing);
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'italic');
+      doc.text("No specific findings or CAPAs recorded for this audit.", margin, yPos);
+      yPos += sectionSpacing;
+    }
+
+    doc.save(filename);
+  };
+
 
   return (
     <div className="space-y-6">
@@ -320,6 +426,10 @@ export default function AuditsPage() {
                           <DropdownMenuItem onClick={() => handleEdit(audit)} disabled={updateAuditMutation.isPending || deleteAuditMutation.isPending}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportAuditAsPdf(audit)} disabled={updateAuditMutation.isPending || deleteAuditMutation.isPending}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Export as PDF
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -494,7 +604,7 @@ export default function AuditsPage() {
             </li>
             <li className="flex items-center">
               <FileText className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
-              Generate comprehensive audit reports and analyze safety trends.
+              Generate comprehensive audit reports (PDF export implemented) and analyze safety trends.
             </li>
              <li className="flex items-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
@@ -507,5 +617,7 @@ export default function AuditsPage() {
   );
 }
 
+
+    
 
     
