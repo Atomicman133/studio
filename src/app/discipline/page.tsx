@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Gavel, FileSignature, UserX, Archive, ShieldAlert, Edit3, Info, UploadCloud, ListChecks, MessageSquareText, Loader2, AlertTriangle } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Gavel, FileSignature, UserX, Archive, ShieldAlert, Edit3, Info, UploadCloud, ListChecks, MessageSquareText, Loader2, AlertTriangle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -56,6 +56,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
+import jsPDF from 'jspdf';
 
 const ACTIONS_QUERY_KEY = 'disciplineActions';
 const CONVERSATIONS_QUERY_KEY = 'recordsOfConversation';
@@ -317,6 +318,134 @@ export default function DisciplinePage() {
     setViewingConversation(null);
   }
 
+  const handleExportDisciplineActionAsPdf = (action: DisciplineAction) => {
+    const doc = new jsPDF();
+    const incidentDateFormatted = format(action.dateOfIncident, "yyyy-MM-dd");
+    const filename = `discipline_action_${action.staffName.replace(/\s+/g, '_')}_${incidentDateFormatted}.pdf`;
+
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxLineWidth = pageWidth - (margin * 2);
+    
+    const addTextSection = (title: string, text?: string | null, isBold = false, customIndent = indent, titleFontSize = 12, textFontSize = 10) => {
+      if (!text || text.trim() === "") return;
+      if (yPos > doc.internal.pageSize.getHeight() - margin - sectionSpacing - 20) { 
+        doc.addPage();
+        yPos = margin;
+      }
+      doc.setFontSize(titleFontSize);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing;
+
+      doc.setFontSize(textFontSize);
+      doc.setFont(undefined, isBold ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      doc.text(lines, margin + customIndent, yPos);
+      yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3); 
+    };
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Discipline Action Report`, margin, yPos);
+    yPos += sectionSpacing * 1.2;
+
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    addTextSection("Staff Member:", action.staffName, false, 0);
+    addTextSection("Date of Incident:", format(action.dateOfIncident, "PPP"), false, 0);
+    addTextSection("Type of Action:", action.typeOfAction, false, 0);
+    yPos += sectionSpacing * 0.5;
+
+    addTextSection("Description of Incident/Breach:", action.incidentDescription, false, 0, 14);
+    if (action.policyBreached) addTextSection("Policy/Regulation Breached:", action.policyBreached, false, 0);
+    if (action.outcome) addTextSection("Outcome of Action:", action.outcome, false, 0);
+    if (action.sanctionsApplied) addTextSection("Sanctions Applied:", action.sanctionsApplied, false, 0);
+    if (action.appealProcessNotes) addTextSection("Appeal Process Notes:", action.appealProcessNotes, false, 0);
+
+    doc.save(filename);
+  };
+
+  const handleExportRecordOfConversationAsPdf = (roc: RecordOfConversation) => {
+    const doc = new jsPDF();
+    const interviewDateFormatted = format(roc.interviewDate, "yyyy-MM-dd");
+    const filename = `record_of_conversation_${roc.subject.replace(/\s+/g, '_')}_${interviewDateFormatted}.pdf`;
+
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxLineWidth = pageWidth - (margin * 2);
+
+    const addTextSection = (title: string, text?: string | null, isBold = false, customIndent = indent, titleFontSize = 12, textFontSize = 10) => {
+      if (!text || text.trim() === "") return;
+       if (yPos > doc.internal.pageSize.getHeight() - margin - sectionSpacing - 20) { 
+        doc.addPage();
+        yPos = margin;
+      }
+      doc.setFontSize(titleFontSize);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing;
+
+      doc.setFontSize(textFontSize);
+      doc.setFont(undefined, isBold ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      doc.text(lines, margin + customIndent, yPos);
+      yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3);
+    };
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Record of Conversation`, margin, yPos);
+    yPos += sectionSpacing;
+    
+    if(roc.referenceNumber) addTextSection("Reference/CEA Incident Number:", roc.referenceNumber, false, 0);
+    addTextSection("Subject:", roc.subject, false, 0);
+    yPos += sectionSpacing * 0.5;
+    
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text("Interview Details", margin, yPos);
+    yPos += lineSpacing * 1.5;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+
+    addTextSection("Interviewing Officer:", roc.interviewingOfficerName, false, indent);
+    addTextSection("Position:", roc.interviewingOfficerPosition, false, indent);
+    addTextSection("Date of Interview:", format(roc.interviewDate, "PPP"), false, indent);
+    addTextSection("Time:", roc.interviewTime, false, indent);
+    addTextSection("Interview Type:", roc.interviewType, false, indent);
+    if(roc.personsPresent) addTextSection("Persons Present:", roc.personsPresent, false, indent);
+    yPos += sectionSpacing * 0.5;
+
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text("Conversation With", margin, yPos);
+    yPos += lineSpacing * 1.5;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    addTextSection("Name (inc. title/rank):", roc.conversationWithName, false, indent);
+    if(roc.conversationWithDeptUnitFirm) addTextSection("Department/Unit/Firm (inc. address):", roc.conversationWithDeptUnitFirm, false, indent);
+    if(roc.conversationWithSquadron) addTextSection("Squadron:", roc.conversationWithSquadron, false, indent);
+    if(roc.conversationWithTelephone) addTextSection("Telephone:", roc.conversationWithTelephone, false, indent);
+    yPos += sectionSpacing * 0.5;
+    
+    addTextSection("Background:", roc.background, false, 0, 14);
+    addTextSection("Conversation:", roc.conversation, false, 0, 14);
+    if (roc.actionsTaken) addTextSection("Actions:", roc.actionsTaken, false, 0, 14);
+    if (roc.questionsAsked) addTextSection("Questions:", roc.questionsAsked, false, 0, 14);
+    if (roc.followUp) addTextSection("Follow Up:", roc.followUp, false, 0, 14);
+
+    doc.save(filename);
+  };
+
 
   return (
     <div className="space-y-6">
@@ -396,6 +525,10 @@ export default function DisciplinePage() {
                                 <DropdownMenuItem onClick={() => handleEditAction(action)} disabled={updateActionMutation.isPending || deleteActionMutation.isPending}>
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleExportDisciplineActionAsPdf(action)} disabled={updateActionMutation.isPending || deleteActionMutation.isPending}>
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Export as PDF
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -478,6 +611,9 @@ export default function DisciplinePage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleEditConversation(roc)} disabled={updateConversationMutation.isPending || deleteConversationMutation.isPending}>
                                     <Pencil className="mr-2 h-4 w-4" /> Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleExportRecordOfConversationAsPdf(roc)} disabled={updateConversationMutation.isPending || deleteConversationMutation.isPending}>
+                                    <Download className="mr-2 h-4 w-4" /> Export as PDF
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -757,4 +893,3 @@ export default function DisciplinePage() {
     </div>
   );
 }
-
