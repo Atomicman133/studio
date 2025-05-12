@@ -73,10 +73,23 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
     name: 'Defence Youth Safety Annual Awareness Training',
     yearsToExpire: 1, // Check if completionDate is within the last 1 year
     identifier: (log: TrainingLog) =>
-      matchesKeywords(log.courseName, ['defence youth safety', 'dysat']) || matchesKeywords(log.qualificationAchieved, ['defence youth safety', 'dysat'])
+      matchesKeywords(log.courseName, [
+        'defence youth safety', 
+        'dysat', 
+        'youth mental health - awareness - completed', 
+        'defence youth protection awareness course - completed online', 
+        'defence youth safety level 3 - leader - completed online'
+      ]) || matchesKeywords(log.qualificationAchieved, [
+        'defence youth safety', 
+        'dysat',
+        'youth mental health - awareness - completed', 
+        'defence youth protection awareness course - completed online', 
+        'defence youth safety level 3 - leader - completed online'
+      ])
   },
 ] as const;
 
 export type ComplianceCriterionKey = typeof COMPLIANCE_CRITERIA_CONFIG[number]['key'];
 
+    
     

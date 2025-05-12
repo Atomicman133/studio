@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -25,7 +26,7 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"; // Keep for Trigger/Content if needed elsewhere, but not for wrapping TRs
+} from "@/components/ui/collapsible"; 
 import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reporting-schema";
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
@@ -303,7 +304,7 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md"> {/* Ensure ScrollArea has a defined height */}
+            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md">
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                   <TableRow>
@@ -317,19 +318,17 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
-                      // Removed asChild to avoid passing invalid props to Fragment
+                      asChild
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
-                      asChild // Keep asChild if Collapsible should render as tbody, but this is invalid HTML. Removing it.
                     >
-                      {/* Use React.Fragment because Collapsible (as div wrapper) needs a valid React child */}
-                      <React.Fragment key={report.staffMemberId}>
+                      <React.Fragment>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
                           <TableCell>
                             {/* CollapsibleTrigger now inside TableCell */}
                             <CollapsibleTrigger asChild>
-                               <Button variant="ghost" size="sm" className="w-9 p-0" data-state={openCollapsible === report.staffMemberId ? 'open' : 'closed'}>
+                               <Button variant="ghost" size="sm" className="w-9 p-0">
                                 {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                 <span className="sr-only">Toggle details for {report.staffMemberName}</span>
                               </Button>
@@ -349,7 +348,7 @@ export default function ReportingPage() {
                          {/* Content Row */}
                          <CollapsibleContent asChild>
                             <TableRow className="bg-muted/50 dark:bg-muted/30">
-                              <TableCell colSpan={4}> {/* Use colSpan */}
+                              <TableCell colSpan={4}>
                                 <div className="p-4">
                                   <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                                   <ul className="space-y-2">
@@ -413,9 +412,9 @@ export default function ReportingPage() {
                   criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' :
                   criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
                   criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
-                  criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment"' :
+                  criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment", "Psychological Test - Completed"' :
                   criterion.key === 'policeClearance' ? '"National Police Clearance", "Police Check", "NPC"' :
-                  criterion.key === 'youthSafety' ? '"Defence Youth Safety", "DYSAT"' : ''
+                  criterion.key === 'youthSafety' ? '"Defence Youth Safety", "DYSAT", "Youth Mental Health - Awareness - Completed", "Defence Youth Protection Awareness Course - Completed Online", "Defence Youth Safety Level 3 - Leader - Completed Online"' : ''
                  }
                  </span>
               </li>
@@ -430,3 +429,6 @@ export default function ReportingPage() {
   );
 
 }
+
+
+    
