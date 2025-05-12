@@ -59,7 +59,7 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
     name: 'Psychological Assessment',
     yearsToExpire: undefined, // Assume one-time
     identifier: (log: TrainingLog) =>
-       matchesKeywords(log.courseName, ['psychological assessment', 'psych assessment']) || matchesKeywords(log.qualificationAchieved, ['psychological assessment', 'psych assessment'])
+       matchesKeywords(log.courseName, ['psychological assessment', 'psych assessment', 'psychological test - completed']) || matchesKeywords(log.qualificationAchieved, ['psychological assessment', 'psych assessment', 'psychological test - completed'])
   },
   {
     key: 'policeClearance',
