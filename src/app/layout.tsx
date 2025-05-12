@@ -5,7 +5,8 @@ import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
 import AppLayout from '@/components/app-layout';
-import QueryProvider from '@/components/query-provider'; // Import the new QueryProvider
+import QueryProvider from '@/components/query-provider';
+import { AuthProvider } from '@/contexts/auth-context'; // Import AuthProvider
 
 const inter = Inter({
   subsets: ['latin'],
@@ -25,16 +26,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
-        <QueryProvider> {/* Wrap with QueryProvider */}
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="system"
-            enableSystem
-            disableTransitionOnChange
-          >
-            <AppLayout>{children}</AppLayout>
-            <Toaster />
-          </ThemeProvider>
+        <QueryProvider>
+          <AuthProvider> {/* Wrap with AuthProvider */}
+            <ThemeProvider
+              attribute="class"
+              defaultTheme="system"
+              enableSystem
+              disableTransitionOnChange
+            >
+              <AppLayout>{children}</AppLayout>
+              <Toaster />
+            </ThemeProvider>
+          </AuthProvider>
         </QueryProvider>
       </body>
     </html>

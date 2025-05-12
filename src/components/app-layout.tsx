@@ -10,16 +10,16 @@ import {
   ShieldCheck,
   Settings,
   Users,
-  ChevronDown,
-  Sun,
-  Moon,
+  LogIn, // Added LogIn icon
+  LogOut, // Added LogOut icon
   LayoutDashboard,
   Plane,
   FileSearch,
   ClipboardList, 
+  UserCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation"; // Added useRouter
 import {
   SidebarProvider,
   Sidebar,
@@ -39,11 +39,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import * as React from "react"; 
+import { useAuth } from "@/contexts/auth-context"; // Import useAuth
 
 interface NavItem {
   href: string;
@@ -85,33 +88,79 @@ function ThemeToggle() {
       onClick={() => setTheme(theme === "light" ? "dark" : "light")}
       aria-label="Toggle theme"
     >
-      <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-      <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+      {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" /> }
     </Button>
   );
 }
 
 function UserNav() {
-   const [mounted, setMounted] = React.useState(false);
-   React.useEffect(() => setMounted(true), []);
+  const { user, logout, loading } = useAuth();
+  const router = useRouter();
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
 
-   if (!mounted) {
-    return <div className="h-10 w-10 rounded-full bg-muted" />;
-   }
+  if (!mounted || loading) { // Show placeholder if not mounted or auth state is loading
+    return <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />;
+  }
+
+  if (!user) {
+    return (
+      <Button variant="outline" onClick={() => router.push('/auth')}>
+        <LogIn className="mr-2 h-4 w-4" />
+        Login
+      </Button>
+    );
+  }
+
+  const getInitials = (email?: string | null, displayName?: string | null) => {
+    if (displayName) {
+      const names = displayName.split(' ');
+      if (names.length > 1) {
+        return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase();
+      }
+      return displayName.substring(0, 2).toUpperCase();
+    }
+    if (email) {
+      return email.substring(0, 2).toUpperCase();
+    }
+    return "UR";
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-10 w-10 rounded-full">
           <Avatar className="h-10 w-10">
-            <AvatarImage src="https://picsum.photos/100/100" alt="User avatar" data-ai-hint="user avatar" />
-            <AvatarFallback>UR</AvatarFallback>
+            <AvatarImage src={user.photoURL || `https://avatar.vercel.sh/${user.email || user.uid}.png`} alt={user.displayName || user.email || "User avatar"} data-ai-hint="user avatar" />
+            <AvatarFallback>{getInitials(user.email, user.displayName)}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56" align="end" forceMount>
-        <DropdownMenuItem>Profile</DropdownMenuItem>
-        <DropdownMenuItem>Settings</DropdownMenuItem>
-        <DropdownMenuItem>Log out</DropdownMenuItem>
+        <DropdownMenuLabel className="font-normal">
+          <div className="flex flex-col space-y-1">
+            <p className="text-sm font-medium leading-none">
+              {user.displayName || "User"}
+            </p>
+            <p className="text-xs leading-none text-muted-foreground">
+              {user.email}
+            </p>
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled> 
+          <UserCircle className="mr-2 h-4 w-4" />
+          Profile
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled>
+          <Settings className="mr-2 h-4 w-4" />
+          Settings
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={logout}>
+          <LogOut className="mr-2 h-4 w-4" />
+          Log out
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -125,7 +174,8 @@ function NavMenuItemContent({
   isCollapsed: boolean;
 }) {
   const pathname = usePathname();
-  const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+  const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+
 
   return (
     <Link href={item.href} className="w-full">
@@ -146,7 +196,17 @@ function NavMenuItemContent({
 
 
 function AppLayoutInternal({ children }: { children: React.ReactNode }) {
-  const { isMobile, open: isSidebarOpen, setOpen: setSidebarOpen, openMobile, setOpenMobile, toggleSidebar } = useSidebar();
+  const { isMobile, open: isSidebarOpen } = useSidebar();
+  const { user, loading: authLoading } = useAuth();
+  const pathname = usePathname();
+
+  // Don't render sidebar if on the /auth page or if auth is loading
+  const hideSidebarAndHeader = pathname === '/auth';
+
+  if (hideSidebarAndHeader) {
+    return <main>{children}</main>;
+  }
+
   const isCollapsed = !isMobile && !isSidebarOpen;
 
 
@@ -227,13 +287,17 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = React.useState(false);
+  const pathname = usePathname();
 
   React.useEffect(() => {
     setIsMounted(true);
   }, []);
 
   if (!isMounted) {
-    // Render a static layout or null for SSR to avoid hydration mismatch until client-side takes over
+    // Basic SSR fallback, especially for the auth page
+    if (pathname === '/auth') {
+      return <main>{children}</main>;
+    }
     return (
       <div className="flex min-h-screen w-full">
         <div className="hidden md:flex md:flex-col md:w-[16rem] border-r bg-background shadow-sm">
@@ -249,6 +313,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     );
+  }
+  
+  // If on /auth page, render children directly without SidebarProvider to avoid context errors
+  if (pathname === '/auth') {
+    return <main>{children}</main>;
   }
 
   return (
