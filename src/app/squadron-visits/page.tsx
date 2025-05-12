@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, ClipboardList, Edit3, Info, ListChecks, Loader2, AlertTriangle } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, ClipboardList, Edit3, Info, ListChecks, Loader2, AlertTriangle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -62,6 +62,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
+import jsPDF from 'jspdf';
 
 
 const VISITS_QUERY_KEY = 'squadronVisits';
@@ -319,6 +320,104 @@ export default function SquadronVisitsPage() {
     return "All Actions Addressed";
   }
 
+  const handleExportVisitAsPdf = (visit: SquadronVisit) => {
+    const doc = new jsPDF();
+    const visitDateFormatted = format(visit.visitDate, "yyyy-MM-dd");
+    const filename = `squadron_visit_${visit.squadronName.replace(/\s+/g, '_')}_${visitDateFormatted}.pdf`;
+
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxLineWidth = pageWidth - (margin * 2);
+
+    const checkPageBreak = (neededHeight: number) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+            doc.addPage();
+            yPos = margin;
+        }
+    };
+    
+    const addSectionTitle = (title: string) => {
+        checkPageBreak(lineSpacing * 2);
+        doc.setFontSize(14);
+        doc.setFont(undefined, 'bold');
+        doc.text(title, margin, yPos);
+        yPos += lineSpacing * 1.5;
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'normal');
+    };
+
+    const addText = (text: string, isBold = false, customIndent = indent) => {
+      if (!text || text.trim() === "") return;
+      checkPageBreak(lineSpacing);
+      doc.setFont(undefined, isBold ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      doc.text(lines, margin + customIndent, yPos);
+      yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3);
+    };
+    
+    const addCheckboxItem = (label: string, checked?: boolean) => {
+        addText(`${label}: ${checked ? 'Yes' : 'No'}`, false, indent + 5);
+    };
+
+    // --- PDF Header ---
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Squadron Visit Report: ${visit.squadronName}`, margin, yPos);
+    yPos += sectionSpacing;
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    addText(`Visited on: ${format(visit.visitDate, "PPP")}`);
+    addText(`RXO: ${visit.rxoName}`);
+    addText(`Squadron CO: ${visit.coName}`);
+    yPos += sectionSpacing * 0.5;
+
+    // --- Discussion Sections ---
+    discussionSectionsConfig.forEach(section => {
+      addSectionTitle(section.title);
+      section.items.forEach(item => {
+        addCheckboxItem(item.label, visit[item.name as keyof SquadronVisit] as boolean | undefined);
+      });
+      if (section.textField && visit[section.textField.name as keyof SquadronVisit]) {
+        addText(`${section.textField.label}:`, true);
+        addText(visit[section.textField.name as keyof SquadronVisit] as string);
+      }
+      if (visit[section.notesField as keyof SquadronVisit]) {
+        addText("Additional Notes:", true);
+        addText(visit[section.notesField as keyof SquadronVisit] as string);
+      }
+      yPos += sectionSpacing * 0.5;
+    });
+
+    // --- General Comments ---
+    if (visit.generalComments) {
+      addSectionTitle("General Comments / Overall Notes");
+      addText(visit.generalComments);
+      yPos += sectionSpacing * 0.5;
+    }
+
+    // --- Action Items ---
+    if (visit.actionItems && visit.actionItems.length > 0) {
+      addSectionTitle("Action Items / Follow-Up");
+      visit.actionItems.forEach((item, index) => {
+        checkPageBreak(lineSpacing * 5); // Estimate space for an action item
+        addText(`Action Item ${index + 1}: ${item.description}`, true, 0); // No indent for item title
+        addText(`Responsible: ${item.responsible}`);
+        addText(`Due Date: ${item.dueDate ? format(item.dueDate, "PPP") : "N/A"}`);
+        addText(`Status: ${item.status}`);
+        yPos += lineSpacing * 0.5; // Extra space between items
+      });
+    } else {
+       addSectionTitle("Action Items / Follow-Up");
+       addText("No action items recorded for this visit.");
+    }
+
+    doc.save(filename);
+  };
+
 
   return (
     <div className="space-y-6">
@@ -400,6 +499,10 @@ export default function SquadronVisitsPage() {
                           <DropdownMenuItem onClick={() => handleEdit(visit)} disabled={updateVisitMutation.isPending || deleteVisitMutation.isPending}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportVisitAsPdf(visit)} disabled={updateVisitMutation.isPending || deleteVisitMutation.isPending}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Export as PDF
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -601,8 +704,8 @@ export default function SquadronVisitsPage() {
               View detailed visit reports and edit existing records. (Implemented)
             </li>
             <li className="flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
-              Export visit reports to PDF/Word.
+              <Download className="h-4 w-4 mr-3 text-primary/70 flex-shrink-0" />
+              Export visit reports to PDF. (Implemented)
             </li>
              <li className="flex items-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-3 text-primary/70 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
@@ -614,3 +717,4 @@ export default function SquadronVisitsPage() {
     </div>
   );
 }
+
