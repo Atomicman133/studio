@@ -20,6 +20,8 @@ import { useStaff } from "@/hooks/useStaffData";
 import { useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+import { useAuth } from "@/contexts/auth-context"; // Added for auth check
+import { useRouter } from "next/navigation"; // Added for redirection
 
 // --- Fetch Training Logs ---
 async function fetchTrainingLogs(): Promise<TrainingLog[]> {
@@ -172,6 +174,9 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 export default function DashboardPage() {
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+
   const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
     queryKey: ['trainingLogsDashboard'],
@@ -189,6 +194,12 @@ export default function DashboardPage() {
   const [complianceData, setComplianceData] = React.useState<{ compliant: number; nonCompliant: number } | null>(null);
   const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
   const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
+
+  React.useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace("/auth");
+    }
+  }, [user, authLoading, router]);
 
   const processedReports = React.useMemo(() => {
     if (staffList && staffList.length > 0 && trainingLogs) {
@@ -314,6 +325,15 @@ export default function DashboardPage() {
   const isLoadingAny = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits;
   const hasError = errorStaff || errorLogs || errorAudits || errorVisits;
 
+  if (authLoading || (!authLoading && !user)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
+        <p className="text-muted-foreground">Loading authentication...</p>
+      </div>
+    );
+  }
+  
   if (isLoadingAny) {
       return (
           <div className="flex flex-col items-center justify-center min-h-[60vh]">
