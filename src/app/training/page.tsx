@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -443,40 +444,6 @@ export default function TrainingPage() {
     setViewingLog(null);
   };
 
-  function parseMemberRankName(memberRankNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
-    let rank: typeof RANKS[number] | null = null;
-    let namePart = memberRankNameInput.trim();
-
-    const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
-
-    for (const r of sortedRanksForParsing) {
-      if (namePart.toUpperCase().startsWith(r + " ")) {
-        rank = r as typeof RANKS[number];
-        namePart = namePart.substring(r.length).trim();
-        break;
-      }
-    }
-
-    if (!namePart) return { rank, firstName: null, lastName: null };
-
-    const parts = namePart.split(' ').filter(p => p);
-    if (parts.length >= 2) {
-      const lastName = parts.pop()!; // Last part is lastName
-      const firstName = parts.join(' '); // Remaining parts are firstName (could include middle names)
-      if (firstName && lastName) {
-        return { rank, firstName, lastName };
-      }
-    }
-
-    // Fallback if parsing fails
-    if (parts.length === 1 && parts[0]) {
-      return { rank, firstName: null, lastName: parts[0] }; // Assume single remaining part is lastName
-    }
-
-    return { rank, firstName: null, lastName: namePart }; // If still unparsed, put all in lastName
-  }
-
-
   const parseDate = (dateString: string): Date | null => {
     // Add 'dd/MM/yy' to the list of formats to try
     const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd", "dd/MM/yy"];
@@ -489,6 +456,54 @@ export default function TrainingPage() {
 
     return null;
   };
+
+  // Helper function to parse the new "Surname" CSV field
+  // Format: "LastName FirstName Rank MemberUID"
+  function parseCompositeSurnameField(surnameField: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
+    const parts = surnameField.trim().split(/\s+/);
+    if (parts.length < 3) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Need at least Last, First, Rank, UID
+
+    const memberUID = parts.pop() || null;
+    const rankStr = parts.pop() || null;
+    
+    let rank: typeof RANKS[number] | null = null;
+    if (rankStr && (RANKS as readonly string[]).includes(rankStr)) {
+        rank = rankStr as typeof RANKS[number];
+    } else {
+        // Attempt to match if rank has spaces (e.g. "FLTLT (AAFC)")
+        let potentialRank = rankStr;
+        for (let i = parts.length -1; i >=0; i--) {
+            const combined = `${parts[i]} ${potentialRank}`;
+            if ((RANKS as readonly string[]).includes(combined)) {
+                rank = combined as typeof RANKS[number];
+                // Adjust parts array by removing consumed rank parts
+                parts.splice(i, parts.length - i); // remove from i to end
+                break;
+            }
+            potentialRank = combined; // for next iteration if rank not yet found
+             if (i === 0 && !rank) { // If we checked all parts and no multi-word rank matched
+                // Fallback to single word rank check if rankStr was valid but not multi-word
+                if (rankStr && (RANKS as readonly string[]).includes(rankStr)) {
+                    rank = rankStr as typeof RANKS[number];
+                } else {
+                     // If still no rank, it's an error for this specific parser
+                    return { lastName: null, firstName: null, rank: null, memberUID: null };
+                }
+            }
+        }
+    }
+
+
+    if (!rank || !memberUID) return { lastName: null, firstName: null, rank: null, memberUID: null };
+
+
+    const lastName = parts.shift() || null;
+    const firstName = parts.join(" ") || null;
+
+    if (!lastName || !firstName) return { lastName: null, firstName: null, rank: rank, memberUID: memberUID };
+    
+    return { lastName, firstName, rank, memberUID };
+  }
 
 
   const handleAccomplishmentCsvImport = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -511,166 +526,176 @@ export default function TrainingPage() {
 
         const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
         const errors: string[] = [];
-        const csvLines = text.split(/\r\n|\n/);
+        const csvLines = text.split(/\r\n|\n/).filter(line => line.trim());
 
         if (csvLines.length < 2) {
           errors.push("CSV must have a header and at least one data row.");
         } else {
           const headerLine = csvLines[0].trim();
           const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-          const expectedHeader = ["MemberUID", "Member Rank - Name", "EffectiveDate", "Accomplishment"];
+          
+          // Expected headers for the new format
+          const expectedCsvHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
+          const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; // Headers needed for actual data extraction
 
-          const allHeadersPresent = expectedHeader.every(eh => header.includes(eh));
+          const headerIndices: Record<string, number> = {};
+          let allRequiredHeadersPresent = true;
 
-          if (!allHeadersPresent) {
-              errors.push(`Invalid CSV header. Expected columns (any order): ${expectedHeader.join(', ')}. Got: ${header.join(',')}`);
-          } else {
-              const headerIndices: Record<string, number> = {};
-              expectedHeader.forEach(eh => {
-                  headerIndices[eh] = header.indexOf(eh);
-                  if (headerIndices[eh] === -1) {
-                    errors.push(`Critical Error: Missing expected header column: "${eh}" despite passing initial check.`);
-                  }
+          expectedCsvHeaders.forEach(eh => { // Check all expected headers
+            const index = header.indexOf(eh);
+            if (index !== -1) {
+              headerIndices[eh] = index;
+            } else if (requiredDataHeaders.includes(eh)) { // Only error if a *required for data extraction* header is missing
+              errors.push(`Missing required CSV header: "${eh}".`);
+              allRequiredHeadersPresent = false;
+            }
+            // Optional headers (like Unit_1, EndDate, etc.) can be missing without erroring here
+          });
+
+
+          if (!allRequiredHeadersPresent) {
+               toast({
+                  variant: "destructive",
+                  title: "CSV Import Failed: Header Mismatch",
+                  description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
+                  duration: 15000,
               });
+              if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
+              setIsImportingAccomplishments(false); // Reset loading state
+              return;
+          }
+          
+          const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
+          let preliminaryParsingOk = true;
 
-              if (!allHeadersPresent) { // Stop if headers are fundamentally wrong
-                   toast({
-                      variant: "destructive",
-                      title: "CSV Import Failed: Header Mismatch",
-                      description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
-                      duration: 15000,
-                  });
-                  if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
-                  setIsImportingAccomplishments(false); // Reset loading state
-                  return;
+          for (let i = 1; i < csvLines.length; i++) {
+              let line = csvLines[i].trim(); 
+              if (!line) continue;
+
+              const values = [];
+              let currentVal = '';
+              let inQuotes = false;
+              for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                  let char = line[charIndex];
+                  if (char === '"') {
+                      if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
+                          currentVal += '"';
+                          charIndex++; 
+                      } else {
+                          inQuotes = !inQuotes; 
+                      }
+                  } else if (char === ',' && !inQuotes) {
+                      values.push(currentVal.trim());
+                      currentVal = '';
+                  } else {
+                      currentVal += char;
+                  }
+              }
+              values.push(currentVal.trim()); 
+
+
+              if (values.length !== header.length) {
+                  errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line.substring(0,100)}..."`);
+                  preliminaryParsingOk = false;
+                  continue;
               }
 
-              const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
-              let preliminaryParsingOk = true;
-
-              for (let i = 1; i < csvLines.length; i++) {
-                  let line = csvLines[i].trim(); // Use let for line modification
-                  if (!line) continue;
-
-                  // Handle commas within quoted fields (basic CSV parsing)
-                  const values = [];
-                  let currentVal = '';
-                  let inQuotes = false;
-                  for (let charIndex = 0; charIndex < line.length; charIndex++) {
-                      let char = line[charIndex];
-                      if (char === '"') {
-                          // Check for escaped double quote ""
-                          if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
-                              currentVal += '"';
-                              charIndex++; // Skip the next quote
-                          } else {
-                              inQuotes = !inQuotes; // Toggle quote state
-                          }
-                      } else if (char === ',' && !inQuotes) {
-                          values.push(currentVal.trim());
-                          currentVal = '';
-                      } else {
-                          currentVal += char;
-                      }
-                  }
-                  values.push(currentVal.trim()); // Add the last value
-
-
-                  if (values.length !== header.length) {
-                      errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line}"`);
-                      preliminaryParsingOk = false;
-                      continue;
-                  }
-
-                  const csvRowData: Record<string, string> = {};
-                   expectedHeader.forEach(eh => {
-                       // Remove surrounding quotes only if they exist as a pair
-                       let val = values[headerIndices[eh]];
+              const csvRowData: Record<string, string> = {};
+               expectedCsvHeaders.forEach(eh => {
+                   const index = headerIndices[eh];
+                   if (index !== undefined && index < values.length) {
+                       let val = values[index];
                        if (val && val.startsWith('"') && val.endsWith('"')) {
                            val = val.substring(1, val.length - 1);
                        }
-                       // Replace escaped double quotes "" with a single double quote "
                        csvRowData[eh] = val.replace(/""/g, '"');
-                  });
+                   } else {
+                       // If an optional header is missing, csvRowData[eh] will be undefined
+                       csvRowData[eh] = ""; // Or handle as needed, maybe an explicit undefined
+                   }
+              });
 
-                  const serviceNumber = csvRowData["MemberUID"];
-
-                  if (!serviceNumber) {
-                      errors.push(`Row ${i + 1}: Missing "MemberUID".`);
-                      preliminaryParsingOk = false;
-                      continue;
-                  }
-
-                  // Find staff member using only MemberUID
-                  const matchedStaff = staffList.find(sm => sm.serviceNumber === serviceNumber);
-
-                  if (!matchedStaff) {
-                      errors.push(`Row ${i + 1}: Staff member with MemberUID "${serviceNumber}" not found. Please ensure a staff profile exists with this Service Number in Staff Management.`);
-                      preliminaryParsingOk = false;
-                  } else {
-                      // Optional: Validate Rank/Name from CSV against profile? For now, we trust the profile.
-                      const parsedRankName = parseMemberRankName(csvRowData["Member Rank - Name"]);
-                      if (!parsedRankName.rank || !parsedRankName.firstName || !parsedRankName.lastName) {
-                         console.warn(`Row ${i + 1}: Could not fully parse Rank/Name from CSV "${csvRowData["Member Rank - Name"]}", but proceeding with UID match.`);
-                         // Not treating this as a hard error since UID matched
-                      }
-
-                      membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1 });
-                  }
+              // Filter by StatusName
+              const statusName = csvRowData["StatusName"] || "";
+              if (statusName.toLowerCase().includes("historical")) {
+                  console.log(`Row ${i + 1}: Skipping due to 'Historical' status.`);
+                  continue; 
+              }
+              
+              const surnameField = csvRowData["Surname"];
+              if (!surnameField) {
+                  errors.push(`Row ${i + 1}: Missing "Surname" field (containing Name, Rank, UID).`);
+                  preliminaryParsingOk = false;
+                  continue;
               }
 
-              if (!preliminaryParsingOk) {
-                  toast({
-                      variant: "destructive",
-                      title: "CSV Import Failed: Data Issues",
-                      description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
-                      duration: 15000,
-                  });
-                  if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
-                  setIsImportingAccomplishments(false); // Reset loading state
+              const parsedNameRankUid = parseCompositeSurnameField(surnameField);
+
+              if (!parsedNameRankUid.memberUID || !parsedNameRankUid.rank || !parsedNameRankUid.firstName || !parsedNameRankUid.lastName) {
+                  errors.push(`Row ${i + 1}: Could not parse "Surname" field: "${surnameField}". Expected "LastName FirstName Rank MemberUID". Make sure rank is valid.`);
+                  preliminaryParsingOk = false;
+                  continue;
+              }
+
+              const matchedStaff = staffList.find(sm => sm.serviceNumber === parsedNameRankUid.memberUID);
+
+              if (!matchedStaff) {
+                  errors.push(`Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`);
+                  preliminaryParsingOk = false;
+              } else {
+                  membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1 });
+              }
+          }
+
+          if (!preliminaryParsingOk) {
+              toast({
+                  variant: "destructive",
+                  title: "CSV Import Failed: Data Issues",
+                  description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
+                  duration: 15000,
+              });
+              if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
+              setIsImportingAccomplishments(false); 
+              return;
+          }
+
+          membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
+              const accomplishmentDetails = csvRowData["Details"];
+              const effectiveDateStr = csvRowData["EffectiveDate"];
+              const parsedSurnameData = parseCompositeSurnameField(csvRowData["Surname"]); // Re-parse to ensure we have it
+
+              if (!accomplishmentDetails) {
+                  errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Details" (Accomplishment).`);
+                  return;
+              }
+              if (!effectiveDateStr) {
+                  errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "EffectiveDate".`);
+                  return;
+              }
+              
+              const completionDate = parseDate(effectiveDateStr);
+              if (!completionDate) {
+                  errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.`);
                   return;
               }
 
-              membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
-                  const accomplishment = csvRowData["Accomplishment"];
-                  const effectiveDateStr = csvRowData["EffectiveDate"];
-
-                  if (!accomplishment) {
-                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Accomplishment".`);
-                      return;
-                  }
-                  if (!effectiveDateStr) {
-                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "EffectiveDate".`);
-                      return;
-                  }
-
-                  const completionDate = parseDate(effectiveDateStr);
-                  if (!completionDate) {
-                      errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.`);
-                      return;
-                  }
-
-                  // Create the log object, omitting certificate fields as they are not in the CSV
-                  const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
-                    rank: staffMember.rank,
-                    staffName: `${staffMember.lastName}, ${staffMember.firstName}`,
-                    squadron: staffMember.squadron || "N/A",
-                    currentRole: staffMember.role,
-                    courseName: accomplishment,
-                    completionDate: completionDate,
-                    qualificationAchieved: accomplishment, // Assuming accomplishment is the qualification
-                    instructorQualification: "", // Default empty
-                    achievementDetails: "", // Default empty
-                  };
-
-                  newLogsToAdd.push(newLog as Omit<TrainingLog, 'id'>); // Cast needed as we omitted fields
-              });
-          }
+              const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
+                rank: parsedSurnameData.rank!, // Known to be valid from earlier check
+                staffName: `${parsedSurnameData.lastName}, ${parsedSurnameData.firstName}`,
+                squadron: staffMember.squadron || "N/A", // Use squadron from matched staff profile
+                currentRole: staffMember.role || "N/A",  // Use role from matched staff profile
+                courseName: accomplishmentDetails,
+                completionDate: completionDate,
+                qualificationAchieved: accomplishmentDetails, // Using Details as qualification
+                instructorQualification: "", 
+                achievementDetails: "", 
+              };
+              newLogsToAdd.push(newLog as Omit<TrainingLog, 'id'>);
+          });
         }
 
         let importedCount = 0;
-        if (newLogsToAdd.length > 0 && errors.length === 0) { // Only proceed if no parsing errors
-          // Add logs one by one using mutation
+        if (newLogsToAdd.length > 0 && errors.length === 0) { 
           for (const log of newLogsToAdd) {
              try {
                  await addLogMutation.mutateAsync(log);
@@ -683,8 +708,7 @@ export default function TrainingPage() {
               toast({ title: "Import Processing Complete", description: `${importedCount} accomplishment(s) added.` });
            }
         }
-
-        // Consolidated error display
+        
         if (errors.length > 0) {
           const title = importedCount > 0 ? "CSV Import Partially Successful" : "CSV Import Failed";
           const variant = importedCount > 0 ? "default" : "destructive";
@@ -705,7 +729,11 @@ export default function TrainingPage() {
               ),
               duration: 15000,
           });
+        } else if (csvLines.length <= 1 && importedCount === 0){ // No data rows and no imports
+             toast({ title: "Import Information", description: "CSV file has no data rows to import." });
         }
+
+
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
         toast({ variant: "destructive", title: "Import Error", description: `An unexpected error occurred: ${error.message}` });
@@ -811,7 +839,7 @@ export default function TrainingPage() {
                     <CardContent className="pt-4">
                       <ScrollArea className="h-[400px] w-full border rounded-md">
                         <Table>
-                          <TableHeader>
+                          <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                             <TableRow>
                               <TableHead>Course/Training</TableHead>
                               <TableHead className="hidden md:table-cell">Role at Training</TableHead>
@@ -897,17 +925,20 @@ export default function TrainingPage() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
-          To bulk import training accomplishments, upload a CSV file with the following columns (header row required, order matters):
+          To bulk import training accomplishments, upload a CSV file. The header row is required.
+          The system expects the following columns (order matters for mapping, but all listed headers should be present):
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
-            <li><code>MemberUID</code> (Text, Required. This is the Staff Member&apos;s Service Number, e.g., &quot;8001234&quot;)</li>
-            <li><code>Member Rank - Name</code> (Text, Required. Format: &quot;RANK FirstName LastName&quot; e.g., &quot;FLTLT(AAFC) Jane Doe&quot;. RANK must be one of: {RANKS.join(", ")}.)</li>
-            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY. This will be the completion date of the training.)</li>
-            <li><code>Accomplishment</code> (Text, Required. This will be used as the Course Name and Qualification Achieved for the training log.)</li>
+            <li><code>Unit_1</code> (Text, Ignored)</li>
+            <li><code>Surname</code> (Text, Required. Format: "LastName FirstName Rank MemberUID" e.g., "Doe John FLTLT(AAFC) 8001234". Rank must be one of: {RANKS.join(", ")}. MemberUID is the Service Number.)</li>
+            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD/MM/YY. This will be the completion date.)</li>
+            <li><code>EndDate</code> (Date, Ignored)</li>
+            <li><code>ChangeType</code> (Text, Ignored)</li>
+            <li><code>StatusName</code> (Text, Required. Records containing "Historical" in this field will be skipped.)</li>
+            <li><code>Details</code> (Text, Required. This will be used as the Course Name and Qualification Achieved.)</li>
+            <li><code>Comment</code> (Text, Ignored)</li>
           </ul>
           <p className="mt-2 text-xs">
-            <strong>Important:</strong> The system uses the <code>MemberUID</code> to find an existing staff member. If a staff member with the provided <code>MemberUID</code> is found, their existing profile details (Rank, Name, Squadron, Role) will be used for the new training log.
-            The <code>Member Rank - Name</code> column must still be correctly formatted as specified, as it is validated.
-            If a staff member is not found via <code>MemberUID</code>, or if CSV data is malformed for a row, that row will be skipped, and an error reported.
+            <strong>Important:</strong> The system uses the `MemberUID` (extracted from the "Surname" column) to find an existing staff member. If a staff member with the provided `MemberUID` is not found, that row will be skipped. The Rank, FirstName, and LastName from the "Surname" column are used to populate the training log.
           </p>
         </AlertDescription>
       </Alert>
@@ -1085,4 +1116,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-
