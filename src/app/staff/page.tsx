@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp } from "lucide-react"; // Added ChevronDown, ChevronUp
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -454,7 +454,7 @@ export default function StaffPage() {
             lastName: lastName,
             email: email, 
             phone: phoneValue,
-            role: roleToSave || "Staff",
+            role: roleToSave,
             squadron: squadron,
             address: address,
             joinDate: existingStaffMember?.joinDate || null, 
@@ -652,7 +652,7 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="max-h-[400px] w-full"> 
+                  <ScrollArea className="max-h-[300px] w-full"> 
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -974,3 +974,4 @@ export default function StaffPage() {
     </div>
   );
 }
+
