@@ -165,35 +165,68 @@ function downloadTextFile(filename: string, text: string) {
   document.body.removeChild(element);
 }
 
-// Helper function to parse a single CSV line, handling quoted fields
-const parseCsvLine = (line: string): string[] => {
-    const fields: string[] = [];
+// Helper function to parse the entire CSV text into an array of string arrays (rows and fields)
+const robustCsvParser = (csvText: string): string[][] => {
+    const rows: string[][] = [];
+    let currentRow: string[] = [];
     let currentField = "";
     let inQuotedField = false;
+    const normalizedText = csvText.replace(/\r\n|\r/g, '\n'); // Normalize line endings
 
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
+    for (let i = 0; i < normalizedText.length; i++) {
+        const char = normalizedText[i];
 
-        if (char === '"') {
-            if (inQuotedField && i + 1 < line.length && line[i + 1] === '"') {
-                // This is an escaped double quote (e.g., "" inside a field)
-                currentField += '"';
-                i++; // Skip the second quote of the pair
+        if (inQuotedField) {
+            if (char === '"') {
+                if (i + 1 < normalizedText.length && normalizedText[i + 1] === '"') {
+                    // Escaped double quote
+                    currentField += '"';
+                    i++; // Skip next quote
+                } else {
+                    // End of quoted field
+                    inQuotedField = false;
+                }
             } else {
-                // This is an opening or closing quote
-                inQuotedField = !inQuotedField;
+                currentField += char; // Includes newlines if they are within quotes
             }
-        } else if (char === ',' && !inQuotedField) {
-            // This is a delimiter, and we are not inside a quoted field
-            fields.push(currentField.trim());
-            currentField = "";
-        } else {
-            // Regular character, part of the current field
-            currentField += char;
+        } else { // Not in quoted field
+            if (char === '"') {
+                // Start of a new quoted field. If currentField is not empty,
+                // it implies an unquoted quote, which is often a CSV format error.
+                // For this parser, we'll assume quotes primarily start fields or escape quotes.
+                // If currentField has content, we treat the quote as part of an unquoted field.
+                if (currentField === "") { // Only treat as start of quote if field is empty
+                    inQuotedField = true;
+                } else {
+                    currentField += char; // Treat as literal char if field already has content
+                }
+            } else if (char === ',') {
+                currentRow.push(currentField.trim());
+                currentField = "";
+            } else if (char === '\n') {
+                currentRow.push(currentField.trim());
+                currentField = "";
+                // Add row if it's not empty or if it's the header (first row being processed)
+                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f) : true) ) {
+                    rows.push([...currentRow]);
+                }
+                currentRow = [];
+            } else {
+                currentField += char;
+            }
         }
     }
-    fields.push(currentField.trim()); // Add the last field, trimmed
-    return fields;
+
+    // Add the last field of the last row
+    if (currentField || currentRow.length > 0) { // Add if there's a pending field or if row has started
+        currentRow.push(currentField.trim());
+    }
+    // Add the last row if it has content
+    if (currentRow.length > 0 && currentRow.some(f => f)) {
+        rows.push([...currentRow]);
+    }
+
+    return rows;
 };
 
 
@@ -489,59 +522,57 @@ export default function TrainingPage() {
     return null;
   };
 
-  // Helper function to parse the new "Surname" CSV field
+  // Helper function to parse the "Surname" CSV field
   // Format: "LastName FirstName Rank MemberUID"
   function parseCompositeSurnameField(surnameField: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
-    const parts = surnameField.trim().split(/\s+/);
-    if (parts.length < 4) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Need at least Last, First, Rank, UID
+      const trimmedField = surnameField.trim();
+      // Regex to capture: (LastName) (FirstName potentially with spaces) (RANK) (MemberUID)
+      // This regex is complex and might need refinement based on actual data variations.
+      // It assumes rank is a single word from RANKS and MemberUID is digits at the end.
+      // A simpler approach if Rank is always a single word:
+      const parts = trimmedField.split(/\s+/);
+      if (parts.length < 3) return { lastName: null, firstName: null, rank: null, memberUID: null };
 
-    const memberUID = parts.pop() || null;
-    let rankStr = parts.pop() || null;
-    
-    let rank: typeof RANKS[number] | null = null;
-    
-    // Attempt to match rank (potentially multi-word)
-    const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length); // Sort by length to match longer ranks first
-    let potentialRankCandidate = "";
-    let rankFound = false;
+      const memberUID = parts[parts.length - 1];
+      const rankCandidate = parts[parts.length - 2].toUpperCase(); // Assuming rank is just before UID
 
-    // Iterate backwards from the end of parts (before UID and initial rankStr were popped)
-    // to build up potential multi-word ranks
-    let tempParts = surnameField.trim().split(/\s+/);
-    tempParts.pop(); // Remove UID for this check
-    
-    for (let j = tempParts.length -1; j >=0; j--) {
-        potentialRankCandidate = tempParts.slice(j).join(" ");
-        if ((RANKS as readonly string[]).includes(potentialRankCandidate)) {
-            rank = potentialRankCandidate as typeof RANKS[number];
-            rankStr = potentialRankCandidate; // Store the matched rank string
-            // Remove the parts that formed the rank from tempParts for name extraction
-            parts.splice(j, tempParts.length - j);
-            rankFound = true;
-            break;
-        }
-    }
-     if (!rankFound && rankStr && (RANKS as readonly string[]).includes(rankStr)) { // Fallback to single word rankStr if no multi-word found
-        rank = rankStr as typeof RANKS[number];
-     }
-
-
-    if (!rank) {
-         // If rank is still not found, it's an invalid format or unknown rank
-         return { lastName: null, firstName: null, rank: null, memberUID: null };
-    }
+      let rank: typeof RANKS[number] | null = null;
+      if ((RANKS as readonly string[]).includes(rankCandidate as typeof RANKS[number])) {
+          rank = rankCandidate as typeof RANKS[number];
+      } else {
+          // Try to match multi-word ranks if rankCandidate was part of a name
+          // This part needs to be robust if ranks can be like "SQNLDR(AAFC)"
+          let potentialRank = "";
+          for (let i = parts.length - 2; i >=0; i--) {
+              potentialRank = parts.slice(i, parts.length -1).join(" ").toUpperCase();
+              if ((RANKS as readonly string[]).includes(potentialRank as typeof RANKS[number])) {
+                  rank = potentialRank as typeof RANKS[number];
+                  // Adjust parts to correctly isolate first and last names
+                  const nameParts = parts.slice(0, i);
+                  if (nameParts.length > 0) {
+                    const lastName = nameParts.shift() || null;
+                    const firstName = nameParts.join(" ") || null;
+                    if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
+                        return { lastName: null, firstName: null, rank: null, memberUID: null };
+                    }
+                    return { lastName, firstName, rank, memberUID };
+                  }
+                  break; 
+              }
+          }
+          if (!rank) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Rank not found
+      }
 
 
-    if (!memberUID) return { lastName: null, firstName: null, rank: rank, memberUID: null };
+      const lastName = parts[0];
+      const firstName = parts.slice(1, parts.length - 2).join(" ");
 
-    // The remaining parts should be LastName then FirstName(s)
-    // Assuming the first part of `parts` is LastName, and the rest is FirstName
-    const lastName = parts.shift() || null;
-    const firstName = parts.join(" ") || null;
 
-    if (!lastName || !firstName) return { lastName: null, firstName: null, rank: rank, memberUID: memberUID };
-    
-    return { lastName, firstName, rank, memberUID };
+      if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
+          return { lastName: null, firstName: null, rank: null, memberUID: null };
+      }
+      
+      return { lastName, firstName, rank, memberUID };
   }
 
 
@@ -565,13 +596,13 @@ export default function TrainingPage() {
 
         const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
         const errors: string[] = [];
-        const csvLines = text.split(/\r\n|\n|\r/).filter(line => line.trim()); // Added \r for Mac line endings
+        
+        const allRows = robustCsvParser(text);
 
-        if (csvLines.length < 2) {
+        if (allRows.length < 2) {
           errors.push("CSV must have a header and at least one data row.");
         } else {
-          const headerLine = csvLines[0].trim();
-          const header = parseCsvLine(headerLine);
+          const header = allRows[0].map(h => h.trim());
           
           const expectedCsvHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
           const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; 
@@ -605,15 +636,12 @@ export default function TrainingPage() {
           const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
           let preliminaryParsingOk = true;
 
-          for (let i = 1; i < csvLines.length; i++) {
-              const line = csvLines[i].trim(); 
-              if (!line) continue;
-
-              const values = parseCsvLine(line);
-
+          for (let i = 1; i < allRows.length; i++) { // Start from 1 to skip header
+              const values = allRows[i];
+              if (values.every(val => val.trim() === "")) continue; // Skip genuinely empty rows
 
               if (values.length !== header.length) {
-                  errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${line.substring(0,100)}..."`);
+                  errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${allRows[i].join(",").substring(0,100)}..."`);
                   preliminaryParsingOk = false;
                   continue;
               }
@@ -622,13 +650,7 @@ export default function TrainingPage() {
                expectedCsvHeaders.forEach(eh => {
                    const index = headerIndices[eh];
                    if (index !== undefined && index < values.length) {
-                       let val = values[index];
-                       // No need to strip quotes here if parseCsvLine handles it, but keeping for safety if parseCsvLine changes
-                       // if (val && val.startsWith('"') && val.endsWith('"')) {
-                       //     val = val.substring(1, val.length - 1);
-                       // }
-                       // csvRowData[eh] = val.replace(/""/g, '"');
-                       csvRowData[eh] = val; // parseCsvLine should already handle escaped quotes and trimming
+                       csvRowData[eh] = values[index]; 
                    } else {
                        csvRowData[eh] = ""; 
                    }
@@ -747,7 +769,7 @@ export default function TrainingPage() {
               ),
               duration: 15000,
           });
-        } else if (csvLines.length <= 1 && importedCount === 0){ 
+        } else if (allRows.length <= 1 && importedCount === 0){ 
              toast({ title: "Import Information", description: "CSV file has no data rows to import." });
         }
 
@@ -855,7 +877,7 @@ export default function TrainingPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <ScrollArea className="h-[400px] w-full border rounded-md">
+                      <ScrollArea className="h-[200px] w-full border rounded-md">
                         <Table>
                           <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                             <TableRow>
@@ -872,7 +894,7 @@ export default function TrainingPage() {
                               <TableRow key={log.id}>
                                 <TableCell className="font-medium">{log.courseName}</TableCell>
                                 <TableCell className="hidden md:table-cell">{log.currentRole}</TableCell>
-                                <TableCell>{format(log.completionDate, "PP")}</TableCell>
+                                <TableCell>{log.completionDate && isValidDate(new Date(log.completionDate)) ? format(new Date(log.completionDate), "PP") : "Invalid Date"}</TableCell>
                                 <TableCell className="hidden lg:table-cell truncate max-w-xs">{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
                                  <TableCell className="hidden xl:table-cell">
                                   {log.certificateFileName && log.certificateDataUrl ? (
@@ -943,7 +965,8 @@ export default function TrainingPage() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
-          To bulk import training accomplishments, upload a CSV file. The header row is required and must exactly match the following order and names:
+          To bulk import training accomplishments, upload a CSV file. The header row is required.
+          The system expects the following headers (order matters for this list, but the parser will find them by name):
           <code className="block whitespace-pre-wrap bg-muted p-2 rounded-md my-2 text-xs">Unit_1,Surname,EffectiveDate,EndDate,ChangeType,StatusName,Details,Comment</code>
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>Unit_1</code>: (Text) Ignored by the system.</li>
@@ -959,7 +982,7 @@ export default function TrainingPage() {
             <li><code>Comment</code>: (Text) Ignored by the system.</li>
           </ul>
           <p className="mt-2 text-xs">
-            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing accomplishments. The CSV file must be well-formed (correctly quoted fields if they contain commas, etc.).
+            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing accomplishments. The CSV file must be well-formed (fields containing commas or newlines must be enclosed in double quotes, and double quotes within fields must be escaped as `""`).
           </p>
         </AlertDescription>
       </Alert>
@@ -998,7 +1021,7 @@ export default function TrainingPage() {
                 <DialogHeader>
                     <DialogTitle>{viewingLog.courseName}</DialogTitle>
                     <DialogDescription>
-                        Training for {viewingLog.rank} {viewingLog.staffName}, completed on {format(viewingLog.completionDate, "PPP")}
+                        Training for {viewingLog.rank} {viewingLog.staffName}, completed on {viewingLog.completionDate && isValidDate(new Date(viewingLog.completionDate)) ? format(new Date(viewingLog.completionDate), "PPP") : "Invalid Date"}
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
@@ -1137,3 +1160,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+
