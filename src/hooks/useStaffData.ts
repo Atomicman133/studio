@@ -15,15 +15,22 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { StaffMember } from '@/app/staff/staff-schema';
-import { staffMemberSchema, RANKS, STAFF_QUERY_KEY } from '@/app/staff/staff-schema'; // Import STAFF_QUERY_KEY
+import { staffMemberSchema, RANKS, STAFF_QUERY_KEY } from '@/app/staff/staff-schema';
 import { useAuth } from '@/contexts/auth-context';
 
 const convertTimestamps = (data: any): StaffMember => {
+  // Ensure joinDate is handled correctly: null remains null, undefined becomes null, valid dates are parsed.
+  let joinDateToParse = data.joinDate;
+  if (data.joinDate instanceof Timestamp) {
+    joinDateToParse = data.joinDate.toDate();
+  } else if (data.joinDate === undefined) {
+    joinDateToParse = null; // Or handle as an error if joinDate is strictly required by some logic not visible here
+  }
+  // For other date fields, if any, apply similar logic.
+
   const validatedData = staffMemberSchema.parse({
     ...data,
-    joinDate: data.joinDate instanceof Timestamp
-      ? data.joinDate.toDate()
-      : (data.joinDate === null ? null : data.joinDate), // Keep null as null, handle undefined if necessary
+    joinDate: joinDateToParse,
   });
   return validatedData;
 };
@@ -47,9 +54,8 @@ async function fetchStaff(): Promise<StaffMember[]> {
         const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
         const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
-        // Sort by rank index (lower index = higher rank)
         if (effectiveRankAIndex !== effectiveRankBIndex) {
-             return effectiveRankAIndex - effectiveRankBIndex; // Lower index (higher rank) first
+             return effectiveRankAIndex - effectiveRankBIndex;
         }
 
         const lastNameCompare = a.lastName.localeCompare(b.lastName);
@@ -61,20 +67,23 @@ async function fetchStaff(): Promise<StaffMember[]> {
 }
 
 export function useStaff() {
-  const { user, loading: authLoading } = useAuth(); // Get auth state
+  const { user, loading: authLoading } = useAuth();
   return useQuery<StaffMember[], Error>({
     queryKey: [STAFF_QUERY_KEY],
     queryFn: fetchStaff,
-    enabled: !!user && !authLoading && !!user.email && user.email.endsWith('@airforcecadets.gov.au'), // Only enable query when user is authenticated and auth is not loading
+    enabled: !!user && !authLoading && !!user.email && user.email.endsWith('@airforcecadets.gov.au'),
     staleTime: 1000 * 60 * 5, 
   });
 }
 
 async function addStaff(newStaffData: Omit<StaffMember, 'id'>): Promise<string> {
+  // Validate data against schema before saving
+  const validatedData = staffMemberSchema.omit({ id: true }).parse(newStaffData);
+
   const staffCollectionRef = collection(db, 'staff');
   const dataToSave = {
-    ...newStaffData,
-    joinDate: newStaffData.joinDate ? Timestamp.fromDate(newStaffData.joinDate) : null, 
+    ...validatedData, // Use validated data
+    joinDate: validatedData.joinDate ? Timestamp.fromDate(validatedData.joinDate) : null, 
   };
   const docRef = await addDoc(staffCollectionRef, dataToSave);
   return docRef.id;
@@ -94,8 +103,11 @@ async function updateStaff(updatedStaff: StaffMember): Promise<void> {
   if (!updatedStaff.id) {
     throw new Error("Staff member ID is required for update.");
   }
-  const staffDocRef = doc(db, 'staff', updatedStaff.id);
-  const { id, ...dataToUpdate } = updatedStaff; 
+  // Validate data against schema before updating
+  const validatedData = staffMemberSchema.parse(updatedStaff);
+
+  const staffDocRef = doc(db, 'staff', validatedData.id as string); // id is now definitely present
+  const { id, ...dataToUpdate } = validatedData; 
   const dataToSave = {
     ...dataToUpdate,
     joinDate: dataToUpdate.joinDate ? Timestamp.fromDate(dataToUpdate.joinDate) : null, 

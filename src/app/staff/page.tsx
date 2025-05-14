@@ -66,7 +66,7 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
 
 import type { TrainingLog } from "../training/training-schema";
-import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page"; // Assuming this is correctly exported
+import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page";
 import type { Meeting } from "../meetings/meeting-schema";
 import type { DisciplineAction } from "../discipline/discipline-schema";
 import type { Pdp } from "../pdps/pdp-schema";
@@ -84,7 +84,6 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
   if (!staffMember) return [];
 
   const logsCollectionRef = collection(db, 'trainingLogs');
-  // Ensure composite index exists in Firestore: staffName (asc), rank (asc), squadron (asc), completionDate (desc)
   const q = query(
     logsCollectionRef,
     where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
@@ -101,46 +100,40 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
     })) as TrainingLog[];
   } catch (error) {
     console.error("Error fetching training logs for staff:", error);
-    // Consider how to inform the user about this specific error if it occurs.
-    // For now, returning empty array and logging.
     return [];
   }
 }
 
-// Helper function to parse "RANK FirstName LastName"
 function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
   let rank: typeof RANKS[number] | null = null;
   let namePart = memberNameInput.trim();
 
-  // Sort ranks by length descending to match longer ranks first (e.g., FLTLT(AAFC) before LAC(AAFC))
   const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
 
   for (const r of sortedRanksForParsing) {
-    if (namePart.toUpperCase().startsWith(r + " ")) { // Ensure space after rank
+    if (namePart.toUpperCase().startsWith(r + " ")) { 
       rank = r as typeof RANKS[number];
       namePart = namePart.substring(r.length).trim();
       break;
     }
   }
 
-  if (!namePart) return { rank, firstName: null, lastName: null }; // Only rank found, no name
+  if (!namePart) return { rank, firstName: null, lastName: null };
 
-  const parts = namePart.split(' ').filter(p => p); // Split remaining parts by space
+  const parts = namePart.split(' ').filter(p => p); 
   if (parts.length >= 2) {
-    // Assume the last part is the last name, everything before is first name (could include middle names)
     const lastName = parts[parts.length - 1];
     const firstName = parts.slice(0, -1).join(' ');
-    if (firstName && lastName) { // Both must be non-empty
+    if (firstName && lastName) { 
       return { rank, firstName, lastName };
     }
   }
   
-  // Fallback if parsing fails (e.g., only one name part left after rank)
   if (parts.length === 1 && parts[0]) {
-    return { rank, firstName: null, lastName: parts[0] }; // Assume single remaining part is lastName
+    return { rank, firstName: null, lastName: parts[0] }; 
   }
 
-  return { rank, firstName: null, lastName: namePart }; // If still unparsed, put all in lastName
+  return { rank, firstName: null, lastName: namePart };
 }
 
 
@@ -166,8 +159,8 @@ export default function StaffPage() {
   } = useQuery<TrainingLog[], Error>({
     queryKey: [STAFF_TRAINING_LOGS_QUERY_KEY, viewingStaffMember?.id || `${viewingStaffMember?.lastName}, ${viewingStaffMember?.firstName}_${viewingStaffMember?.rank}`],
     queryFn: () => fetchTrainingLogsForStaff(viewingStaffMember),
-    enabled: !!viewingStaffMember, // Only run query when a staff member is being viewed
-    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+    enabled: !!viewingStaffMember,
+    staleTime: 1000 * 60 * 2,
   });
 
   const staffGroups = React.useMemo(() => {
@@ -181,20 +174,16 @@ export default function StaffPage() {
       groups[sqn].push(staff);
     });
 
-    // Sort staff members within each group by rank then name
     for (const sqn in groups) {
       groups[sqn].sort((a, b) => {
         const rankAIndex = RANKS.indexOf(a.rank);
         const rankBIndex = RANKS.indexOf(b.rank);
-        // Handle cases where rank might not be in RANKS (shouldn't happen with validation)
         const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
         const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
-        // Sort numerically ascending index (higher rank first)
         if (effectiveRankAIndex !== effectiveRankBIndex) {
             return effectiveRankAIndex - effectiveRankBIndex;
         }
-        // If ranks are the same, sort by last name, then first name
         const lastNameCompare = a.lastName.localeCompare(b.lastName);
         if (lastNameCompare !== 0) return lastNameCompare;
         return a.firstName.localeCompare(b.firstName);
@@ -204,9 +193,9 @@ export default function StaffPage() {
     return Object.entries(groups)
       .map(([squadronName, staffMembers]) => ({
         squadronName,
-        staffMembers // Already sorted
+        staffMembers
       }))
-      .sort((a, b) => a.squadronName.localeCompare(b.squadronName)); // Sort squadrons alphabetically
+      .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
   }, [staffList]);
 
   const handleAddStaff = async (data: Omit<StaffMember, 'id'>) => {
@@ -328,13 +317,6 @@ export default function StaffPage() {
           "HighestEducationLevel", "Religion", "Citizenship", "DefenceVendorNumber", "Name"
         ];
         
-        const essentialHeadersFromCsv = ["MemberUID", "MemberName", "Appointment", "EmailAddress", "PhoneNumber"];
-        const hasAllEssentialHeaders = essentialHeadersFromCsv.every(eh => csvHeader.includes(eh));
-
-        if (!hasAllEssentialHeaders) {
-           throw new Error(`Invalid CSV header. Expected at least these columns to be present in the CSV: "${essentialHeadersFromCsv.join(', ')}". Found: "${csvHeader.join(',')}"`);
-        }
-
         const headerIndices: Record<string, number> = {};
         allPossibleCsvHeaders.forEach(h => { 
           headerIndices[h] = csvHeader.indexOf(h); 
@@ -388,36 +370,35 @@ export default function StaffPage() {
           
           const phoneValue = csvData.PhoneNumber?.trim();
           if (!phoneValue) {
+            // Only skip entire record if phone number is blank.
+            // Other missing required fields will be caught by Zod validation in addStaff.
             errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
             continue; 
           }
 
           const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
-          if (!rank) {
-            errors.push(`Row ${i + 1} (UID: ${csvData.MemberUID || 'UNKNOWN'}): Could not parse rank from MemberName "${csvData.MemberName}". Valid ranks: ${RANKS.join(", ")}. Skipping.`);
-            continue;
+          if (!rank || !firstName || !lastName) {
+            // This is a critical parsing error for essential fields.
+            // Log it, but let the Zod validation in addStaff handle the final error reporting if passed.
+             errors.push(`Row ${i + 1} (UID: ${csvData.MemberUID || 'UNKNOWN'}): Could not fully parse rank, first name, or last name from MemberName "${csvData.MemberName}". Attempting to add, but validation may fail.`);
           }
-          if (!firstName || !lastName) {
-            errors.push(`Row ${i + 1} (UID: ${csvData.MemberUID || 'UNKNOWN'}): Could not parse first and last name from MemberName "${csvData.MemberName}". Expected "RANK FirstName LastName". Skipping.`);
-            continue;
-          }
+
 
           const serviceNumber = csvData.MemberUID;
           const email = csvData.EmailAddress;
           
-          let rawAppointment = csvData.Appointment;
-          let mappedRole = rawAppointment; 
-          const upperAppointment = rawAppointment?.trim().toUpperCase();
-          if (upperAppointment && appointmentMapping[upperAppointment]) {
-            mappedRole = appointmentMapping[upperAppointment];
-          }
+          let rawAppointmentFromCsv = csvData.Appointment;
+          let roleToSave = ""; 
 
-          // Explicitly check if mappedRole is empty or just whitespace AFTER attempting mapping
-          if (!mappedRole || mappedRole.trim() === "") {
-            errors.push(`Row ${i + 1} (UID: ${serviceNumber}): "Appointment" field is missing, empty, or results in an empty role after mapping. Skipping record.`);
-            continue; 
+          if (rawAppointmentFromCsv && rawAppointmentFromCsv.trim() !== "") {
+            const upperAppointment = rawAppointmentFromCsv.trim().toUpperCase();
+            if (appointmentMapping[upperAppointment]) {
+              roleToSave = appointmentMapping[upperAppointment];
+            } else {
+              roleToSave = rawAppointmentFromCsv.trim(); // Use the trimmed raw value if not in mapping
+            }
           }
-
+          // roleToSave might be "" if rawAppointmentFromCsv was empty/whitespace. This will be caught by Zod in addStaff.
 
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
@@ -433,12 +414,12 @@ export default function StaffPage() {
 
           const memberToAdd: Omit<StaffMember, 'id'> = {
             serviceNumber: serviceNumber, 
-            rank: rank,
-            firstName: firstName,
-            lastName: lastName,
+            rank: rank || "", // Pass empty string if rank is null, Zod will catch
+            firstName: firstName || "", // Pass empty string if null, Zod will catch
+            lastName: lastName || "", // Pass empty string if null, Zod will catch
             email: email, 
             phone: phoneValue,
-            role: mappedRole, // Use the potentially mapped and validated role
+            role: roleToSave, 
             squadron: squadron,
             address: address,
             joinDate: undefined, 
@@ -450,6 +431,7 @@ export default function StaffPage() {
                  existingStaffNumbers.add(serviceNumber); 
                  existingEmails.add(email);      
               }).catch((addError: any) => {
+                 // Zod errors will be caught here
                  errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
               })
             );
@@ -502,31 +484,26 @@ export default function StaffPage() {
     reader.readAsText(file);
   };
 
-  // Placeholder data for related items - replace with actual fetches later
   const filteredMeetings: Meeting[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    // TODO: Implement backend fetch for meetings involving viewingStaffMember.id or name
     console.warn("TODO: Implement backend fetch for meetings for staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
   const filteredPdps: Pdp[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    // TODO: Implement backend fetch for PDPs for viewingStaffMember.id or name
     console.warn("TODO: Implement backend fetch for PDPs for staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
   const filteredDisciplineActions: DisciplineAction[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    // TODO: Implement backend fetch for discipline actions for viewingStaffMember.staffName
     console.warn("TODO: Implement backend fetch for discipline actions for staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
   const filteredAudits: SafetyAudit[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    // TODO: Implement backend fetch for audits where viewingStaffMember.auditorName matches or is involved
     console.warn("TODO: Implement backend fetch for audits involving staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
@@ -617,7 +594,7 @@ export default function StaffPage() {
                         <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
                         <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role}</TableCell>
                         <TableCell className="hidden lg:table-cell">
-                          {staff.joinDate && isValidDate(staff.joinDate) ? format(staff.joinDate, "PP") : "N/A"}
+                          {staff.joinDate && isValidDate(new Date(staff.joinDate)) ? format(new Date(staff.joinDate), "PP") : "N/A"}
                         </TableCell>
                         <TableCell className="text-right">
                           <DropdownMenu>
@@ -741,7 +718,7 @@ export default function StaffPage() {
                             </div>
                             <div>
                                 <p className="font-semibold">Join Date</p>
-                                <p className="text-muted-foreground">{viewingStaffMember.joinDate && isValidDate(viewingStaffMember.joinDate) ? format(viewingStaffMember.joinDate, "PP") : "N/A"}</p>
+                                <p className="text-muted-foreground">{viewingStaffMember.joinDate && isValidDate(new Date(viewingStaffMember.joinDate)) ? format(new Date(viewingStaffMember.joinDate), "PP") : "N/A"}</p>
                             </div>
                              <div>
                                 <p className="font-semibold">Address</p>
@@ -777,7 +754,7 @@ export default function StaffPage() {
                                   {viewedStaffTrainingLogs.map(log => (
                                     <TableRow key={log.id}>
                                       <TableCell>{log.courseName}</TableCell>
-                                      <TableCell>{log.completionDate && isValidDate(log.completionDate) ? format(log.completionDate, "PP") : "Invalid Date"}</TableCell>
+                                      <TableCell>{log.completionDate && isValidDate(new Date(log.completionDate)) ? format(new Date(log.completionDate), "PP") : "Invalid Date"}</TableCell>
                                       <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
                                     </TableRow>
                                   ))}
@@ -795,11 +772,10 @@ export default function StaffPage() {
                           </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                            {/* TODO: Implement actual data fetching and display */}
                             {filteredMeetings.length > 0 ? (
                                 <ul className="list-disc pl-5 space-y-1 text-sm">
                                 {filteredMeetings.map(meeting => (
-                                    <li key={meeting.id}>{meeting.title} - Date: {meeting.date && isValidDate(meeting.date) ? format(meeting.date, "PP") : "Invalid Date"}
+                                    <li key={meeting.id}>{meeting.title} - Date: {meeting.date && isValidDate(new Date(meeting.date)) ? format(new Date(meeting.date), "PP") : "Invalid Date"}
                                     <br/>Attendees: {meeting.attendees}
                                     </li>
                                 ))}
@@ -815,14 +791,13 @@ export default function StaffPage() {
                           </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                             {/* TODO: Implement actual data fetching and display */}
                             {filteredPdps.length > 0 ? (
                                 <ul className="list-disc pl-5 space-y-1 text-sm">
                                 {filteredPdps.map(pdp => (
                                     <li key={pdp.id}>
                                     PDP Period: {pdp.pdpPeriod}
                                     <br/>Goals: {pdp.goals.length}
-                                    {pdp.reviewDate && isValidDate(pdp.reviewDate) && ` | Next Review: ${format(pdp.reviewDate, "PP")}`}
+                                    {pdp.reviewDate && isValidDate(new Date(pdp.reviewDate)) && ` | Next Review: ${format(new Date(pdp.reviewDate), "PP")}`}
                                     </li>
                                 ))}
                                 </ul>
@@ -837,12 +812,11 @@ export default function StaffPage() {
                             </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                            {/* TODO: Implement actual data fetching and display */}
                              {filteredDisciplineActions.length > 0 ? (
                                 <ul className="list-disc pl-5 space-y-1 text-sm">
                                 {filteredDisciplineActions.map(action => (
                                     <li key={action.id}>
-                                    {action.typeOfAction} - Incident Date: {action.dateOfIncident && isValidDate(action.dateOfIncident) ? format(action.dateOfIncident, "PP") : "Invalid Date"}
+                                    {action.typeOfAction} - Incident Date: {action.dateOfIncident && isValidDate(new Date(action.dateOfIncident)) ? format(new Date(action.dateOfIncident), "PP") : "Invalid Date"}
                                     <br/>Description: {action.incidentDescription}
                                     </li>
                                 ))}
@@ -858,12 +832,11 @@ export default function StaffPage() {
                             </div>
                         </AccordionTrigger>
                         <AccordionContent>
-                            {/* TODO: Implement actual data fetching and display */}
                             {filteredAudits.length > 0 ? (
                                 <ul className="list-disc pl-5 space-y-1 text-sm">
                                 {filteredAudits.map(audit => (
                                     <li key={audit.id}>
-                                    {audit.auditTitle} - Date: {audit.auditDate && isValidDate(audit.auditDate) ? format(audit.auditDate, "PP") : "Invalid Date"}
+                                    {audit.auditTitle} - Date: {audit.auditDate && isValidDate(new Date(audit.auditDate)) ? format(new Date(audit.auditDate), "PP") : "Invalid Date"}
                                     <br/>Type: {audit.auditType}
                                     </li>
                                 ))}
@@ -920,4 +893,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
