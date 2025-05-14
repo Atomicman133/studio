@@ -55,7 +55,8 @@ import {
 } from "@/components/ui/accordion";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
-import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
+import { RANKS } from "./staff-schema";
+import { STAFF_QUERY_KEY } from "@/hooks/useStaffData";
 import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -298,6 +299,7 @@ export default function StaffPage() {
 
       const errors: string[] = [];
       let importedCount = 0;
+      let updatedCount = 0;
       
       try {
         const lines = text.split(/\r\n|\n/).filter(line => line.trim());
@@ -322,11 +324,14 @@ export default function StaffPage() {
           headerIndices[h] = csvHeader.indexOf(h); 
         });
         
-        const currentStaffList = queryClient.getQueryData<StaffMember[]>([STAFF_QUERY_KEY]) || [];
+        // Use the staffList from useStaff for checking existing records
+        const currentStaffList = staffList || [];
         const existingStaffNumbers = new Set(currentStaffList.map(s => s.serviceNumber));
         const existingEmails = new Set(currentStaffList.map(s => s.email));
 
         const addPromises: Promise<void>[] = [];
+        const updatePromises: Promise<void>[] = [];
+
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
@@ -369,96 +374,106 @@ export default function StaffPage() {
           });
           
           const phoneValue = csvData.PhoneNumber?.trim();
+          const serviceNumber = csvData.MemberUID;
+          const email = csvData.EmailAddress?.trim(); // Trim email as well
+
           if (!phoneValue) {
-            // Only skip entire record if phone number is blank.
-            // Other missing required fields will be caught by Zod validation in addStaff.
-            errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
+            errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${serviceNumber || 'UNKNOWN'}".`);
             continue; 
           }
 
           const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
-          if (!rank || !firstName || !lastName) {
-            // This is a critical parsing error for essential fields.
-            // Log it, but let the Zod validation in addStaff handle the final error reporting if passed.
-             errors.push(`Row ${i + 1} (UID: ${csvData.MemberUID || 'UNKNOWN'}): Could not fully parse rank, first name, or last name from MemberName "${csvData.MemberName}". Attempting to add, but validation may fail.`);
-          }
-
-
-          const serviceNumber = csvData.MemberUID;
-          const email = csvData.EmailAddress;
           
-          let rawAppointmentFromCsv = csvData.Appointment;
           let roleToSave = ""; 
-
+          const rawAppointmentFromCsv = csvData.Appointment;
           if (rawAppointmentFromCsv && rawAppointmentFromCsv.trim() !== "") {
             const upperAppointment = rawAppointmentFromCsv.trim().toUpperCase();
-            if (appointmentMapping[upperAppointment]) {
-              roleToSave = appointmentMapping[upperAppointment];
-            } else {
-              roleToSave = rawAppointmentFromCsv.trim(); // Use the trimmed raw value if not in mapping
-            }
+            roleToSave = appointmentMapping[upperAppointment] || rawAppointmentFromCsv.trim();
           }
-          // roleToSave might be "" if rawAppointmentFromCsv was empty/whitespace. This will be caught by Zod in addStaff.
 
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
+          
+          const existingStaffMember = currentStaffList.find(s => s.serviceNumber === serviceNumber);
 
-          if (existingStaffNumbers.has(serviceNumber)) {
-            errors.push(`Row ${i + 1}: Duplicate MemberUID "${serviceNumber}". Skipped.`);
-            continue;
-          }
-          if (existingEmails.has(email)) {
-            errors.push(`Row ${i + 1}: Duplicate EmailAddress "${email}". Skipped.`);
-            continue;
-          }
-
-          const memberToAdd: Omit<StaffMember, 'id'> = {
-            serviceNumber: serviceNumber, 
-            rank: rank || "", // Pass empty string if rank is null, Zod will catch
-            firstName: firstName || "", // Pass empty string if null, Zod will catch
-            lastName: lastName || "", // Pass empty string if null, Zod will catch
-            email: email, 
+          const staffDataPayload: Omit<StaffMember, 'id'> & { id?: string } = {
+            serviceNumber: serviceNumber,
+            rank: rank || "", 
+            firstName: firstName || "",
+            lastName: lastName || "",
+            email: email || "", 
             phone: phoneValue,
             role: roleToSave, 
             squadron: squadron,
             address: address,
-            joinDate: undefined, 
+            joinDate: existingStaffMember?.joinDate || undefined,
           };
 
-           addPromises.push(
-              addStaffMutation.mutateAsync(memberToAdd).then(() => {
-                 importedCount++;
-                 existingStaffNumbers.add(serviceNumber); 
-                 existingEmails.add(email);      
-              }).catch((addError: any) => {
-                 // Zod errors will be caught here
-                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
+          if (existingStaffMember) {
+            // Update existing record
+            staffDataPayload.id = existingStaffMember.id;
+
+            if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
+                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
+                continue;
+            }
+
+            updatePromises.push(
+              updateStaffMutation.mutateAsync(staffDataPayload as StaffMember).then(() => {
+                updatedCount++;
+                if (email && email !== existingStaffMember.email) {
+                  existingEmails.delete(existingStaffMember.email); // Remove old email if it changed
+                  existingEmails.add(email); // Add new email
+                }
+              }).catch((updateError: any) => {
+                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`);
               })
             );
+          } else {
+            // Add new record
+            if (email && existingEmails.has(email)) {
+              errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
+              continue;
+            }
+            // Service number uniqueness is implicitly handled by the find above, but an explicit check for new records is safer.
+            if (existingStaffNumbers.has(serviceNumber)) {
+                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Service Number "${serviceNumber}" already exists (should have been an update). New record skipped.`);
+                continue;
+            }
+
+            addPromises.push(
+              addStaffMutation.mutateAsync(staffDataPayload).then(() => {
+                importedCount++;
+                existingStaffNumbers.add(serviceNumber);
+                if(email) existingEmails.add(email);      
+              }).catch((addError: any) => {
+                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
+              })
+            );
+          }
         }
 
-        await Promise.all(addPromises);
+        await Promise.all([...addPromises, ...updatePromises]);
 
-        if (importedCount > 0 && errors.length === 0) {
-          toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
-        } else if (importedCount > 0 && errors.length > 0) {
+        let toastMessage = "";
+        if (importedCount > 0) toastMessage += `${importedCount} new staff member(s) imported. `;
+        if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
+        
+        if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
+            toast({ title: "Import Complete", description: "No new staff members were found to import or update (all might already exist with no changes, or file was empty after header)." });
+        } else if (toastMessage !== "" && errors.length === 0) {
+            toast({ title: "Import Successful", description: toastMessage.trim() });
+        } else if (errors.length > 0) {
             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-             toast({
-                variant: "default", 
-                title: "CSV Import Partially Successful",
-                description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{`${importedCount} imported. Errors:\n${errorMessages}`}</pre></ScrollArea> ),
+            const title = (importedCount > 0 || updatedCount > 0) ? "CSV Import Partially Successful" : "CSV Import Failed";
+            const descriptionPrefix = toastMessage !== "" ? toastMessage : "";
+            
+            toast({
+                variant: (importedCount > 0 || updatedCount > 0) ? "default" : "destructive",
+                title: title,
+                description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}Errors:\n{errorMessages}</pre></ScrollArea> ),
                 duration: 15000,
             });
-        } else if (importedCount === 0 && errors.length > 0) {
-             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-             toast({
-                variant: "destructive",
-                title: "CSV Import Failed",
-                description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre></ScrollArea> ),
-                duration: 15000,
-            });
-        } else if (importedCount === 0 && errors.length === 0 && lines.length > 1) { 
-           toast({ title: "Import Complete", description: "No new staff members were found to import (all might already exist, or file was empty after header)." });
         } else if (lines.length <=1) {
            toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
         }
@@ -652,15 +667,16 @@ export default function StaffPage() {
           The following fields are used if their corresponding headers are found:
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>PrimaryUnit</code> (Optional, e.g., "701 Squadron") - Populates 'Squadron'.</li>
-            <li><code>MemberUID</code> (Required, e.g., "8001234") - Populates 'Service Number'.</li>
+            <li><code>MemberUID</code> (Required, e.g., "8001234") - Populates 'Service Number'. Used to match existing records for updates.</li>
             <li><code>MemberName</code> (Required. Format: "RANK FirstName LastName" e.g., "FLTLT(AAFC) Jane Doe". RANK must be one of: {RANKS.join(", ")}.) - Parsed for Rank, First Name, Last Name.</li>
-            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If this field is blank or cannot be mapped, the record will be skipped.</li>
+            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If this field is blank or cannot be mapped, the record will error during validation.</li>
             <li><code>EmailAddress</code> (Required, e.g., "jane.doe@example.com") - Populates 'Email'.</li>
             <li><code>PhoneNumber</code> (Required, e.g., "0400123456") - Populates 'Phone'. <strong>Records with a blank PhoneNumber will be skipped.</strong></li>
             <li><code>Address</code> (Optional) - Populates 'Address'.</li>
             <li>Other headers (e.g., MemberType, IsPrimary, Active, ContactEmail1, ContactName, etc.) will be ignored.</li>
           </ul>
-          MemberUID and EmailAddress must be unique among existing and newly imported staff. Join Date is not part of this import and will be unassigned.
+          If a record with a matching `MemberUID` is found, it will be updated. Otherwise, a new record will be created.
+          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones.
         </AlertDescription>
       </Alert>
 
@@ -893,3 +909,4 @@ export default function StaffPage() {
     </div>
   );
 }
+
