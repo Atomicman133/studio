@@ -27,10 +27,10 @@ export const staffMemberSchema = z.object({
   lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Invalid email address").min(1, "Email is required"),
   phone: z.string().optional(),
-  role: z.string().min(1, "Role is required"),
+  role: z.string().optional(), // Changed: Role is now optional
   joinDate: z.date().optional().nullable(), // Allow null for joinDate
   squadron: z.string().optional(),
-  address: z.string().optional(), // Added address field
+  address: z.string().optional(),
 });
 
 export type StaffMember = z.infer<typeof staffMemberSchema>;

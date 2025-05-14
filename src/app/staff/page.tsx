@@ -309,17 +309,22 @@ export default function StaffPage() {
         const headerLine = lines[0].trim();
         const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         
-        const allPossibleCsvHeaders = [
-          "PrimaryUnit", "MemberUID", "MemberName", "MemberType", "Appointment", 
-          "IsPrimary", "Active", "EmailAddress", "ContactEmail1", "PhoneNumber", 
-          "Address", "ContactName", "EmergencyContactEmail", "ParentalResponsiblity", 
-          "Relationship", "NextOfKin", "PrimaryContact", "MemberContactPhoneNumber", 
-          "AboriginalTorresStraitIslander", "FullTimeStudent", "EducationInstitution", 
-          "HighestEducationLevel", "Religion", "Citizenship", "DefenceVendorNumber", "Name"
+        const expectedCsvHeaders = [ // Using the new list
+          "PrimaryUnit", "MemberUID", "MemberName", "Appointment", 
+          "EmailAddress", "PhoneNumber", "Address"
         ];
+        const optionalCsvHeaders = [ // Headers that are parsed if present but not strictly required
+          "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName", 
+          "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin", 
+          "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander", 
+          "FullTimeStudent", "EducationInstitution", "HighestEducationLevel", "Religion", 
+          "Citizenship", "DefenceVendorNumber", "Name"
+        ];
+
+        const allRecognizedHeaders = [...expectedCsvHeaders, ...optionalCsvHeaders];
         
         const headerIndices: Record<string, number> = {};
-        allPossibleCsvHeaders.forEach(h => { 
+        allRecognizedHeaders.forEach(h => { 
           headerIndices[h] = csvHeader.indexOf(h); 
         });
         
@@ -361,26 +366,39 @@ export default function StaffPage() {
             continue;
           }
 
-          const csvData: Record<string, string> = {};
-          allPossibleCsvHeaders.forEach(h => {
+          const csvData: Record<string, string | undefined> = {};
+          allRecognizedHeaders.forEach(h => {
               const index = headerIndices[h];
               if (index !== -1 && index < values.length) { 
                 csvData[h] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
               } else {
-                csvData[h] = ""; 
+                csvData[h] = undefined; 
               }
           });
           
           const phoneValue = csvData.PhoneNumber?.trim();
-          const serviceNumber = csvData.MemberUID;
-          const email = csvData.EmailAddress?.trim();
-
-          if (!phoneValue) {
-            errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${serviceNumber || 'UNKNOWN'}".`);
+          if (!phoneValue) { // Skip record if PhoneNumber is blank
+            errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
             continue; 
           }
 
-          const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
+          const serviceNumber = csvData.MemberUID;
+          const email = csvData.EmailAddress?.trim();
+          
+          if (!serviceNumber) { // ServiceNumber is fundamental, treat as error for the row
+             errors.push(`Row ${i + 1}: MemberUID (Service Number) is blank. Skipping record.`);
+             continue;
+          }
+          if (!email) { // Email is fundamental
+             errors.push(`Row ${i + 1} (UID: ${serviceNumber}): EmailAddress is blank. Skipping record.`);
+             continue;
+          }
+
+          const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName || "");
+          if (!rank || !firstName || !lastName) {
+             errors.push(`Row ${i + 1} (UID: ${serviceNumber}): MemberName "${csvData.MemberName || ''}" could not be parsed into Rank, First Name, and Last Name. Skipping record.`);
+             continue;
+          }
           
           let roleToSave = ""; 
           const rawAppointmentFromCsv = csvData.Appointment;
@@ -392,7 +410,6 @@ export default function StaffPage() {
             roleToSave = "Staff"; // Default to "Staff" if Appointment is blank or unmappable
           }
 
-
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
           
@@ -400,10 +417,10 @@ export default function StaffPage() {
 
           const memberToAdd: Omit<StaffMember, 'id'> & { id?: string } = {
             serviceNumber: serviceNumber,
-            rank: rank || "", 
-            firstName: firstName || "",
-            lastName: lastName || "",
-            email: email || "", 
+            rank: rank, 
+            firstName: firstName,
+            lastName: lastName,
+            email: email, 
             phone: phoneValue,
             role: roleToSave, 
             squadron: squadron,
@@ -424,7 +441,7 @@ export default function StaffPage() {
                     existingEmails.delete(existingStaffMember.email);
                     existingEmails.add(email);
                 }
-                existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberToAdd }); // Update local map
+                existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberToAdd });
               }).catch((updateError: any) => {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`);
               })
@@ -435,14 +452,14 @@ export default function StaffPage() {
               continue;
             }
             if (existingStaffByServiceNumber.has(serviceNumber)) {
-                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Service Number "${serviceNumber}" seems to already exist but wasn't found for update (internal error or race condition). New record skipped.`);
+                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Service Number "${serviceNumber}" seems to already exist but wasn't found for update. New record skipped.`);
                 continue;
             }
 
             addPromises.push(
               addStaffMutation.mutateAsync(memberToAdd).then((newId) => {
                 importedCount++;
-                existingStaffByServiceNumber.set(serviceNumber, { ...memberToAdd, id: newId as string }); // Add to local map
+                existingStaffByServiceNumber.set(serviceNumber, { ...memberToAdd, id: newId as string }); 
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
@@ -458,7 +475,7 @@ export default function StaffPage() {
         if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
         
         if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
-            toast({ title: "Import Complete", description: "No new staff members were found to import or update (all might already exist with no changes, or file was empty after header)." });
+            toast({ title: "Import Complete", description: "No new staff members were found to import or update." });
         } else if (toastMessage !== "" && errors.length === 0) {
             toast({ title: "Import Successful", description: toastMessage.trim() });
         } else if (errors.length > 0) {
@@ -605,7 +622,7 @@ export default function StaffPage() {
                         <TableCell>{staff.serviceNumber}</TableCell>
                         <TableCell>{staff.rank}</TableCell>
                         <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                        <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role}</TableCell>
+                        <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role || "N/A"}</TableCell>
                         <TableCell className="hidden lg:table-cell">
                           {staff.joinDate && isValidDate(new Date(staff.joinDate)) ? format(new Date(staff.joinDate), "PP") : "N/A"}
                         </TableCell>
@@ -712,7 +729,7 @@ export default function StaffPage() {
                 <DialogHeader>
                     <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
                     <DialogDescription>
-                       Service No: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role} | Squadron: {viewingStaffMember.squadron || 'N/A'}
+                       Service No: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role || "N/A"} | Squadron: {viewingStaffMember.squadron || 'N/A'}
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
