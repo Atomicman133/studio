@@ -65,7 +65,7 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
 
 import type { TrainingLog } from "../training/training-schema";
-import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page";
+import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page"; // Assuming this is correctly typed and exported
 import type { Meeting } from "../meetings/meeting-schema";
 import type { DisciplineAction } from "../discipline/discipline-schema";
 import type { Pdp } from "../pdps/pdp-schema";
@@ -339,20 +339,33 @@ export default function StaffPage() {
           "PrimaryUnit", "MemberUID", "MemberName", "Appointment", 
           "EmailAddress", "PhoneNumber", "Address"
         ];
-        const optionalCsvHeaders = [ 
-          "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName", 
-          "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin", 
-          "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander", 
-          "FullTimeStudent", "EducationInstitution", "HighestEducationLevel", "Religion", 
-          "Citizenship", "DefenceVendorNumber", "Name"
+        // All other headers from the user's list are effectively "optional" or "ignored"
+        const allRecognizedHeaders = [
+            ...expectedCsvHeaders,
+            "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName", 
+            "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin", 
+            "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander", 
+            "FullTimeStudent", "EducationInstitution", "HighestEducationLevel", "Religion", 
+            "Citizenship", "DefenceVendorNumber", "Name"
         ];
-
-        const allRecognizedHeaders = [...expectedCsvHeaders, ...optionalCsvHeaders];
         
         const headerIndices: Record<string, number> = {};
         allRecognizedHeaders.forEach(h => { 
-          headerIndices[h] = csvHeader.indexOf(h); 
+          const index = csvHeader.indexOf(h);
+          if (index !== -1) { // Only map headers that are present in the CSV
+            headerIndices[h] = index;
+          }
         });
+        
+        // Ensure all *expected* headers are present
+        for (const expectedHeader of expectedCsvHeaders) {
+            if (headerIndices[expectedHeader] === undefined) {
+                 errors.push(`Missing required CSV header: "${expectedHeader}".`);
+            }
+        }
+        if (errors.length > 0) { // Stop if essential headers are missing
+            throw new Error(errors.join(" "));
+        }
         
         let currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || [];
         if (currentStaffList.length === 0 && staffList.length > 0) { 
@@ -364,10 +377,8 @@ export default function StaffPage() {
         const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
         const existingEmails = new Set(currentStaffList.map(s => s.email).filter(Boolean));
 
-
         const addPromises: Promise<void>[] = [];
         const updatePromises: Promise<void>[] = [];
-
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
@@ -402,7 +413,7 @@ export default function StaffPage() {
           const csvData: Record<string, string | undefined> = {};
           allRecognizedHeaders.forEach(h => {
               const index = headerIndices[h];
-              if (index !== -1 && index < values.length) { 
+              if (index !== undefined && index < values.length) { 
                 csvData[h] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
               } else {
                 csvData[h] = undefined; 
@@ -437,7 +448,7 @@ export default function StaffPage() {
           const rawAppointmentFromCsv = csvData.Appointment?.trim().toUpperCase();
           if (rawAppointmentFromCsv && appointmentMapping[rawAppointmentFromCsv]) {
               roleToSave = appointmentMapping[rawAppointmentFromCsv];
-          } else if (rawAppointmentFromCsv) { 
+          } else if (rawAppointmentFromCsv && rawAppointmentFromCsv.length > 0) { 
               roleToSave = csvData.Appointment!.trim(); 
           }
 
@@ -475,7 +486,11 @@ export default function StaffPage() {
                 }
                 existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberDataPayload });
               }).catch((updateError: any) => {
-                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`);
+                let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`;
+                if (updateError.errors) { // Zod errors
+                  errorMessage += ` Details: ${JSON.stringify(updateError.errors)}`;
+                }
+                errors.push(errorMessage);
               })
             );
           } else { 
@@ -483,18 +498,18 @@ export default function StaffPage() {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
               continue;
             }
-            if (existingStaffByServiceNumber.has(serviceNumber)) {
-                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Service Number "${serviceNumber}" seems to already exist but wasn't found for update. New record skipped.`);
-                continue;
-            }
-
+            // No need to check existingStaffByServiceNumber again, as it's done above
             addPromises.push(
-              addStaffMutation.mutateAsync(memberDataPayload).then((newId) => {
+              addStaffMutation.mutateAsync(memberDataPayload as Omit<StaffMember, 'id'>).then((newId) => {
                 importedCount++;
                 existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string }); 
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
-                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
+                let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`;
+                if (addError.errors) { // Zod errors
+                  errorMessage += ` Details: ${JSON.stringify(addError.errors)}`;
+                }
+                errors.push(errorMessage);
               })
             );
           }
@@ -524,7 +539,6 @@ export default function StaffPage() {
         } else if (lines.length <=1) { 
            toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
         }
-
 
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
@@ -652,9 +666,9 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="max-h-[300px] w-full"> 
+                  <ScrollArea className="h-[300px] w-full border"> {/* Applied fixed height and border */}
                     <Table>
-                      <TableHeader>
+                      <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                         <TableRow>
                           <TableHead>Service No.</TableHead>
                           <TableHead>Rank</TableHead>
