@@ -471,30 +471,34 @@ export default function TrainingPage() {
         rank = rankStr as typeof RANKS[number];
     } else {
         // Attempt to match if rank has spaces (e.g. "FLTLT (AAFC)")
-        let potentialRank = rankStr;
+        let potentialRankCandidate = rankStr;
+        let consumedPartsForRank = 1; // Start with the last part popped as rankStr
+
+        // Iterate backwards from the part before rankStr
         for (let i = parts.length -1; i >=0; i--) {
-            const combined = `${parts[i]} ${potentialRank}`;
+            const combined = `${parts[i]} ${potentialRankCandidate}`;
             if ((RANKS as readonly string[]).includes(combined)) {
                 rank = combined as typeof RANKS[number];
-                // Adjust parts array by removing consumed rank parts
-                parts.splice(i, parts.length - i); // remove from i to end
+                consumedPartsForRank = (parts.length - i) + 1; // +1 for the original rankStr part
+                // Remove consumed parts from `parts` array to correctly isolate name
+                 parts.splice(i, parts.length -i); // remove from current i to end
                 break;
             }
-            potentialRank = combined; // for next iteration if rank not yet found
-             if (i === 0 && !rank) { // If we checked all parts and no multi-word rank matched
-                // Fallback to single word rank check if rankStr was valid but not multi-word
-                if (rankStr && (RANKS as readonly string[]).includes(rankStr)) {
-                    rank = rankStr as typeof RANKS[number];
-                } else {
-                     // If still no rank, it's an error for this specific parser
-                    return { lastName: null, firstName: null, rank: null, memberUID: null };
-                }
-            }
+             // If not a match, this part is likely part of the name, so stop trying to combine for rank
+        }
+
+        // If no multi-word rank found, check if the original rankStr was a valid single-word rank
+        if (!rank && rankStr && (RANKS as readonly string[]).includes(rankStr)) {
+            rank = rankStr as typeof RANKS[number];
+        }
+
+        if (!rank) {
+             return { lastName: null, firstName: null, rank: null, memberUID: null };
         }
     }
 
 
-    if (!rank || !memberUID) return { lastName: null, firstName: null, rank: null, memberUID: null };
+    if (!memberUID) return { lastName: null, firstName: null, rank: rank, memberUID: null };
 
 
     const lastName = parts.shift() || null;
@@ -569,29 +573,37 @@ export default function TrainingPage() {
           let preliminaryParsingOk = true;
 
           for (let i = 1; i < csvLines.length; i++) {
-              let line = csvLines[i].trim(); 
+              const line = csvLines[i].trim(); 
               if (!line) continue;
 
-              const values = [];
+              const values: string[] = [];
               let currentVal = '';
               let inQuotes = false;
-              for (let charIndex = 0; charIndex < line.length; charIndex++) {
-                  let char = line[charIndex];
-                  if (char === '"') {
-                      if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
-                          currentVal += '"';
-                          charIndex++; 
-                      } else {
-                          inQuotes = !inQuotes; 
-                      }
-                  } else if (char === ',' && !inQuotes) {
-                      values.push(currentVal.trim());
-                      currentVal = '';
+              let charIndex = 0;
+
+              while(charIndex < line.length) {
+                const char = line[charIndex];
+
+                if (char === '"') {
+                  if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
+                    // This is an escaped double quote e.g. "" inside a quoted field
+                    currentVal += '"';
+                    charIndex++; // Consume the second quote of the pair
                   } else {
-                      currentVal += char;
+                    // This is an opening or closing quote
+                    inQuotes = !inQuotes;
                   }
+                } else if (char === ',' && !inQuotes) {
+                  // This is a delimiter outside of a quoted field
+                  values.push(currentVal);
+                  currentVal = '';
+                } else {
+                  // Regular character
+                  currentVal += char;
+                }
+                charIndex++;
               }
-              values.push(currentVal.trim()); 
+              values.push(currentVal); // Add the last field
 
 
               if (values.length !== header.length) {
@@ -605,13 +617,14 @@ export default function TrainingPage() {
                    const index = headerIndices[eh];
                    if (index !== undefined && index < values.length) {
                        let val = values[index];
+                       // Remove surrounding quotes only if they are true pairs at start/end
                        if (val && val.startsWith('"') && val.endsWith('"')) {
                            val = val.substring(1, val.length - 1);
                        }
+                       // Replace escaped double quotes "" with a single "
                        csvRowData[eh] = val.replace(/""/g, '"');
                    } else {
-                       // If an optional header is missing, csvRowData[eh] will be undefined
-                       csvRowData[eh] = ""; // Or handle as needed, maybe an explicit undefined
+                       csvRowData[eh] = ""; 
                    }
               });
 
@@ -930,7 +943,7 @@ export default function TrainingPage() {
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>Unit_1</code> (Text, Ignored)</li>
             <li><code>Surname</code> (Text, Required. Format: "LastName FirstName Rank MemberUID" e.g., "Doe John FLTLT(AAFC) 8001234". Rank must be one of: {RANKS.join(", ")}. MemberUID is the Service Number.)</li>
-            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD/MM/YY. This will be the completion date.)</li>
+            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY. This will be the completion date.)</li>
             <li><code>EndDate</code> (Date, Ignored)</li>
             <li><code>ChangeType</code> (Text, Ignored)</li>
             <li><code>StatusName</code> (Text, Required. Records containing "Historical" in this field will be skipped.)</li>
@@ -1116,3 +1129,4 @@ export default function TrainingPage() {
     </div>
   );
 }
+
