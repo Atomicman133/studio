@@ -185,14 +185,14 @@ const parseCsvLine = (line: string): string[] => {
             }
         } else if (char === ',' && !inQuotedField) {
             // This is a delimiter, and we are not inside a quoted field
-            fields.push(currentField);
+            fields.push(currentField.trim());
             currentField = "";
         } else {
             // Regular character, part of the current field
             currentField += char;
         }
     }
-    fields.push(currentField); // Add the last field
+    fields.push(currentField.trim()); // Add the last field, trimmed
     return fields;
 };
 
@@ -571,7 +571,7 @@ export default function TrainingPage() {
           errors.push("CSV must have a header and at least one data row.");
         } else {
           const headerLine = csvLines[0].trim();
-          const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+          const header = parseCsvLine(headerLine);
           
           const expectedCsvHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
           const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; 
@@ -623,10 +623,12 @@ export default function TrainingPage() {
                    const index = headerIndices[eh];
                    if (index !== undefined && index < values.length) {
                        let val = values[index];
-                       if (val && val.startsWith('"') && val.endsWith('"')) {
-                           val = val.substring(1, val.length - 1);
-                       }
-                       csvRowData[eh] = val.replace(/""/g, '"');
+                       // No need to strip quotes here if parseCsvLine handles it, but keeping for safety if parseCsvLine changes
+                       // if (val && val.startsWith('"') && val.endsWith('"')) {
+                       //     val = val.substring(1, val.length - 1);
+                       // }
+                       // csvRowData[eh] = val.replace(/""/g, '"');
+                       csvRowData[eh] = val; // parseCsvLine should already handle escaped quotes and trimming
                    } else {
                        csvRowData[eh] = ""; 
                    }
@@ -941,20 +943,23 @@ export default function TrainingPage() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
-          To bulk import training accomplishments, upload a CSV file. The header row is required.
-          The system expects the following columns (order matters for mapping, but all listed headers should be present):
+          To bulk import training accomplishments, upload a CSV file. The header row is required and must exactly match the following order and names:
+          <code className="block whitespace-pre-wrap bg-muted p-2 rounded-md my-2 text-xs">Unit_1,Surname,EffectiveDate,EndDate,ChangeType,StatusName,Details,Comment</code>
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
-            <li><code>Unit_1</code> (Text, Ignored)</li>
-            <li><code>Surname</code> (Text, Required. Format: "LastName FirstName Rank MemberUID" e.g., "Doe John FLTLT(AAFC) 8001234". Rank must be one of: {RANKS.join(", ")}. MemberUID is the Service Number.)</li>
-            <li><code>EffectiveDate</code> (Date, Required. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY. This will be the completion date.)</li>
-            <li><code>EndDate</code> (Date, Ignored)</li>
-            <li><code>ChangeType</code> (Text, Ignored)</li>
-            <li><code>StatusName</code> (Text, Required. Records containing "Historical" in this field will be skipped.)</li>
-            <li><code>Details</code> (Text, Required. This will be used as the Course Name and Qualification Achieved.)</li>
-            <li><code>Comment</code> (Text, Ignored)</li>
+            <li><code>Unit_1</code>: (Text) Ignored by the system.</li>
+            <li><code>Surname</code>: (Text, Required) Format: "LastName FirstName Rank MemberUID".
+                Example: "Doe John FLTLT(AAFC) 8001234".
+                Rank must be one of: {RANKS.join(", ")}. MemberUID is the Service Number and is used to match an existing staff profile. If the staff profile is not found for the UID, the row is skipped.
+            </li>
+            <li><code>EffectiveDate</code>: (Date, Required) Completion date of the accomplishment. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.</li>
+            <li><code>EndDate</code>: (Date) Ignored by the system.</li>
+            <li><code>ChangeType</code>: (Text) Ignored by the system.</li>
+            <li><code>StatusName</code>: (Text, Required) If this field contains "Historical" (case-insensitive), the entire record will be skipped.</li>
+            <li><code>Details</code>: (Text, Required) This will be used as the Course Name and Qualification Achieved for the training log.</li>
+            <li><code>Comment</code>: (Text) Ignored by the system.</li>
           </ul>
           <p className="mt-2 text-xs">
-            <strong>Important:</strong> The system uses the `MemberUID` (extracted from the "Surname" column) to find an existing staff member. If a staff member with the provided `MemberUID` is not found, that row will be skipped. The Rank, FirstName, and LastName from the "Surname" column are used to populate the training log.
+            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing accomplishments. The CSV file must be well-formed (correctly quoted fields if they contain commas, etc.).
           </p>
         </AlertDescription>
       </Alert>
@@ -1132,4 +1137,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-
