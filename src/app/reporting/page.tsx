@@ -118,10 +118,9 @@ const processComplianceReports = (
 
           if (criterion.yearsToExpire) {
               const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-              expiryDate.setHours(0,0,0,0); // Ensure expiry is compared at start of day
-
+             
               // Check if 'today' is strictly BEFORE the expiry date
-              if (isBefore(today, expiryDate)) {
+              if (isBefore(today, expiryDate)) { 
                   isMet = true;
                   details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
               } else {
@@ -129,7 +128,7 @@ const processComplianceReports = (
                   details = `Out of Date (Completed: ${format(completionDate, 'dd/MM/yyyy')})`;
               }
           } else {
-            // Logic for non-expiring items (WWCC, CoC, Psych)
+            // Logic for non-expiring items (CoC, Psych) - WWCC now has expiry
             isMet = true; // If a valid log exists, it's met
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
@@ -221,12 +220,10 @@ export default function ReportingPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Start of today
 
-    const expiryDateStartOfDay = new Date(expiryDate);
-    expiryDateStartOfDay.setHours(0, 0, 0, 0); // Start of expiry day
-
+    
     // Return days left only if it's not expired yet (today is strictly BEFORE expiry day)
-     if (isBefore(today, expiryDateStartOfDay)) {
-        return differenceInDays(expiryDateStartOfDay, today); // Days remaining including today until expiry
+     if (isBefore(today, expiryDate)) {
+        return differenceInDays(expiryDate, today); // Days remaining including today until expiry
      }
      return null; // Return null if expired (today is on or after expiry day)
   };
@@ -410,7 +407,7 @@ export default function ReportingPage() {
                  <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
                  {
                   criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' :
-                  criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC"' :
+                  criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC", "Working With Children - WA - Certified"' :
                   criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
                   criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment", "Psychological Test - Completed"' :
                   criterion.key === 'policeClearance' ? '"National Police Clearance", "Police Check", "NPC"' :
@@ -429,6 +426,3 @@ export default function ReportingPage() {
   );
 
 }
-
-
-    

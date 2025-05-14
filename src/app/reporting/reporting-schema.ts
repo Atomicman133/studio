@@ -33,45 +33,42 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
   {
     key: 'firstAid',
     name: 'First Aid Certificate',
-    yearsToExpire: 3, // Check if completionDate is within the last 3 years
+    yearsToExpire: 3,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['first aid', 'hltaid']) || matchesKeywords(log.qualificationAchieved, ['first aid', 'hltaid'])
   },
   {
     key: 'wwcc',
     name: 'Working With Children Check',
-    // WWCCs *do* expire, but the expiry date isn't typically the completion date + fixed years.
-    // For this system, we'll assume a log signifies it's held, but expiry needs external tracking or a dedicated field.
-    // We will treat *any* record as meeting the check for now, acknowledging this limitation.
-    yearsToExpire: undefined, // Check only for existence
+    yearsToExpire: 3, // Normal validity period, e.g., 3 years
     identifier: (log: TrainingLog) =>
-      matchesKeywords(log.courseName, ['working with children', 'wwcc']) || matchesKeywords(log.qualificationAchieved, ['working with children', 'wwcc'])
+      matchesKeywords(log.courseName, ['working with children', 'wwcc', 'Working With Children - WA - Certified']) || matchesKeywords(log.qualificationAchieved, ['working with children', 'wwcc', 'Working With Children - WA - Certified'])
   },
   {
     key: 'codeOfConduct',
     name: 'Code of Conduct & Behavioural Policy Acceptance',
-    yearsToExpire: undefined, // Assume one-time or periodically renewed outside this log system
+    yearsToExpire: undefined,
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['code of conduct', 'behavioural policy acceptance', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'behavioural policy acceptance', 'coc'])
   },
   {
     key: 'psychAssessment',
     name: 'Psychological Assessment',
-    yearsToExpire: undefined, // Assume one-time
+    yearsToExpire: undefined, 
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['psychological assessment', 'psych assessment', 'psychological test - completed']) || matchesKeywords(log.qualificationAchieved, ['psychological assessment', 'psych assessment', 'psychological test - completed'])
   },
   {
     key: 'policeClearance',
     name: 'National Police Clearance',
-    yearsToExpire: 5, // Check if completionDate is within the last 5 years
+    yearsToExpire: 5, 
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['national police clearance', 'police check', 'npc']) || matchesKeywords(log.qualificationAchieved, ['national police clearance', 'police check', 'npc'])
   },
   {
     key: 'youthSafety',
     name: 'Defence Youth Safety Annual Awareness Training',
-    yearsToExpire: 1, // Check if completionDate is within the last 1 year
+    yearsToExpire: 1,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, [
         'defence youth safety', 
@@ -90,6 +87,3 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
 ] as const;
 
 export type ComplianceCriterionKey = typeof COMPLIANCE_CRITERIA_CONFIG[number]['key'];
-
-    
-    
