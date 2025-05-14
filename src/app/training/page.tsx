@@ -165,6 +165,38 @@ function downloadTextFile(filename: string, text: string) {
   document.body.removeChild(element);
 }
 
+// Helper function to parse a single CSV line, handling quoted fields
+const parseCsvLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let currentField = "";
+    let inQuotedField = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+
+        if (char === '"') {
+            if (inQuotedField && i + 1 < line.length && line[i + 1] === '"') {
+                // This is an escaped double quote (e.g., "" inside a field)
+                currentField += '"';
+                i++; // Skip the second quote of the pair
+            } else {
+                // This is an opening or closing quote
+                inQuotedField = !inQuotedField;
+            }
+        } else if (char === ',' && !inQuotedField) {
+            // This is a delimiter, and we are not inside a quoted field
+            fields.push(currentField);
+            currentField = "";
+        } else {
+            // Regular character, part of the current field
+            currentField += char;
+        }
+    }
+    fields.push(currentField); // Add the last field
+    return fields;
+};
+
+
 export default function TrainingPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -461,46 +493,49 @@ export default function TrainingPage() {
   // Format: "LastName FirstName Rank MemberUID"
   function parseCompositeSurnameField(surnameField: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
     const parts = surnameField.trim().split(/\s+/);
-    if (parts.length < 3) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Need at least Last, First, Rank, UID
+    if (parts.length < 4) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Need at least Last, First, Rank, UID
 
     const memberUID = parts.pop() || null;
-    const rankStr = parts.pop() || null;
+    let rankStr = parts.pop() || null;
     
     let rank: typeof RANKS[number] | null = null;
-    if (rankStr && (RANKS as readonly string[]).includes(rankStr)) {
+    
+    // Attempt to match rank (potentially multi-word)
+    const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length); // Sort by length to match longer ranks first
+    let potentialRankCandidate = "";
+    let rankFound = false;
+
+    // Iterate backwards from the end of parts (before UID and initial rankStr were popped)
+    // to build up potential multi-word ranks
+    let tempParts = surnameField.trim().split(/\s+/);
+    tempParts.pop(); // Remove UID for this check
+    
+    for (let j = tempParts.length -1; j >=0; j--) {
+        potentialRankCandidate = tempParts.slice(j).join(" ");
+        if ((RANKS as readonly string[]).includes(potentialRankCandidate)) {
+            rank = potentialRankCandidate as typeof RANKS[number];
+            rankStr = potentialRankCandidate; // Store the matched rank string
+            // Remove the parts that formed the rank from tempParts for name extraction
+            parts.splice(j, tempParts.length - j);
+            rankFound = true;
+            break;
+        }
+    }
+     if (!rankFound && rankStr && (RANKS as readonly string[]).includes(rankStr)) { // Fallback to single word rankStr if no multi-word found
         rank = rankStr as typeof RANKS[number];
-    } else {
-        // Attempt to match if rank has spaces (e.g. "FLTLT (AAFC)")
-        let potentialRankCandidate = rankStr;
-        let consumedPartsForRank = 1; // Start with the last part popped as rankStr
+     }
 
-        // Iterate backwards from the part before rankStr
-        for (let i = parts.length -1; i >=0; i--) {
-            const combined = `${parts[i]} ${potentialRankCandidate}`;
-            if ((RANKS as readonly string[]).includes(combined)) {
-                rank = combined as typeof RANKS[number];
-                consumedPartsForRank = (parts.length - i) + 1; // +1 for the original rankStr part
-                // Remove consumed parts from `parts` array to correctly isolate name
-                 parts.splice(i, parts.length -i); // remove from current i to end
-                break;
-            }
-             // If not a match, this part is likely part of the name, so stop trying to combine for rank
-        }
 
-        // If no multi-word rank found, check if the original rankStr was a valid single-word rank
-        if (!rank && rankStr && (RANKS as readonly string[]).includes(rankStr)) {
-            rank = rankStr as typeof RANKS[number];
-        }
-
-        if (!rank) {
-             return { lastName: null, firstName: null, rank: null, memberUID: null };
-        }
+    if (!rank) {
+         // If rank is still not found, it's an invalid format or unknown rank
+         return { lastName: null, firstName: null, rank: null, memberUID: null };
     }
 
 
     if (!memberUID) return { lastName: null, firstName: null, rank: rank, memberUID: null };
 
-
+    // The remaining parts should be LastName then FirstName(s)
+    // Assuming the first part of `parts` is LastName, and the rest is FirstName
     const lastName = parts.shift() || null;
     const firstName = parts.join(" ") || null;
 
@@ -530,7 +565,7 @@ export default function TrainingPage() {
 
         const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
         const errors: string[] = [];
-        const csvLines = text.split(/\r\n|\n/).filter(line => line.trim());
+        const csvLines = text.split(/\r\n|\n|\r/).filter(line => line.trim()); // Added \r for Mac line endings
 
         if (csvLines.length < 2) {
           errors.push("CSV must have a header and at least one data row.");
@@ -538,22 +573,20 @@ export default function TrainingPage() {
           const headerLine = csvLines[0].trim();
           const header = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
           
-          // Expected headers for the new format
           const expectedCsvHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
-          const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; // Headers needed for actual data extraction
+          const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; 
 
           const headerIndices: Record<string, number> = {};
           let allRequiredHeadersPresent = true;
 
-          expectedCsvHeaders.forEach(eh => { // Check all expected headers
+          expectedCsvHeaders.forEach(eh => { 
             const index = header.indexOf(eh);
             if (index !== -1) {
               headerIndices[eh] = index;
-            } else if (requiredDataHeaders.includes(eh)) { // Only error if a *required for data extraction* header is missing
+            } else if (requiredDataHeaders.includes(eh)) { 
               errors.push(`Missing required CSV header: "${eh}".`);
               allRequiredHeadersPresent = false;
             }
-            // Optional headers (like Unit_1, EndDate, etc.) can be missing without erroring here
           });
 
 
@@ -565,7 +598,7 @@ export default function TrainingPage() {
                   duration: 15000,
               });
               if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
-              setIsImportingAccomplishments(false); // Reset loading state
+              setIsImportingAccomplishments(false); 
               return;
           }
           
@@ -576,34 +609,7 @@ export default function TrainingPage() {
               const line = csvLines[i].trim(); 
               if (!line) continue;
 
-              const values: string[] = [];
-              let currentVal = '';
-              let inQuotes = false;
-              let charIndex = 0;
-
-              while(charIndex < line.length) {
-                const char = line[charIndex];
-
-                if (char === '"') {
-                  if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
-                    // This is an escaped double quote e.g. "" inside a quoted field
-                    currentVal += '"';
-                    charIndex++; // Consume the second quote of the pair
-                  } else {
-                    // This is an opening or closing quote
-                    inQuotes = !inQuotes;
-                  }
-                } else if (char === ',' && !inQuotes) {
-                  // This is a delimiter outside of a quoted field
-                  values.push(currentVal);
-                  currentVal = '';
-                } else {
-                  // Regular character
-                  currentVal += char;
-                }
-                charIndex++;
-              }
-              values.push(currentVal); // Add the last field
+              const values = parseCsvLine(line);
 
 
               if (values.length !== header.length) {
@@ -617,18 +623,15 @@ export default function TrainingPage() {
                    const index = headerIndices[eh];
                    if (index !== undefined && index < values.length) {
                        let val = values[index];
-                       // Remove surrounding quotes only if they are true pairs at start/end
                        if (val && val.startsWith('"') && val.endsWith('"')) {
                            val = val.substring(1, val.length - 1);
                        }
-                       // Replace escaped double quotes "" with a single "
                        csvRowData[eh] = val.replace(/""/g, '"');
                    } else {
                        csvRowData[eh] = ""; 
                    }
               });
 
-              // Filter by StatusName
               const statusName = csvRowData["StatusName"] || "";
               if (statusName.toLowerCase().includes("historical")) {
                   console.log(`Row ${i + 1}: Skipping due to 'Historical' status.`);
@@ -675,7 +678,7 @@ export default function TrainingPage() {
           membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
               const accomplishmentDetails = csvRowData["Details"];
               const effectiveDateStr = csvRowData["EffectiveDate"];
-              const parsedSurnameData = parseCompositeSurnameField(csvRowData["Surname"]); // Re-parse to ensure we have it
+              const parsedSurnameData = parseCompositeSurnameField(csvRowData["Surname"]); 
 
               if (!accomplishmentDetails) {
                   errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Details" (Accomplishment).`);
@@ -693,13 +696,13 @@ export default function TrainingPage() {
               }
 
               const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
-                rank: parsedSurnameData.rank!, // Known to be valid from earlier check
+                rank: parsedSurnameData.rank!, 
                 staffName: `${parsedSurnameData.lastName}, ${parsedSurnameData.firstName}`,
-                squadron: staffMember.squadron || "N/A", // Use squadron from matched staff profile
-                currentRole: staffMember.role || "N/A",  // Use role from matched staff profile
+                squadron: staffMember.squadron || "N/A", 
+                currentRole: staffMember.role || "N/A",  
                 courseName: accomplishmentDetails,
                 completionDate: completionDate,
-                qualificationAchieved: accomplishmentDetails, // Using Details as qualification
+                qualificationAchieved: accomplishmentDetails, 
                 instructorQualification: "", 
                 achievementDetails: "", 
               };
@@ -742,7 +745,7 @@ export default function TrainingPage() {
               ),
               duration: 15000,
           });
-        } else if (csvLines.length <= 1 && importedCount === 0){ // No data rows and no imports
+        } else if (csvLines.length <= 1 && importedCount === 0){ 
              toast({ title: "Import Information", description: "CSV file has no data rows to import." });
         }
 
