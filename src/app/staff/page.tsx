@@ -55,8 +55,7 @@ import {
 } from "@/components/ui/accordion";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
-import { RANKS } from "./staff-schema";
-import { STAFF_QUERY_KEY } from "@/hooks/useStaffData";
+import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
 import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -324,9 +323,8 @@ export default function StaffPage() {
           headerIndices[h] = csvHeader.indexOf(h); 
         });
         
-        // Use the staffList from useStaff for checking existing records
         const currentStaffList = staffList || [];
-        const existingStaffNumbers = new Set(currentStaffList.map(s => s.serviceNumber));
+        const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
         const existingEmails = new Set(currentStaffList.map(s => s.email));
 
         const addPromises: Promise<void>[] = [];
@@ -375,7 +373,7 @@ export default function StaffPage() {
           
           const phoneValue = csvData.PhoneNumber?.trim();
           const serviceNumber = csvData.MemberUID;
-          const email = csvData.EmailAddress?.trim(); // Trim email as well
+          const email = csvData.EmailAddress?.trim();
 
           if (!phoneValue) {
             errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${serviceNumber || 'UNKNOWN'}".`);
@@ -390,13 +388,17 @@ export default function StaffPage() {
             const upperAppointment = rawAppointmentFromCsv.trim().toUpperCase();
             roleToSave = appointmentMapping[upperAppointment] || rawAppointmentFromCsv.trim();
           }
+          if (!roleToSave.trim()) {
+            roleToSave = "Staff"; // Default to "Staff" if Appointment is blank or unmappable
+          }
+
 
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
           
-          const existingStaffMember = currentStaffList.find(s => s.serviceNumber === serviceNumber);
+          const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
 
-          const staffDataPayload: Omit<StaffMember, 'id'> & { id?: string } = {
+          const memberToAdd: Omit<StaffMember, 'id'> & { id?: string } = {
             serviceNumber: serviceNumber,
             rank: rank || "", 
             firstName: firstName || "",
@@ -406,45 +408,41 @@ export default function StaffPage() {
             role: roleToSave, 
             squadron: squadron,
             address: address,
-            joinDate: existingStaffMember?.joinDate || undefined,
+            joinDate: existingStaffMember?.joinDate || null,
           };
 
           if (existingStaffMember) {
-            // Update existing record
-            staffDataPayload.id = existingStaffMember.id;
-
+            memberToAdd.id = existingStaffMember.id;
             if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
                 continue;
             }
-
             updatePromises.push(
-              updateStaffMutation.mutateAsync(staffDataPayload as StaffMember).then(() => {
+              updateStaffMutation.mutateAsync(memberToAdd as StaffMember).then(() => {
                 updatedCount++;
                 if (email && email !== existingStaffMember.email) {
-                  existingEmails.delete(existingStaffMember.email); // Remove old email if it changed
-                  existingEmails.add(email); // Add new email
+                    existingEmails.delete(existingStaffMember.email);
+                    existingEmails.add(email);
                 }
+                existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberToAdd }); // Update local map
               }).catch((updateError: any) => {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`);
               })
             );
           } else {
-            // Add new record
             if (email && existingEmails.has(email)) {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
               continue;
             }
-            // Service number uniqueness is implicitly handled by the find above, but an explicit check for new records is safer.
-            if (existingStaffNumbers.has(serviceNumber)) {
-                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Service Number "${serviceNumber}" already exists (should have been an update). New record skipped.`);
+            if (existingStaffByServiceNumber.has(serviceNumber)) {
+                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Service Number "${serviceNumber}" seems to already exist but wasn't found for update (internal error or race condition). New record skipped.`);
                 continue;
             }
 
             addPromises.push(
-              addStaffMutation.mutateAsync(staffDataPayload).then(() => {
+              addStaffMutation.mutateAsync(memberToAdd).then((newId) => {
                 importedCount++;
-                existingStaffNumbers.add(serviceNumber);
+                existingStaffByServiceNumber.set(serviceNumber, { ...memberToAdd, id: newId as string }); // Add to local map
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
@@ -669,7 +667,7 @@ export default function StaffPage() {
             <li><code>PrimaryUnit</code> (Optional, e.g., "701 Squadron") - Populates 'Squadron'.</li>
             <li><code>MemberUID</code> (Required, e.g., "8001234") - Populates 'Service Number'. Used to match existing records for updates.</li>
             <li><code>MemberName</code> (Required. Format: "RANK FirstName LastName" e.g., "FLTLT(AAFC) Jane Doe". RANK must be one of: {RANKS.join(", ")}.) - Parsed for Rank, First Name, Last Name.</li>
-            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If this field is blank or cannot be mapped, the record will error during validation.</li>
+            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If this field is blank or cannot be mapped, the role will default to "Staff".</li>
             <li><code>EmailAddress</code> (Required, e.g., "jane.doe@example.com") - Populates 'Email'.</li>
             <li><code>PhoneNumber</code> (Required, e.g., "0400123456") - Populates 'Phone'. <strong>Records with a blank PhoneNumber will be skipped.</strong></li>
             <li><code>Address</code> (Optional) - Populates 'Address'.</li>
