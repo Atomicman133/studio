@@ -286,7 +286,7 @@ export default function StaffPage() {
     "USA": "Unit Safety Advisor",
     "SSO": "Squadron Supply Officer",
     "TRS": "Trainee Staff",
-    "STAFF": "Staff", // Added Staff in uppercase as per common CSV exports
+    "STAFF": "Staff", 
     "SQNXI": "Squadron Executive Instructor",
   };
 
@@ -319,7 +319,6 @@ export default function StaffPage() {
         const headerLine = lines[0].trim();
         const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         
-        // Define all headers expected or that might appear in the CSV
         const allPossibleCsvHeaders = [
           "PrimaryUnit", "MemberUID", "MemberName", "MemberType", "Appointment", 
           "IsPrimary", "Active", "EmailAddress", "ContactEmail1", "PhoneNumber", 
@@ -329,10 +328,7 @@ export default function StaffPage() {
           "HighestEducationLevel", "Religion", "Citizenship", "DefenceVendorNumber", "Name"
         ];
         
-        // Define headers that are *essential* for creating a basic record if present in CSV
         const essentialHeadersFromCsv = ["MemberUID", "MemberName", "Appointment", "EmailAddress", "PhoneNumber"];
-        
-        // Check if all *essential* headers are present in the CSV
         const hasAllEssentialHeaders = essentialHeadersFromCsv.every(eh => csvHeader.includes(eh));
 
         if (!hasAllEssentialHeaders) {
@@ -340,8 +336,8 @@ export default function StaffPage() {
         }
 
         const headerIndices: Record<string, number> = {};
-        allPossibleCsvHeaders.forEach(h => { // Map all possible headers to their index
-          headerIndices[h] = csvHeader.indexOf(h); // Will be -1 if not found
+        allPossibleCsvHeaders.forEach(h => { 
+          headerIndices[h] = csvHeader.indexOf(h); 
         });
         
         const currentStaffList = queryClient.getQueryData<StaffMember[]>([STAFF_QUERY_KEY]) || [];
@@ -354,7 +350,6 @@ export default function StaffPage() {
           const line = lines[i].trim();
           if (!line) continue;
 
-          // Basic CSV value parsing (handles commas within quotes)
           const values = [];
           let currentVal = '';
           let inQuotes = false;
@@ -362,7 +357,7 @@ export default function StaffPage() {
             const char = line[charIndex];
             if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) {
               if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
-                currentVal += '"'; // Handle escaped double quote ""
+                currentVal += '"'; 
                 charIndex++;
               } else {
                 inQuotes = !inQuotes;
@@ -387,20 +382,16 @@ export default function StaffPage() {
               if (index !== -1 && index < values.length) { 
                 csvData[h] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
               } else {
-                // If header was expected but not found in CSV, or data missing, treat as empty string for now
-                // Zod validation will catch if it's a required field for the schema
                 csvData[h] = ""; 
               }
           });
           
-          // **Critical: Skip record only if PhoneNumber is blank**
           const phoneValue = csvData.PhoneNumber?.trim();
           if (!phoneValue) {
             errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
             continue; 
           }
 
-          // Parse MemberName for rank, first name, last name
           const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName);
           if (!rank) {
             errors.push(`Row ${i + 1} (UID: ${csvData.MemberUID || 'UNKNOWN'}): Could not parse rank from MemberName "${csvData.MemberName}". Valid ranks: ${RANKS.join(", ")}. Skipping.`);
@@ -414,18 +405,23 @@ export default function StaffPage() {
           const serviceNumber = csvData.MemberUID;
           const email = csvData.EmailAddress;
           
-          // Map Appointment
           let rawAppointment = csvData.Appointment;
-          let role = rawAppointment; // Default to raw value
-          const upperAppointment = rawAppointment?.toUpperCase();
+          let mappedRole = rawAppointment; 
+          const upperAppointment = rawAppointment?.trim().toUpperCase();
           if (upperAppointment && appointmentMapping[upperAppointment]) {
-            role = appointmentMapping[upperAppointment];
+            mappedRole = appointmentMapping[upperAppointment];
           }
+
+          // Explicitly check if mappedRole is empty or just whitespace AFTER attempting mapping
+          if (!mappedRole || mappedRole.trim() === "") {
+            errors.push(`Row ${i + 1} (UID: ${serviceNumber}): "Appointment" field is missing, empty, or results in an empty role after mapping. Skipping record.`);
+            continue; 
+          }
+
 
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
 
-          // Check for duplicates before attempting to add
           if (existingStaffNumbers.has(serviceNumber)) {
             errors.push(`Row ${i + 1}: Duplicate MemberUID "${serviceNumber}". Skipped.`);
             continue;
@@ -436,25 +432,24 @@ export default function StaffPage() {
           }
 
           const memberToAdd: Omit<StaffMember, 'id'> = {
-            serviceNumber: serviceNumber, // This will be validated by Zod if empty
+            serviceNumber: serviceNumber, 
             rank: rank,
             firstName: firstName,
             lastName: lastName,
-            email: email, // This will be validated by Zod if empty/invalid
+            email: email, 
             phone: phoneValue,
-            role: role, // This will be validated by Zod if empty
+            role: mappedRole, // Use the potentially mapped and validated role
             squadron: squadron,
             address: address,
-            joinDate: undefined, // joinDate is not in this CSV format
+            joinDate: undefined, 
           };
 
            addPromises.push(
               addStaffMutation.mutateAsync(memberToAdd).then(() => {
                  importedCount++;
-                 existingStaffNumbers.add(serviceNumber); // Add to set after successful import
-                 existingEmails.add(email);       // Add to set after successful import
+                 existingStaffNumbers.add(serviceNumber); 
+                 existingEmails.add(email);      
               }).catch((addError: any) => {
-                 // Catch Zod validation errors or other DB errors here
                  errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
               })
             );
@@ -462,13 +457,12 @@ export default function StaffPage() {
 
         await Promise.all(addPromises);
 
-        // Toast notifications based on outcome
         if (importedCount > 0 && errors.length === 0) {
           toast({ title: "Import Complete", description: `${importedCount} staff member(s) imported successfully.` });
         } else if (importedCount > 0 && errors.length > 0) {
             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
              toast({
-                variant: "default", // Or "warning" if you have one
+                variant: "default", 
                 title: "CSV Import Partially Successful",
                 description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{`${importedCount} imported. Errors:\n${errorMessages}`}</pre></ScrollArea> ),
                 duration: 15000,
@@ -481,7 +475,7 @@ export default function StaffPage() {
                 description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errorMessages}</pre></ScrollArea> ),
                 duration: 15000,
             });
-        } else if (importedCount === 0 && errors.length === 0 && lines.length > 1) { // Processed lines but nothing to add
+        } else if (importedCount === 0 && errors.length === 0 && lines.length > 1) { 
            toast({ title: "Import Complete", description: "No new staff members were found to import (all might already exist, or file was empty after header)." });
         } else if (lines.length <=1) {
            toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
@@ -493,10 +487,9 @@ export default function StaffPage() {
         toast({ variant: "destructive", title: "Import Error", description: error.message || "An unexpected error occurred during processing." });
       } finally {
         if (fileInputRef.current) {
-          fileInputRef.current.value = ""; // Reset file input
+          fileInputRef.current.value = ""; 
         }
         setIsImportingCsv(false);
-        // No direct invalidateQueries here, as addStaffMutation's onSuccess will handle it
       }
     };
     reader.onerror = () => {
@@ -684,7 +677,7 @@ export default function StaffPage() {
             <li><code>PrimaryUnit</code> (Optional, e.g., "701 Squadron") - Populates 'Squadron'.</li>
             <li><code>MemberUID</code> (Required, e.g., "8001234") - Populates 'Service Number'.</li>
             <li><code>MemberName</code> (Required. Format: "RANK FirstName LastName" e.g., "FLTLT(AAFC) Jane Doe". RANK must be one of: {RANKS.join(", ")}.) - Parsed for Rank, First Name, Last Name.</li>
-            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded.</li>
+            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If this field is blank or cannot be mapped, the record will be skipped.</li>
             <li><code>EmailAddress</code> (Required, e.g., "jane.doe@example.com") - Populates 'Email'.</li>
             <li><code>PhoneNumber</code> (Required, e.g., "0400123456") - Populates 'Phone'. <strong>Records with a blank PhoneNumber will be skipped.</strong></li>
             <li><code>Address</code> (Optional) - Populates 'Address'.</li>
