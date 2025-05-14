@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin } from "lucide-react"; // Added MapPin
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp } from "lucide-react"; // Added ChevronDown, ChevronUp
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -48,11 +48,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"; // Added Collapsible components
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
 import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
@@ -84,13 +83,35 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
   if (!staffMember) return [];
 
   const logsCollectionRef = collection(db, 'trainingLogs');
-  const q = query(
-    logsCollectionRef,
-    where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
-    where('rank', '==', staffMember.rank),
-    where('squadron', '==', staffMember.squadron),
-    orderBy('completionDate', 'desc')
-  );
+  
+  // Try to match based on Service Number first as it's more unique
+  let q;
+  if (staffMember.serviceNumber) {
+      q = query(
+          logsCollectionRef,
+          where('squadron', '==', staffMember.squadron),
+          where('rank', '==', staffMember.rank), 
+          // This is tricky. If staff name in training log isn't exactly "LastName, FirstName"
+          // or if service number isn't stored in training log, this won't work.
+          // For now, we assume staffName in log is "LastName, FirstName" for matching
+          // and that it's associated with the staff member's service number indirectly
+          // or that we add service number to training logs in future.
+          // A more robust solution would be to query training logs by a staff_id if available.
+          // Let's assume for now we are matching on "LastName, FirstName" string
+          where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
+          orderBy('completionDate', 'desc')
+      );
+  } else {
+      // Fallback if service number isn't present on staffMember (should be rare)
+      q = query(
+          logsCollectionRef,
+          where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
+          where('rank', '==', staffMember.rank),
+          where('squadron', '==', staffMember.squadron),
+          orderBy('completionDate', 'desc')
+      );
+  }
+
 
   try {
     const querySnapshot = await getDocs(q);
@@ -151,6 +172,12 @@ export default function StaffPage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const [isImportingCsv, setIsImportingCsv] = React.useState(false);
+  const [openSquadrons, setOpenSquadrons] = React.useState<Record<string, boolean>>({});
+
+  const toggleSquadron = (squadronName: string) => {
+    setOpenSquadrons(prev => ({ ...prev, [squadronName]: !(prev[squadronName] ?? true) }));
+  };
+
 
   const {
     data: viewedStaffTrainingLogs = [],
@@ -275,7 +302,7 @@ export default function StaffPage() {
     "USA": "Unit Safety Advisor",
     "SSO": "Squadron Supply Officer",
     "TRS": "Trainee Staff",
-    "STAFF": "Staff", 
+    // STAFF is handled as default if no match
     "SQNXI": "Squadron Executive Instructor",
   };
 
@@ -309,11 +336,11 @@ export default function StaffPage() {
         const headerLine = lines[0].trim();
         const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         
-        const expectedCsvHeaders = [ // Using the new list
+        const expectedCsvHeaders = [ 
           "PrimaryUnit", "MemberUID", "MemberName", "Appointment", 
           "EmailAddress", "PhoneNumber", "Address"
         ];
-        const optionalCsvHeaders = [ // Headers that are parsed if present but not strictly required
+        const optionalCsvHeaders = [ 
           "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName", 
           "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin", 
           "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander", 
@@ -377,7 +404,7 @@ export default function StaffPage() {
           });
           
           const phoneValue = csvData.PhoneNumber?.trim();
-          if (!phoneValue) { // Skip record if PhoneNumber is blank
+          if (!phoneValue) {
             errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
             continue; 
           }
@@ -385,11 +412,11 @@ export default function StaffPage() {
           const serviceNumber = csvData.MemberUID;
           const email = csvData.EmailAddress?.trim();
           
-          if (!serviceNumber) { // ServiceNumber is fundamental, treat as error for the row
+          if (!serviceNumber) {
              errors.push(`Row ${i + 1}: MemberUID (Service Number) is blank. Skipping record.`);
              continue;
           }
-          if (!email) { // Email is fundamental
+          if (!email) {
              errors.push(`Row ${i + 1} (UID: ${serviceNumber}): EmailAddress is blank. Skipping record.`);
              continue;
           }
@@ -400,22 +427,29 @@ export default function StaffPage() {
              continue;
           }
           
-          let roleToSave = ""; 
+          let roleToSave = "Staff"; // Default to "Staff"
           const rawAppointmentFromCsv = csvData.Appointment;
           if (rawAppointmentFromCsv && rawAppointmentFromCsv.trim() !== "") {
             const upperAppointment = rawAppointmentFromCsv.trim().toUpperCase();
             roleToSave = appointmentMapping[upperAppointment] || rawAppointmentFromCsv.trim();
+             if (appointmentMapping[upperAppointment]) {
+                roleToSave = appointmentMapping[upperAppointment];
+            } else if (rawAppointmentFromCsv.trim().toUpperCase() === "STAFF") { // Explicitly check for "STAFF"
+                roleToSave = "Staff";
+            } else {
+                // If not in mapping and not explicitly "STAFF", use the raw value if it's not empty,
+                // otherwise it remains "Staff" due to initial default.
+                roleToSave = rawAppointmentFromCsv.trim() || "Staff";
+            }
           }
-          if (!roleToSave.trim()) {
-            roleToSave = "Staff"; // Default to "Staff" if Appointment is blank or unmappable
-          }
+
 
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
           
           const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
 
-          const memberToAdd: Omit<StaffMember, 'id'> & { id?: string } = {
+          const memberDataPayload: Omit<StaffMember, 'id'> & { id?: string } = {
             serviceNumber: serviceNumber,
             rank: rank, 
             firstName: firstName,
@@ -429,19 +463,19 @@ export default function StaffPage() {
           };
 
           if (existingStaffMember) {
-            memberToAdd.id = existingStaffMember.id;
+            memberDataPayload.id = existingStaffMember.id;
             if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
                 continue;
             }
             updatePromises.push(
-              updateStaffMutation.mutateAsync(memberToAdd as StaffMember).then(() => {
+              updateStaffMutation.mutateAsync(memberDataPayload as StaffMember).then(() => {
                 updatedCount++;
                 if (email && email !== existingStaffMember.email) {
                     existingEmails.delete(existingStaffMember.email);
                     existingEmails.add(email);
                 }
-                existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberToAdd });
+                existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberDataPayload });
               }).catch((updateError: any) => {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`);
               })
@@ -457,9 +491,9 @@ export default function StaffPage() {
             }
 
             addPromises.push(
-              addStaffMutation.mutateAsync(memberToAdd).then((newId) => {
+              addStaffMutation.mutateAsync(memberDataPayload).then((newId) => {
                 importedCount++;
-                existingStaffByServiceNumber.set(serviceNumber, { ...memberToAdd, id: newId as string }); 
+                existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string }); 
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`);
@@ -596,73 +630,89 @@ export default function StaffPage() {
 
       {!isLoading && !error && staffGroups.map(group => (
         <Card key={group.squadronName} className="shadow-xl mb-8">
-          <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b">
-            <CardTitle className="text-2xl">Squadron: {group.squadronName}</CardTitle>
-            <CardDescription>{group.staffMembers.length} staff member(s)</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0 px-0 sm:px-0">
-            {group.staffMembers.length === 0 ? (
-              <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
-            ) : (
-              <ScrollArea className="max-h-[600px] w-full">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Service No.</TableHead>
-                      <TableHead>Rank</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead className="hidden md:table-cell">Role</TableHead>
-                      <TableHead className="hidden lg:table-cell">Join Date</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.staffMembers.map((staff) => (
-                      <TableRow key={staff.id}>
-                        <TableCell>{staff.serviceNumber}</TableCell>
-                        <TableCell>{staff.rank}</TableCell>
-                        <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
-                        <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role || "N/A"}</TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          {staff.joinDate && isValidDate(new Date(staff.joinDate)) ? format(new Date(staff.joinDate), "PP") : "N/A"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
-                                <span className="sr-only">Open menu</span>
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                              <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
-                                <Info className="mr-2 h-4 w-4" />
-                                View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
-                                <Pencil className="mr-2 h-4 w-4" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => setStaffToDelete(staff)}
-                                className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            )}
-          </CardContent>
+          <Collapsible
+            open={openSquadrons[group.squadronName] ?? true} // Default to open
+            onOpenChange={() => toggleSquadron(group.squadronName)}
+            className="w-full"
+          >
+            <CollapsibleTrigger asChild>
+              <div className="flex justify-between items-center p-6 border-b bg-muted/20 dark:bg-muted/10 cursor-pointer hover:bg-muted/30 dark:hover:bg-muted/20 transition-colors rounded-t-lg">
+                <div>
+                  <CardTitle className="text-2xl">Squadron: {group.squadronName}</CardTitle>
+                  <CardDescription>{group.staffMembers.length} staff member(s)</CardDescription>
+                </div>
+                <Button variant="ghost" size="sm" className="ml-auto">
+                  {(openSquadrons[group.squadronName] ?? true) ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  <span className="sr-only">Toggle</span>
+                </Button>
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0 px-0 sm:px-0">
+                {group.staffMembers.length === 0 ? (
+                  <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
+                ) : (
+                  <ScrollArea className="max-h-[600px] w-full">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Service No.</TableHead>
+                          <TableHead>Rank</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead className="hidden md:table-cell">Role</TableHead>
+                          <TableHead className="hidden lg:table-cell">Join Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.staffMembers.map((staff) => (
+                          <TableRow key={staff.id}>
+                            <TableCell>{staff.serviceNumber}</TableCell>
+                            <TableCell>{staff.rank}</TableCell>
+                            <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
+                            <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role || "N/A"}</TableCell>
+                            <TableCell className="hidden lg:table-cell">
+                              {staff.joinDate && isValidDate(new Date(staff.joinDate)) ? format(new Date(staff.joinDate), "PP") : "N/A"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                    <span className="sr-only">Open menu</span>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                    <Info className="mr-2 h-4 w-4" />
+                                    View Details
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                    <Pencil className="mr-2 h-4 w-4" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setStaffToDelete(staff)}
+                                    className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                    disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
         </Card>
       ))}
 
@@ -924,4 +974,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
