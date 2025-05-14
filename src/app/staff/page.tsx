@@ -54,12 +54,12 @@ import {
 } from "@/components/ui/collapsible";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
-import { RANKS } from "./staff-schema";
+import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
 import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff, STAFF_QUERY_KEY } from '@/hooks/useStaffData';
+import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
@@ -85,15 +85,22 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
   const logsCollectionRef = collection(db, 'trainingLogs');
   
   let q;
-  if (staffMember.serviceNumber) {
-      q = query(
-          logsCollectionRef,
-          where('squadron', '==', staffMember.squadron),
-          where('rank', '==', staffMember.rank), 
-          where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
-          orderBy('completionDate', 'desc')
-      );
+  if (staffMember.id) {
+    // This assumes you add a 'staffMemberId' field to your trainingLog documents
+    // when they are created or imported, referencing the StaffMember's Firestore ID.
+    // This is the most reliable way to link logs to staff.
+    // q = query(logsCollectionRef, where('staffMemberId', '==', staffMember.id), orderBy('completionDate', 'desc'));
+    
+    // Current fallback since staffMemberId might not be in logs:
+     q = query(
+        logsCollectionRef,
+        where('squadron', '==', staffMember.squadron),
+        where('rank', '==', staffMember.rank), 
+        where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`), 
+        orderBy('completionDate', 'desc')
+    );
   } else {
+      // Fallback if no staffMember.id (should ideally not happen for existing staff)
       q = query(
           logsCollectionRef,
           where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
@@ -108,14 +115,15 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => ({
       id: doc.id,
-      ...convertTrainingLogTimestamps(doc.data()),
+      ...convertTrainingLogTimestamps(doc.data()), 
     })) as TrainingLog[];
   } catch (error) {
     console.error("Error fetching training logs for staff:", error);
-    return [];
+    return []; 
   }
 }
 
+// Helper function to parse MemberName "RANK FirstName LastName"
 function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
   let rank: typeof RANKS[number] | null = null;
   let namePart = memberNameInput.trim();
@@ -130,7 +138,7 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
     }
   }
 
-  if (!namePart) return { rank, firstName: null, lastName: null };
+  if (!namePart) return { rank, firstName: null, lastName: null }; 
 
   const parts = namePart.split(' ').filter(p => p); 
   if (parts.length >= 2) {
@@ -145,7 +153,7 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
     return { rank, firstName: null, lastName: parts[0] }; 
   }
 
-  return { rank, firstName: null, lastName: namePart };
+  return { rank, firstName: null, lastName: namePart }; 
 }
 
 
@@ -177,8 +185,8 @@ export default function StaffPage() {
   } = useQuery<TrainingLog[], Error>({
     queryKey: [STAFF_TRAINING_LOGS_QUERY_KEY, viewingStaffMember?.id || `${viewingStaffMember?.lastName}, ${viewingStaffMember?.firstName}_${viewingStaffMember?.rank}`],
     queryFn: () => fetchTrainingLogsForStaff(viewingStaffMember),
-    enabled: !!viewingStaffMember,
-    staleTime: 1000 * 60 * 2,
+    enabled: !!viewingStaffMember, 
+    staleTime: 1000 * 60 * 2, 
   });
 
   const staffGroups = React.useMemo(() => {
@@ -200,7 +208,7 @@ export default function StaffPage() {
         const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
         if (effectiveRankAIndex !== effectiveRankBIndex) {
-            return effectiveRankAIndex - effectiveRankBIndex;
+            return effectiveRankAIndex - effectiveRankBIndex; 
         }
         const lastNameCompare = a.lastName.localeCompare(b.lastName);
         if (lastNameCompare !== 0) return lastNameCompare;
@@ -213,7 +221,7 @@ export default function StaffPage() {
         squadronName,
         staffMembers
       }))
-      .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
+      .sort((a, b) => a.squadronName.localeCompare(b.squadronName)); 
   }, [staffList]);
 
   const handleAddStaff = async (data: Omit<StaffMember, 'id'>) => {
@@ -252,20 +260,20 @@ export default function StaffPage() {
        } catch (err: any) {
          console.error("Failed to delete staff:", err);
          toast({ variant: "destructive", title: "Error", description: `Failed to delete staff member: ${err.message}` });
-         setStaffToDelete(null);
+         setStaffToDelete(null); 
        }
     }
   };
 
   const handleEdit = (staffMember: StaffMember) => {
     setEditingStaff(staffMember);
-    setViewingStaffMember(null);
+    setViewingStaffMember(null); 
     setIsFormOpen(true);
   };
 
   const handleViewDetails = (staffMember: StaffMember) => {
     setViewingStaffMember(staffMember);
-    setEditingStaff(null);
+    setEditingStaff(null); 
     setIsFormOpen(false);
   };
 
@@ -293,7 +301,7 @@ export default function StaffPage() {
     "USA": "Unit Safety Advisor",
     "SSO": "Squadron Supply Officer",
     "TRS": "Trainee Staff",
-    "STAFF": "Staff",
+    "STAFF": "Staff", 
     "SQNXI": "Squadron Executive Instructor",
   };
 
@@ -319,8 +327,8 @@ export default function StaffPage() {
       let updatedCount = 0;
       
       try {
-        const lines = text.split(/\r\n|\n/).filter(line => line.trim());
-        if (lines.length < 2) {
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim()); 
+        if (lines.length < 2) { 
           throw new Error("CSV must have a header and at least one data row.");
         }
 
@@ -346,13 +354,11 @@ export default function StaffPage() {
           headerIndices[h] = csvHeader.indexOf(h); 
         });
         
-        // Fetch current staff list ONCE before the loop for efficient lookup
-        // Use queryClient to get cached data if available, or fetch if not
         let currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || [];
-        if (currentStaffList.length === 0 && staffList.length > 0) { // Fallback if queryClient cache is empty but hook has data
+        if (currentStaffList.length === 0 && staffList.length > 0) { 
             currentStaffList = staffList;
-        } else if (currentStaffList.length === 0 && staffList.length === 0 && !isLoading) { // Fetch if truly no data
-            currentStaffList = await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn });
+        } else if (currentStaffList.length === 0 && staffList.length === 0 && !isLoading) { 
+            currentStaffList = await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
         }
 
         const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
@@ -365,19 +371,19 @@ export default function StaffPage() {
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
-          if (!line) continue;
+          if (!line) continue; 
 
           const values = [];
           let currentVal = '';
           let inQuotes = false;
           for (let charIndex = 0; charIndex < line.length; charIndex++) {
             const char = line[charIndex];
-            if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) {
+            if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) { 
               if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
                 currentVal += '"'; 
-                charIndex++;
+                charIndex++; 
               } else {
-                inQuotes = !inQuotes;
+                inQuotes = !inQuotes; 
               }
             } else if (char === ',' && !inQuotes) {
               values.push(currentVal.trim());
@@ -386,7 +392,7 @@ export default function StaffPage() {
               currentVal += char;
             }
           }
-          values.push(currentVal.trim());
+          values.push(currentVal.trim()); 
 
           if (values.length !== csvHeader.length) {
             errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
@@ -427,17 +433,17 @@ export default function StaffPage() {
              continue;
           }
           
-          let roleToSave = "Staff"; // Default
+          let roleToSave = "Staff"; 
           const rawAppointmentFromCsv = csvData.Appointment?.trim().toUpperCase();
           if (rawAppointmentFromCsv && appointmentMapping[rawAppointmentFromCsv]) {
               roleToSave = appointmentMapping[rawAppointmentFromCsv];
-          } else if (rawAppointmentFromCsv) { // If not in mapping but present, use the raw value
-              roleToSave = csvData.Appointment!.trim(); // Use original casing from CSV
+          } else if (rawAppointmentFromCsv) { 
+              roleToSave = csvData.Appointment!.trim(); 
           }
-          // If rawAppointmentFromCsv is empty or undefined, roleToSave remains "Staff"
 
-          const squadron = csvData.PrimaryUnit || undefined;
-          const address = csvData.Address || undefined;
+
+          const squadron = csvData.PrimaryUnit || undefined; 
+          const address = csvData.Address || undefined; 
           
           const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
 
@@ -448,14 +454,14 @@ export default function StaffPage() {
             lastName: lastName,
             email: email, 
             phone: phoneValue,
-            role: roleToSave, 
+            role: roleToSave || "Staff",
             squadron: squadron,
             address: address,
-            joinDate: existingStaffMember?.joinDate || null,
+            joinDate: existingStaffMember?.joinDate || null, 
           };
 
-          if (existingStaffMember) {
-            memberDataPayload.id = existingStaffMember.id;
+          if (existingStaffMember) { 
+            memberDataPayload.id = existingStaffMember.id; 
             if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
                 continue;
@@ -472,7 +478,7 @@ export default function StaffPage() {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`);
               })
             );
-          } else {
+          } else { 
             if (email && existingEmails.has(email)) {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
               continue;
@@ -485,7 +491,6 @@ export default function StaffPage() {
             addPromises.push(
               addStaffMutation.mutateAsync(memberDataPayload).then((newId) => {
                 importedCount++;
-                // Add to local map to prevent re-adding if UID appears again in same CSV
                 existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string }); 
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
@@ -501,11 +506,11 @@ export default function StaffPage() {
         if (importedCount > 0) toastMessage += `${importedCount} new staff member(s) imported. `;
         if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
         
-        if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
+        if (toastMessage === "" && errors.length === 0 && lines.length > 1) { 
             toast({ title: "Import Complete", description: "No new staff members were found to import or update based on provided UIDs." });
-        } else if (toastMessage !== "" && errors.length === 0) {
+        } else if (toastMessage !== "" && errors.length === 0) { 
             toast({ title: "Import Successful", description: toastMessage.trim() });
-        } else if (errors.length > 0) {
+        } else if (errors.length > 0) { 
             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
             const title = (importedCount > 0 || updatedCount > 0) ? "CSV Import Partially Successful" : "CSV Import Failed";
             const descriptionPrefix = toastMessage !== "" ? toastMessage : "";
@@ -514,9 +519,9 @@ export default function StaffPage() {
                 variant: (importedCount > 0 || updatedCount > 0) ? "default" : "destructive",
                 title: title,
                 description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}Errors:\n{errorMessages}</pre></ScrollArea> ),
-                duration: 15000,
+                duration: 15000, 
             });
-        } else if (lines.length <=1) {
+        } else if (lines.length <=1) { 
            toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
         }
 
@@ -529,7 +534,6 @@ export default function StaffPage() {
           fileInputRef.current.value = ""; 
         }
         setIsImportingCsv(false);
-        // Manually refetch staff list after import operations
         queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
       }
     };
@@ -566,6 +570,7 @@ export default function StaffPage() {
     console.warn("TODO: Implement backend fetch for audits involving staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
+
 
   return (
     <div className="space-y-6">
@@ -647,7 +652,7 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="max-h-[400px] w-full"> {/* Adjusted max-h */}
+                  <ScrollArea className="max-h-[400px] w-full"> 
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -803,9 +808,9 @@ export default function StaffPage() {
                           </CardContent>
                       </Card>
 
-                    <Accordion type="multiple" className="w-full" defaultValue={["training"]}>
+                    <Accordion type="multiple" collapsible className="w-full">
                       <AccordionItem value="training">
-                        <AccordionTrigger className="text-lg">
+                        <AccordionTrigger>
                           <div className="flex items-center gap-2">
                             <GraduationCap className="h-5 w-5" /> Training Records ({isLoadingViewedStaffLogs ? <Loader2 className="h-4 w-4 animate-spin"/> : viewedStaffTrainingLogs.length})
                           </div>
@@ -842,7 +847,7 @@ export default function StaffPage() {
                       </AccordionItem>
 
                       <AccordionItem value="meetings">
-                        <AccordionTrigger className="text-lg">
+                        <AccordionTrigger>
                           <div className="flex items-center gap-2">
                            <FileText className="h-5 w-5" /> Meetings Attended ({filteredMeetings.length})
                           </div>
@@ -861,7 +866,7 @@ export default function StaffPage() {
                       </AccordionItem>
 
                       <AccordionItem value="pdps">
-                        <AccordionTrigger className="text-lg">
+                        <AccordionTrigger>
                           <div className="flex items-center gap-2">
                             <Briefcase className="h-5 w-5" /> Professional Development ({filteredPdps.length})
                           </div>
@@ -882,7 +887,7 @@ export default function StaffPage() {
                       </AccordionItem>
 
                       <AccordionItem value="discipline">
-                        <AccordionTrigger className="text-lg">
+                        <AccordionTrigger>
                             <div className="flex items-center gap-2">
                                 <Gavel className="h-5 w-5" /> Discipline Actions ({filteredDisciplineActions.length})
                             </div>
@@ -902,7 +907,7 @@ export default function StaffPage() {
                       </AccordionItem>
 
                       <AccordionItem value="audits">
-                        <AccordionTrigger className="text-lg">
+                        <AccordionTrigger>
                             <div className="flex items-center gap-2">
                                 <ShieldCheck className="h-5 w-5" /> Safety Audits Involved In ({filteredAudits.length})
                             </div>
@@ -969,4 +974,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
