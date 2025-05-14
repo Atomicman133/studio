@@ -29,7 +29,8 @@ export const staffMemberSchema = z.object({
   phone: z.string().optional(),
   role: z.string().min(1, "Role is required"),
   joinDate: z.date().optional().nullable(), // Allow null for joinDate
-  squadron: z.string().optional(), // Added for CSV import and direct association
+  squadron: z.string().optional(),
+  address: z.string().optional(), // Added address field
 });
 
 export type StaffMember = z.infer<typeof staffMemberSchema>;

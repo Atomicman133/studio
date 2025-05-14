@@ -1,7 +1,6 @@
 
 "use client";
 
-// import type { Control } from "react-hook-form"; // No longer needed explicitly
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { staffMemberSchema, type StaffMember, RANKS } from "../staff-schema";
@@ -16,6 +15,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea"; // Added Textarea
 import {
   Select,
   SelectContent,
@@ -34,11 +34,11 @@ import { CalendarIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface StaffFormProps {
-  onSubmit: (data: StaffMember | Omit<StaffMember, 'id'>) => void; // Adjusted to allow Omit for new staff
+  onSubmit: (data: StaffMember | Omit<StaffMember, 'id'>) => void;
   defaultValues?: Partial<StaffMember>;
   onCancel: () => void;
   isEditing: boolean;
-  isSubmitting?: boolean; // Optional prop for loading state
+  isSubmitting?: boolean;
 }
 
 export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: StaffFormProps) {
@@ -54,14 +54,15 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubm
       role: "",
       joinDate: undefined,
       squadron: "",
+      address: "", // Added address
     },
   });
 
   const handleSubmit = (data: StaffMember) => {
     if (isEditing && defaultValues?.id) {
-      onSubmit({ ...data, id: defaultValues.id }); // Ensure ID is passed for updates
+      onSubmit({ ...data, id: defaultValues.id });
     } else {
-      const { id, ...newData } = data; // Remove ID for new entries
+      const { id, ...newData } = data;
       onSubmit(newData);
     }
 
@@ -193,7 +194,7 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubm
             control={form.control}
             name="joinDate"
             render={({ field }) => (
-              <FormItem className="flex flex-col md:col-span-2">
+              <FormItem className="flex flex-col">
                 <FormLabel>Join Date (Optional)</FormLabel>
                 <Popover>
                   <PopoverTrigger asChild>
@@ -231,6 +232,19 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubm
               </FormItem>
             )}
           />
+            <FormField
+              control={form.control}
+              name="address"
+              render={({ field }) => (
+                <FormItem className="md:col-span-2">
+                  <FormLabel>Address (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="123 Main St, Anytown" {...field} rows={3} disabled={isSubmitting} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
         </div>
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
