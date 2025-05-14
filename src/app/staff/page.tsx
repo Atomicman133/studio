@@ -51,15 +51,15 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"; // Added Collapsible components
+} from "@/components/ui/collapsible";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
-import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
+import { RANKS } from "./staff-schema";
 import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData';
+import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff, STAFF_QUERY_KEY } from '@/hooks/useStaffData';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
@@ -84,25 +84,16 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
 
   const logsCollectionRef = collection(db, 'trainingLogs');
   
-  // Try to match based on Service Number first as it's more unique
   let q;
   if (staffMember.serviceNumber) {
       q = query(
           logsCollectionRef,
           where('squadron', '==', staffMember.squadron),
           where('rank', '==', staffMember.rank), 
-          // This is tricky. If staff name in training log isn't exactly "LastName, FirstName"
-          // or if service number isn't stored in training log, this won't work.
-          // For now, we assume staffName in log is "LastName, FirstName" for matching
-          // and that it's associated with the staff member's service number indirectly
-          // or that we add service number to training logs in future.
-          // A more robust solution would be to query training logs by a staff_id if available.
-          // Let's assume for now we are matching on "LastName, FirstName" string
           where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
           orderBy('completionDate', 'desc')
       );
   } else {
-      // Fallback if service number isn't present on staffMember (should be rare)
       q = query(
           logsCollectionRef,
           where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
@@ -302,7 +293,7 @@ export default function StaffPage() {
     "USA": "Unit Safety Advisor",
     "SSO": "Squadron Supply Officer",
     "TRS": "Trainee Staff",
-    // STAFF is handled as default if no match
+    "STAFF": "Staff",
     "SQNXI": "Squadron Executive Instructor",
   };
 
@@ -355,9 +346,18 @@ export default function StaffPage() {
           headerIndices[h] = csvHeader.indexOf(h); 
         });
         
-        const currentStaffList = staffList || [];
+        // Fetch current staff list ONCE before the loop for efficient lookup
+        // Use queryClient to get cached data if available, or fetch if not
+        let currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || [];
+        if (currentStaffList.length === 0 && staffList.length > 0) { // Fallback if queryClient cache is empty but hook has data
+            currentStaffList = staffList;
+        } else if (currentStaffList.length === 0 && staffList.length === 0 && !isLoading) { // Fetch if truly no data
+            currentStaffList = await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn });
+        }
+
         const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
-        const existingEmails = new Set(currentStaffList.map(s => s.email));
+        const existingEmails = new Set(currentStaffList.map(s => s.email).filter(Boolean));
+
 
         const addPromises: Promise<void>[] = [];
         const updatePromises: Promise<void>[] = [];
@@ -427,22 +427,14 @@ export default function StaffPage() {
              continue;
           }
           
-          let roleToSave = "Staff"; // Default to "Staff"
-          const rawAppointmentFromCsv = csvData.Appointment;
-          if (rawAppointmentFromCsv && rawAppointmentFromCsv.trim() !== "") {
-            const upperAppointment = rawAppointmentFromCsv.trim().toUpperCase();
-            roleToSave = appointmentMapping[upperAppointment] || rawAppointmentFromCsv.trim();
-             if (appointmentMapping[upperAppointment]) {
-                roleToSave = appointmentMapping[upperAppointment];
-            } else if (rawAppointmentFromCsv.trim().toUpperCase() === "STAFF") { // Explicitly check for "STAFF"
-                roleToSave = "Staff";
-            } else {
-                // If not in mapping and not explicitly "STAFF", use the raw value if it's not empty,
-                // otherwise it remains "Staff" due to initial default.
-                roleToSave = rawAppointmentFromCsv.trim() || "Staff";
-            }
+          let roleToSave = "Staff"; // Default
+          const rawAppointmentFromCsv = csvData.Appointment?.trim().toUpperCase();
+          if (rawAppointmentFromCsv && appointmentMapping[rawAppointmentFromCsv]) {
+              roleToSave = appointmentMapping[rawAppointmentFromCsv];
+          } else if (rawAppointmentFromCsv) { // If not in mapping but present, use the raw value
+              roleToSave = csvData.Appointment!.trim(); // Use original casing from CSV
           }
-
+          // If rawAppointmentFromCsv is empty or undefined, roleToSave remains "Staff"
 
           const squadron = csvData.PrimaryUnit || undefined;
           const address = csvData.Address || undefined;
@@ -493,6 +485,7 @@ export default function StaffPage() {
             addPromises.push(
               addStaffMutation.mutateAsync(memberDataPayload).then((newId) => {
                 importedCount++;
+                // Add to local map to prevent re-adding if UID appears again in same CSV
                 existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string }); 
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
@@ -509,7 +502,7 @@ export default function StaffPage() {
         if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
         
         if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
-            toast({ title: "Import Complete", description: "No new staff members were found to import or update." });
+            toast({ title: "Import Complete", description: "No new staff members were found to import or update based on provided UIDs." });
         } else if (toastMessage !== "" && errors.length === 0) {
             toast({ title: "Import Successful", description: toastMessage.trim() });
         } else if (errors.length > 0) {
@@ -536,6 +529,8 @@ export default function StaffPage() {
           fileInputRef.current.value = ""; 
         }
         setIsImportingCsv(false);
+        // Manually refetch staff list after import operations
+        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
       }
     };
     reader.onerror = () => {
@@ -631,7 +626,7 @@ export default function StaffPage() {
       {!isLoading && !error && staffGroups.map(group => (
         <Card key={group.squadronName} className="shadow-xl mb-8">
           <Collapsible
-            open={openSquadrons[group.squadronName] ?? true} // Default to open
+            open={openSquadrons[group.squadronName] ?? true} 
             onOpenChange={() => toggleSquadron(group.squadronName)}
             className="w-full"
           >
@@ -652,7 +647,7 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="max-h-[600px] w-full">
+                  <ScrollArea className="max-h-[400px] w-full"> {/* Adjusted max-h */}
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -731,17 +726,17 @@ export default function StaffPage() {
           To bulk import staff, upload a CSV file. The system will attempt to parse the headers provided.
           The following fields are used if their corresponding headers are found:
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
-            <li><code>PrimaryUnit</code> (Optional, e.g., "701 Squadron") - Populates 'Squadron'.</li>
-            <li><code>MemberUID</code> (Required, e.g., "8001234") - Populates 'Service Number'. Used to match existing records for updates.</li>
-            <li><code>MemberName</code> (Required. Format: "RANK FirstName LastName" e.g., "FLTLT(AAFC) Jane Doe". RANK must be one of: {RANKS.join(", ")}.) - Parsed for Rank, First Name, Last Name.</li>
-            <li><code>Appointment</code> (Required, e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If this field is blank or cannot be mapped, the role will default to "Staff".</li>
-            <li><code>EmailAddress</code> (Required, e.g., "jane.doe@example.com") - Populates 'Email'.</li>
-            <li><code>PhoneNumber</code> (Required, e.g., "0400123456") - Populates 'Phone'. <strong>Records with a blank PhoneNumber will be skipped.</strong></li>
-            <li><code>Address</code> (Optional) - Populates 'Address'.</li>
+            <li><code>PrimaryUnit</code> (e.g., "701 Squadron") - Populates 'Squadron'.</li>
+            <li><code>MemberUID</code> (e.g., "8001234") - Populates 'Service Number'. Used to match existing records for updates. **Required for each record.**</li>
+            <li><code>MemberName</code> (Format: "RANK FirstName LastName" e.g., "FLTLT(AAFC) Jane Doe". RANK must be one of: {RANKS.join(", ")}.) - Parsed for Rank, First Name, Last Name. **Required and must be parsable.**</li>
+            <li><code>Appointment</code> (e.g., "Squadron Training Officer" or "XO") - Populates 'Role'. Abbreviations (XO, ADMINO, etc.) will be expanded. If blank or unmappable, defaults to "Staff".</li>
+            <li><code>EmailAddress</code> (e.g., "jane.doe@example.com") - Populates 'Email'. **Required for each record.**</li>
+            <li><code>PhoneNumber</code> (e.g., "0400123456") - Populates 'Phone'. **Records with a blank PhoneNumber will be skipped entirely.**</li>
+            <li><code>Address</code> - Populates 'Address'.</li>
             <li>Other headers (e.g., MemberType, IsPrimary, Active, ContactEmail1, ContactName, etc.) will be ignored.</li>
           </ul>
           If a record with a matching `MemberUID` is found, it will be updated. Otherwise, a new record will be created.
-          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones.
+          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates/creations skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones.
         </AlertDescription>
       </Alert>
 
@@ -974,3 +969,4 @@ export default function StaffPage() {
     </div>
   );
 }
+
