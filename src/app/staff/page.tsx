@@ -52,6 +52,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import type { StaffMember } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
 import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
@@ -65,7 +71,7 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
 
 import type { TrainingLog } from "../training/training-schema";
-import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page"; // Assuming this is correctly typed and exported
+import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page";
 import type { Meeting } from "../meetings/meeting-schema";
 import type { DisciplineAction } from "../discipline/discipline-schema";
 import type { Pdp } from "../pdps/pdp-schema";
@@ -86,12 +92,6 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
   
   let q;
   if (staffMember.id) {
-    // This assumes you add a 'staffMemberId' field to your trainingLog documents
-    // when they are created or imported, referencing the StaffMember's Firestore ID.
-    // This is the most reliable way to link logs to staff.
-    // q = query(logsCollectionRef, where('staffMemberId', '==', staffMember.id), orderBy('completionDate', 'desc'));
-    
-    // Current fallback since staffMemberId might not be in logs:
      q = query(
         logsCollectionRef,
         where('squadron', '==', staffMember.squadron),
@@ -100,7 +100,6 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
         orderBy('completionDate', 'desc')
     );
   } else {
-      // Fallback if no staffMember.id (should ideally not happen for existing staff)
       q = query(
           logsCollectionRef,
           where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
@@ -123,7 +122,6 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
   }
 }
 
-// Helper function to parse MemberName "RANK FirstName LastName"
 function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
   let rank: typeof RANKS[number] | null = null;
   let namePart = memberNameInput.trim();
@@ -339,7 +337,6 @@ export default function StaffPage() {
           "PrimaryUnit", "MemberUID", "MemberName", "Appointment", 
           "EmailAddress", "PhoneNumber", "Address"
         ];
-        // All other headers from the user's list are effectively "optional" or "ignored"
         const allRecognizedHeaders = [
             ...expectedCsvHeaders,
             "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName", 
@@ -352,18 +349,17 @@ export default function StaffPage() {
         const headerIndices: Record<string, number> = {};
         allRecognizedHeaders.forEach(h => { 
           const index = csvHeader.indexOf(h);
-          if (index !== -1) { // Only map headers that are present in the CSV
+          if (index !== -1) { 
             headerIndices[h] = index;
           }
         });
         
-        // Ensure all *expected* headers are present
         for (const expectedHeader of expectedCsvHeaders) {
             if (headerIndices[expectedHeader] === undefined) {
                  errors.push(`Missing required CSV header: "${expectedHeader}".`);
             }
         }
-        if (errors.length > 0) { // Stop if essential headers are missing
+        if (errors.length > 0) { 
             throw new Error(errors.join(" "));
         }
         
@@ -487,7 +483,7 @@ export default function StaffPage() {
                 existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberDataPayload });
               }).catch((updateError: any) => {
                 let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`;
-                if (updateError.errors) { // Zod errors
+                if (updateError.errors) { 
                   errorMessage += ` Details: ${JSON.stringify(updateError.errors)}`;
                 }
                 errors.push(errorMessage);
@@ -498,7 +494,6 @@ export default function StaffPage() {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
               continue;
             }
-            // No need to check existingStaffByServiceNumber again, as it's done above
             addPromises.push(
               addStaffMutation.mutateAsync(memberDataPayload as Omit<StaffMember, 'id'>).then((newId) => {
                 importedCount++;
@@ -506,7 +501,7 @@ export default function StaffPage() {
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
                 let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`;
-                if (addError.errors) { // Zod errors
+                if (addError.errors) { 
                   errorMessage += ` Details: ${JSON.stringify(addError.errors)}`;
                 }
                 errors.push(errorMessage);
@@ -666,7 +661,7 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="h-[300px] w-full border"> {/* Applied fixed height and border */}
+                  <ScrollArea className="h-[400px] w-full border"> 
                     <Table>
                       <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                         <TableRow>
@@ -821,126 +816,126 @@ export default function StaffPage() {
                             </div>
                           </CardContent>
                       </Card>
+                        
+                        <Accordion type="multiple" collapsible className="w-full">
+                          <AccordionItem value="training">
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                                <GraduationCap className="h-5 w-5" /> Training Records ({isLoadingViewedStaffLogs ? <Loader2 className="h-4 w-4 animate-spin"/> : viewedStaffTrainingLogs.length})
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              <ScrollArea className="max-h-[300px] border rounded-md">
+                                {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+                                {errorViewedStaffLogs && <p className="text-sm text-destructive p-4">Error loading training records: {errorViewedStaffLogs.message}</p>}
+                                {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
+                                    <p className="text-sm text-muted-foreground p-4 text-center">No training records found for this staff member.</p>
+                                )}
+                                {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Course Name</TableHead>
+                                        <TableHead>Completion Date</TableHead>
+                                        <TableHead>Qualification</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {viewedStaffTrainingLogs.map(log => (
+                                        <TableRow key={log.id}>
+                                          <TableCell>{log.courseName}</TableCell>
+                                          <TableCell>{log.completionDate && isValidDate(new Date(log.completionDate)) ? format(new Date(log.completionDate), "PP") : "Invalid Date"}</TableCell>
+                                          <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                )}
+                              </ScrollArea>
+                            </AccordionContent>
+                          </AccordionItem>
 
-                    <Accordion type="multiple" collapsible className="w-full">
-                      <AccordionItem value="training">
-                        <AccordionTrigger>
-                          <div className="flex items-center gap-2">
-                            <GraduationCap className="h-5 w-5" /> Training Records ({isLoadingViewedStaffLogs ? <Loader2 className="h-4 w-4 animate-spin"/> : viewedStaffTrainingLogs.length})
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                          <ScrollArea className="max-h-[300px] border rounded-md">
-                            {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
-                            {errorViewedStaffLogs && <p className="text-sm text-destructive p-4">Error loading training records: {errorViewedStaffLogs.message}</p>}
-                            {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
-                                <p className="text-sm text-muted-foreground p-4 text-center">No training records found for this staff member.</p>
-                            )}
-                            {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Course Name</TableHead>
-                                    <TableHead>Completion Date</TableHead>
-                                    <TableHead>Qualification</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {viewedStaffTrainingLogs.map(log => (
-                                    <TableRow key={log.id}>
-                                      <TableCell>{log.courseName}</TableCell>
-                                      <TableCell>{log.completionDate && isValidDate(new Date(log.completionDate)) ? format(new Date(log.completionDate), "PP") : "Invalid Date"}</TableCell>
-                                      <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            )}
-                          </ScrollArea>
-                        </AccordionContent>
-                      </AccordionItem>
+                          <AccordionItem value="meetings">
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                               <FileText className="h-5 w-5" /> Meetings Attended ({filteredMeetings.length})
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                {filteredMeetings.length > 0 ? (
+                                    <ul className="list-disc pl-5 space-y-1 text-sm">
+                                    {filteredMeetings.map(meeting => (
+                                        <li key={meeting.id}>{meeting.title} - Date: {meeting.date && isValidDate(new Date(meeting.date)) ? format(new Date(meeting.date), "PP") : "Invalid Date"}
+                                        <br/>Attendees: {meeting.attendees}
+                                        </li>
+                                    ))}
+                                    </ul>
+                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No meeting records found (fetching not implemented).</p>}
+                            </AccordionContent>
+                          </AccordionItem>
 
-                      <AccordionItem value="meetings">
-                        <AccordionTrigger>
-                          <div className="flex items-center gap-2">
-                           <FileText className="h-5 w-5" /> Meetings Attended ({filteredMeetings.length})
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                            {filteredMeetings.length > 0 ? (
-                                <ul className="list-disc pl-5 space-y-1 text-sm">
-                                {filteredMeetings.map(meeting => (
-                                    <li key={meeting.id}>{meeting.title} - Date: {meeting.date && isValidDate(new Date(meeting.date)) ? format(new Date(meeting.date), "PP") : "Invalid Date"}
-                                    <br/>Attendees: {meeting.attendees}
-                                    </li>
-                                ))}
-                                </ul>
-                            ) : <p className="text-sm text-muted-foreground p-4 text-center">No meeting records found (fetching not implemented).</p>}
-                        </AccordionContent>
-                      </AccordionItem>
+                          <AccordionItem value="pdps">
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                                <Briefcase className="h-5 w-5" /> Professional Development ({filteredPdps.length})
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                {filteredPdps.length > 0 ? (
+                                    <ul className="list-disc pl-5 space-y-1 text-sm">
+                                    {filteredPdps.map(pdp => (
+                                        <li key={pdp.id}>
+                                        PDP Period: {pdp.pdpPeriod}
+                                        <br/>Goals: {pdp.goals.length}
+                                        {pdp.reviewDate && isValidDate(new Date(pdp.reviewDate)) && ` | Next Review: ${format(new Date(pdp.reviewDate), "PP")}`}
+                                        </li>
+                                    ))}
+                                    </ul>
+                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No PDPs found (fetching not implemented).</p>}
+                            </AccordionContent>
+                          </AccordionItem>
 
-                      <AccordionItem value="pdps">
-                        <AccordionTrigger>
-                          <div className="flex items-center gap-2">
-                            <Briefcase className="h-5 w-5" /> Professional Development ({filteredPdps.length})
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                            {filteredPdps.length > 0 ? (
-                                <ul className="list-disc pl-5 space-y-1 text-sm">
-                                {filteredPdps.map(pdp => (
-                                    <li key={pdp.id}>
-                                    PDP Period: {pdp.pdpPeriod}
-                                    <br/>Goals: {pdp.goals.length}
-                                    {pdp.reviewDate && isValidDate(new Date(pdp.reviewDate)) && ` | Next Review: ${format(new Date(pdp.reviewDate), "PP")}`}
-                                    </li>
-                                ))}
-                                </ul>
-                            ) : <p className="text-sm text-muted-foreground p-4 text-center">No PDPs found (fetching not implemented).</p>}
-                        </AccordionContent>
-                      </AccordionItem>
+                          <AccordionItem value="discipline">
+                            <AccordionTrigger>
+                                <div className="flex items-center gap-2">
+                                    <Gavel className="h-5 w-5" /> Discipline Actions ({filteredDisciplineActions.length})
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                 {filteredDisciplineActions.length > 0 ? (
+                                    <ul className="list-disc pl-5 space-y-1 text-sm">
+                                    {filteredDisciplineActions.map(action => (
+                                        <li key={action.id}>
+                                        {action.typeOfAction} - Incident Date: {action.dateOfIncident && isValidDate(new Date(action.dateOfIncident)) ? format(new Date(action.dateOfIncident), "PP") : "Invalid Date"}
+                                        <br/>Description: {action.incidentDescription}
+                                        </li>
+                                    ))}
+                                    </ul>
+                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No discipline actions found (fetching not implemented).</p>}
+                            </AccordionContent>
+                          </AccordionItem>
 
-                      <AccordionItem value="discipline">
-                        <AccordionTrigger>
-                            <div className="flex items-center gap-2">
-                                <Gavel className="h-5 w-5" /> Discipline Actions ({filteredDisciplineActions.length})
-                            </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                             {filteredDisciplineActions.length > 0 ? (
-                                <ul className="list-disc pl-5 space-y-1 text-sm">
-                                {filteredDisciplineActions.map(action => (
-                                    <li key={action.id}>
-                                    {action.typeOfAction} - Incident Date: {action.dateOfIncident && isValidDate(new Date(action.dateOfIncident)) ? format(new Date(action.dateOfIncident), "PP") : "Invalid Date"}
-                                    <br/>Description: {action.incidentDescription}
-                                    </li>
-                                ))}
-                                </ul>
-                            ) : <p className="text-sm text-muted-foreground p-4 text-center">No discipline actions found (fetching not implemented).</p>}
-                        </AccordionContent>
-                      </AccordionItem>
-
-                      <AccordionItem value="audits">
-                        <AccordionTrigger>
-                            <div className="flex items-center gap-2">
-                                <ShieldCheck className="h-5 w-5" /> Safety Audits Involved In ({filteredAudits.length})
-                            </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                            {filteredAudits.length > 0 ? (
-                                <ul className="list-disc pl-5 space-y-1 text-sm">
-                                {filteredAudits.map(audit => (
-                                    <li key={audit.id}>
-                                    {audit.auditTitle} - Date: {audit.auditDate && isValidDate(new Date(audit.auditDate)) ? format(new Date(audit.auditDate), "PP") : "Invalid Date"}
-                                    <br/>Type: {audit.auditType}
-                                    </li>
-                                ))}
-                                </ul>
-                            ) : <p className="text-sm text-muted-foreground p-4 text-center">No safety audits found where this member was involved (fetching not implemented).</p>}
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  </div>
+                          <AccordionItem value="audits">
+                            <AccordionTrigger>
+                                <div className="flex items-center gap-2">
+                                    <ShieldCheck className="h-5 w-5" /> Safety Audits Involved In ({filteredAudits.length})
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                {filteredAudits.length > 0 ? (
+                                    <ul className="list-disc pl-5 space-y-1 text-sm">
+                                    {filteredAudits.map(audit => (
+                                        <li key={audit.id}>
+                                        {audit.auditTitle} - Date: {audit.auditDate && isValidDate(new Date(audit.auditDate)) ? format(new Date(audit.auditDate), "PP") : "Invalid Date"}
+                                        <br/>Type: {audit.auditType}
+                                        </li>
+                                    ))}
+                                    </ul>
+                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No safety audits found where this member was involved (fetching not implemented).</p>}
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
+                      </div>
                 </ScrollArea>
                 <DialogFooter className="pt-4 border-t">
                     <Button variant="outline" onClick={() => {
