@@ -109,12 +109,14 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); 
 
           if (criterion.yearsToExpire) {
-            const expiryDateBasedOnCompletion = addYears(completionDate, criterion.yearsToExpire);
-            if (isBefore(today, expiryDateBasedOnCompletion)) { // Check if today is before the calculated expiry date
+            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+             // For compliance, item is valid UP TO AND INCLUDING the day before expiry.
+             // So, if today is strictly BEFORE the expiry date, it's met.
+            if (isBefore(today, expiryDate)) { 
               isMet = true;
-               details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDateBasedOnCompletion, 'dd/MM/yyyy')}.`;
+               details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
             } else {
-              details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDateBasedOnCompletion, 'dd/MM/yyyy')}.`;
+              details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
           } else { // No expiry, just needs to exist
             isMet = true; 
@@ -202,7 +204,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return null; // Or return a negative number if you want to show days past expiry
+     return null; 
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -214,10 +216,10 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft >= 0) { // Only show for items not yet expired
-        if (daysLeft <= 30) { // Expiring within 30 days
+    if (daysLeft !== null && daysLeft >= 0) { 
+        if (daysLeft <= 30) { 
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-        } else if (daysLeft <= 90) { // Expiring within 90 days
+        } else if (daysLeft <= 90) { 
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
     }
@@ -226,7 +228,6 @@ export default function ReportingPage() {
 
   const generateComplianceReportPdf = (report: StaffComplianceReport): jsPDF => {
     const doc = new jsPDF();
-    // const filename = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
     
     let yPos = 15;
     const lineSpacing = 7;
@@ -264,7 +265,7 @@ export default function ReportingPage() {
     yPos += lineSpacing * 1.2;
 
     report.criteriaChecks.forEach(criterion => {
-      checkPageBreak(lineSpacing * 3); // Estimate for a criterion
+      checkPageBreak(lineSpacing * 3); 
       doc.setFontSize(11);
       doc.setFont(undefined, 'bold');
       doc.text(criterion.name, margin, yPos);
@@ -272,11 +273,11 @@ export default function ReportingPage() {
 
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      doc.setTextColor(criterion.isMet ? 0 : 200); // Black for met, reddish for not met (can be adjusted)
+      doc.setTextColor(criterion.isMet ? 0 : 200); 
       const statusText = criterion.isMet ? "Met" : "Not Met";
       const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, maxLineWidth - indent);
       doc.text(detailLines, margin + indent, yPos);
-      doc.setTextColor(0); // Reset color
+      doc.setTextColor(0); 
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     });
     
@@ -291,33 +292,54 @@ export default function ReportingPage() {
 
     const pdfDoc = generateComplianceReportPdf(report);
     const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
-    pdfDoc.save(pdfFileName);
-
+    
+    // Get PDF as base64 string
+    const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
 
     const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
       .map(c => `  - ${c.name}: ${c.details}`)
       .join("\n");
 
+    const emailTo = report.email || '';
     const subject = `Action Required: Compliance Update for ${report.staffMemberName}`;
-    const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items. For your reference, a detailed compliance report (named: ${pdfFileName}) has been generated and downloaded to your computer. Please attach this PDF if you are forwarding this email or replying.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+    const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
-    const mailtoLink = `mailto:${report.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
     
-    console.log("Generated mailto link:", mailtoLink); // Log for debugging
-    try {
-      window.location.href = mailtoLink;
-    } catch (e: any) {
-      console.error("Error attempting to open email client:", e);
-      toast({
-        variant: "destructive",
-        title: "Email Client Error",
-        description: "Could not automatically open your email client. Please manually create an email.",
-      });
-    }
+    let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`; // Replace with a generic sender if needed
+    emlContent += `To: ${emailTo}\r\n`;
+    emlContent += `Subject: ${subject}\r\n`;
+    emlContent += `MIME-Version: 1.0\r\n`;
+    emlContent += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
+
+    // Text part
+    emlContent += `--${boundary}\r\n`;
+    emlContent += `Content-Type: text/plain; charset="UTF-8"\r\n`;
+    emlContent += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
+    emlContent += `${body}\r\n\r\n`;
+
+    // Attachment part
+    emlContent += `--${boundary}\r\n`;
+    emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`;
+    emlContent += `Content-Transfer-Encoding: base64\r\n`;
+    emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`;
+    emlContent += `${pdfBase64}\r\n\r\n`;
+
+    emlContent += `--${boundary}--`;
+
+    const emlFileName = `Compliance_Email_for_${report.staffMemberName.replace(/\s+/g, '_')}.eml`;
+    const dataUri = `data:message/rfc822;charset=utf-8,${encodeURIComponent(emlContent)}`;
+
+    const link = document.createElement('a');
+    link.href = dataUri;
+    link.download = emlFileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
     toast({
-      title: "Compliance Report Downloaded",
-      description: "Please attach the downloaded PDF to the email that has been opened (or a new email if your client didn't open).",
+      title: "Email File Generated",
+      description: `An .eml file "${emlFileName}" has been downloaded. Please open it with your email client to send the pre-composed email with the PDF report attached.`,
       duration: 10000,
     });
   };
@@ -384,7 +406,6 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
-                      {/* Trigger Row */}
                       <TableRow
                         onClick={() => toggleCollapsible(report.staffMemberId)}
                         className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
@@ -414,7 +435,6 @@ export default function ReportingPage() {
                           )}
                         </TableCell>
                       </TableRow>
-                      {/* Content Row (conditionally rendered) */}
                       {openCollapsible === report.staffMemberId && (
                         <TableRow className="bg-muted/50 dark:bg-muted/30">
                           <TableCell colSpan={5}>
@@ -471,7 +491,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s) from the current date).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
