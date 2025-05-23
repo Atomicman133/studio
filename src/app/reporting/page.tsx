@@ -75,7 +75,7 @@ const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[
     return getStaffIdentifier(matchedStaff);
   }
 
-  console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}. Using log details as fallback identifier.`);
+  console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}, ${log.squadron}. Using log details as fallback identifier.`);
   return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
 };
 
@@ -109,14 +109,14 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); 
 
           if (criterion.yearsToExpire) {
-            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-             if (isBefore(today, expiryDate)) {
+            const expiryDateBasedOnCompletion = addYears(completionDate, criterion.yearsToExpire);
+            if (isBefore(today, expiryDateBasedOnCompletion)) { // Check if today is before the calculated expiry date
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
+               details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDateBasedOnCompletion, 'dd/MM/yyyy')}.`;
             } else {
-              details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+              details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDateBasedOnCompletion, 'dd/MM/yyyy')}.`;
             }
-          } else {
+          } else { // No expiry, just needs to exist
             isMet = true; 
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
@@ -140,7 +140,7 @@ const processComplianceReports = (
       squadron: staff.squadron || "N/A",
       isCompliant,
       criteriaChecks,
-      email: staff.email, // Add email for mailing
+      email: staff.email, 
     };
   })
   .sort((a,b) => {
@@ -202,7 +202,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return null;
+     return null; // Or return a negative number if you want to show days past expiry
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -214,10 +214,10 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft >= 0) {
-        if (daysLeft <= 30) {
+    if (daysLeft !== null && daysLeft >= 0) { // Only show for items not yet expired
+        if (daysLeft <= 30) { // Expiring within 30 days
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-        } else if (daysLeft <= 90) {
+        } else if (daysLeft <= 90) { // Expiring within 90 days
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
     }
@@ -226,7 +226,7 @@ export default function ReportingPage() {
 
   const generateComplianceReportPdf = (report: StaffComplianceReport): jsPDF => {
     const doc = new jsPDF();
-    const filename = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
+    // const filename = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
     
     let yPos = 15;
     const lineSpacing = 7;
@@ -272,7 +272,7 @@ export default function ReportingPage() {
 
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      doc.setTextColor(criterion.isMet ? 0 : 200); // Black for met, reddish for not met
+      doc.setTextColor(criterion.isMet ? 0 : 200); // Black for met, reddish for not met (can be adjusted)
       const statusText = criterion.isMet ? "Met" : "Not Met";
       const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, maxLineWidth - indent);
       doc.text(detailLines, margin + indent, yPos);
@@ -290,7 +290,8 @@ export default function ReportingPage() {
     }
 
     const pdfDoc = generateComplianceReportPdf(report);
-    pdfDoc.save(`compliance_report_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`);
+    const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
+    pdfDoc.save(pdfFileName);
 
 
     const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
@@ -298,15 +299,25 @@ export default function ReportingPage() {
       .join("\n");
 
     const subject = `Action Required: Compliance Update for ${report.staffMemberName}`;
-    const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items. For your reference, a detailed compliance report has been generated and downloaded to your computer (it's named: compliance_report_${report.staffMemberName.replace(/\s+/g, '_')}.pdf). Please attach this PDF if you are forwarding this email or replying.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+    const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items. For your reference, a detailed compliance report (named: ${pdfFileName}) has been generated and downloaded to your computer. Please attach this PDF if you are forwarding this email or replying.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
     const mailtoLink = `mailto:${report.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     
-    window.location.href = mailtoLink;
+    console.log("Generated mailto link:", mailtoLink); // Log for debugging
+    try {
+      window.location.href = mailtoLink;
+    } catch (e: any) {
+      console.error("Error attempting to open email client:", e);
+      toast({
+        variant: "destructive",
+        title: "Email Client Error",
+        description: "Could not automatically open your email client. Please manually create an email.",
+      });
+    }
 
     toast({
       title: "Compliance Report Downloaded",
-      description: "Please attach the downloaded PDF to the email that has been opened.",
+      description: "Please attach the downloaded PDF to the email that has been opened (or a new email if your client didn't open).",
       duration: 10000,
     });
   };
@@ -373,6 +384,7 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
+                      {/* Trigger Row */}
                       <TableRow
                         onClick={() => toggleCollapsible(report.staffMemberId)}
                         className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
@@ -395,13 +407,14 @@ export default function ReportingPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {!report.isCompliant && (
+                          {!report.isCompliant && report.email && (
                             <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
                               <Mail className="h-4 w-4" />
                             </Button>
                           )}
                         </TableCell>
                       </TableRow>
+                      {/* Content Row (conditionally rendered) */}
                       {openCollapsible === report.staffMemberId && (
                         <TableRow className="bg-muted/50 dark:bg-muted/30">
                           <TableCell colSpan={5}>
@@ -458,7 +471,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years, check is exclusive of expiry date - expires *on* the date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s) from the current date).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -476,7 +489,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
           </p>
         </CardContent>
       </Card>
