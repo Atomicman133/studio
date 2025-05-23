@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2, Mail } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2, Mail, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -26,18 +26,22 @@ import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reportin
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
-import { useStaff } from "@/hooks/useStaffData"; 
-import { useQuery } from '@tanstack/react-query'; 
-import { db } from '@/lib/firebase/config'; 
-import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; 
+import { useStaff } from "@/hooks/useStaffData";
+import { useQuery } from '@tanstack/react-query';
+import { db } from '@/lib/firebase/config';
+import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns";
 import { RANKS } from "../staff/staff-schema";
 import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+
+const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
+const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
 
 // --- Fetch Training Logs (copied from training page for this component's scope) ---
-const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; 
+const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting';
 const convertLogTimestamps = (data: any): TrainingLog => {
   return {
     ...data,
@@ -68,7 +72,7 @@ const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[
   const matchedStaff = staffList.find(sm =>
     sm.rank === log.rank &&
     `${sm.lastName}, ${sm.firstName}` === log.staffName &&
-    sm.squadron === log.squadron 
+    sm.squadron === log.squadron
   );
 
   if (matchedStaff) {
@@ -94,32 +98,33 @@ const processComplianceReports = (
         .filter(log => criterion.identifier(log))
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
-      let isMet = false; 
+      let isMet = false;
       let details = "Missing";
       let selectedLog: TrainingLog | undefined = undefined;
 
       if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0]; 
+        selectedLog = relevantLogs[0];
         const completionDate = new Date(selectedLog.completionDate);
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
         } else {
           const today = new Date();
-          today.setHours(0, 0, 0, 0); 
+          today.setHours(0, 0, 0, 0);
 
           if (criterion.yearsToExpire) {
+            // Valid IF today is strictly BEFORE the expiry date (calculated as completionDate + yearsToExpire).
+            // AND IF today is ON OR AFTER the completion date.
+            // The item expires ON the calculated expiry date (exclusive of this day for validity).
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-             // For compliance, item is valid UP TO AND INCLUDING the day before expiry.
-             // So, if today is strictly BEFORE the expiry date, it's met.
-            if (isBefore(today, expiryDate)) { 
+            if (isBefore(today, expiryDate) && (isAfter(today, completionDate) || isEqual(today, completionDate))) {
               isMet = true;
-               details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
+              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`; // Display as valid until day *before* actual expiry.
             } else {
-              details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
           } else { // No expiry, just needs to exist
-            isMet = true; 
+            isMet = true;
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
         }
@@ -142,7 +147,7 @@ const processComplianceReports = (
       squadron: staff.squadron || "N/A",
       isCompliant,
       criteriaChecks,
-      email: staff.email, 
+      email: staff.email,
     };
   })
   .sort((a,b) => {
@@ -204,7 +209,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return null; 
+     return 0; // Return 0 if expired or on expiry day
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -216,19 +221,21 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft >= 0) { 
-        if (daysLeft <= 30) { 
+    if (daysLeft !== null && daysLeft > 0) { // Only show if not expired
+        if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-        } else if (daysLeft <= 90) { 
+        } else if (daysLeft <= 90) {
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
+    } else if (daysLeft === 0) {
+        return <Badge variant="destructive" className="ml-2 text-xs">Expired/Today</Badge>;
     }
     return null;
   };
 
-  const generateComplianceReportPdf = (report: StaffComplianceReport): jsPDF => {
+  const generateComplianceReportPdf = async (report: StaffComplianceReport): Promise<jsPDF> => {
     const doc = new jsPDF();
-    
+
     let yPos = 15;
     const lineSpacing = 7;
     const sectionSpacing = 10;
@@ -236,36 +243,48 @@ export default function ReportingPage() {
     const margin = 15;
     const pageWidth = doc.internal.pageSize.getWidth();
     const maxLineWidth = pageWidth - margin * 2;
+    let headerHeight = 0;
+    let footerHeight = 0;
 
-    const checkPageBreak = (neededHeight: number) => {
-      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5;
+    };
+    await setPageLayout();
+
+    const checkPageBreak = async (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+        addPageNumbers(doc, footerHeight, margin); // Add page number before adding new page
         doc.addPage();
-        yPos = margin;
+        await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+        yPos = margin + headerHeight + 5;
       }
     };
 
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
-    checkPageBreak(sectionSpacing);
+    await checkPageBreak(sectionSpacing);
     doc.text(`Compliance Report: ${report.staffMemberRank} ${report.staffMemberName}`, margin, yPos);
     yPos += lineSpacing;
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
-    checkPageBreak(lineSpacing);
+    await checkPageBreak(lineSpacing);
     doc.text(`Squadron: ${report.squadron}`, margin, yPos);
     yPos += lineSpacing;
-    checkPageBreak(lineSpacing);
+    await checkPageBreak(lineSpacing);
     doc.text(`Overall Status: ${report.isCompliant ? "Compliant" : "Not Compliant"}`, margin, yPos);
     yPos += sectionSpacing * 1.5;
 
     doc.setFontSize(14);
     doc.setFont(undefined, 'bold');
-    checkPageBreak(lineSpacing);
+    await checkPageBreak(lineSpacing);
     doc.text("Compliance Details:", margin, yPos);
     yPos += lineSpacing * 1.2;
 
-    report.criteriaChecks.forEach(criterion => {
-      checkPageBreak(lineSpacing * 3); 
+    for (const criterion of report.criteriaChecks) {
+      await checkPageBreak(lineSpacing * 3);
       doc.setFontSize(11);
       doc.setFont(undefined, 'bold');
       doc.text(criterion.name, margin, yPos);
@@ -273,26 +292,38 @@ export default function ReportingPage() {
 
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      doc.setTextColor(criterion.isMet ? 0 : 200); 
+      doc.setTextColor(criterion.isMet ? 0 : 200);
       const statusText = criterion.isMet ? "Met" : "Not Met";
       const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, maxLineWidth - indent);
+      await checkPageBreak(detailLines.length * (lineSpacing * 0.7));
       doc.text(detailLines, margin + indent, yPos);
-      doc.setTextColor(0); 
+      doc.setTextColor(0);
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
-    });
-    
+    }
+    addPageNumbers(doc, footerHeight, margin); // Add page numbers to the last page
     return doc;
   };
 
-  const handleEmailComplianceReport = (report: StaffComplianceReport) => {
+  const handleDownloadComplianceReport = async (report: StaffComplianceReport) => {
+    const pdfDoc = await generateComplianceReportPdf(report);
+    const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
+    pdfDoc.save(pdfFileName);
+    toast({
+      title: "PDF Downloaded",
+      description: `Compliance report "${pdfFileName}" has been downloaded.`,
+    });
+  };
+
+
+  const handleEmailComplianceReport = async (report: StaffComplianceReport) => {
     if (report.isCompliant) {
       toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email sent.` });
       return;
     }
 
-    const pdfDoc = generateComplianceReportPdf(report);
+    const pdfDoc = await generateComplianceReportPdf(report);
     const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
-    
+
     // Get PDF as base64 string
     const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
 
@@ -305,8 +336,8 @@ export default function ReportingPage() {
     const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
     const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
-    
-    let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`; // Replace with a generic sender if needed
+
+    let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`;
     emlContent += `To: ${emailTo}\r\n`;
     emlContent += `Subject: ${subject}\r\n`;
     emlContent += `MIME-Version: 1.0\r\n`;
@@ -339,7 +370,13 @@ export default function ReportingPage() {
 
     toast({
       title: "Email File Generated",
-      description: `An .eml file "${emlFileName}" has been downloaded. Please open it with your email client to send the pre-composed email with the PDF report attached.`,
+      description: (
+        <>
+          An .eml file &quot;{emlFileName}&quot; has been downloaded.
+          <br />
+          Please open it with your email client to send the pre-composed email with the PDF report attached.
+        </>
+      ),
       duration: 10000,
     });
   };
@@ -406,61 +443,66 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
-                      <TableRow
-                        onClick={() => toggleCollapsible(report.staffMemberId)}
-                        className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
-                        data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
-                      >
-                        <TableCell>
-                          <Button variant="ghost" size="sm" className="w-9 p-0" aria-expanded={openCollapsible === report.staffMemberId}>
-                            {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                            <span className="sr-only">Toggle details for {report.staffMemberName}</span>
-                          </Button>
-                        </TableCell>
-                        <TableCell>{report.squadron}</TableCell>
-                        <TableCell className="font-medium">
-                          {report.staffMemberRank} {report.staffMemberName}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                            {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                            {report.isCompliant ? "Compliant" : "Not Compliant"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {!report.isCompliant && report.email && (
-                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
-                              <Mail className="h-4 w-4" />
+                         {/* Trigger Row */}
+                        <TableRow
+                            onClick={() => toggleCollapsible(report.staffMemberId)}
+                            className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
+                            data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
+                          >
+                          <TableCell>
+                            <Button variant="ghost" size="sm" className="w-9 p-0" aria-expanded={openCollapsible === report.staffMemberId}>
+                              {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              <span className="sr-only">Toggle details for {report.staffMemberName}</span>
                             </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                      {openCollapsible === report.staffMemberId && (
-                        <TableRow className="bg-muted/50 dark:bg-muted/30">
-                          <TableCell colSpan={5}>
-                            <div className="p-4">
-                              <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                              <ul className="space-y-2">
-                                {report.criteriaChecks.map(criterion => (
-                                  <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                    <div className="flex items-center">
-                                      {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                      <div>
-                                        <span>{criterion.name}:</span>
-                                        <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                          {criterion.isMet ? "Met" : "Not Met"}
-                                        </span>
-                                        <p className="text-xs text-muted-foreground">{criterion.details}</p>
-                                      </div>
-                                    </div>
-                                    {getExpiryWarningBadge(criterion)}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
+                          </TableCell>
+                          <TableCell>{report.squadron}</TableCell>
+                          <TableCell className="font-medium">
+                            {report.staffMemberRank} {report.staffMemberName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                              {report.isCompliant ? "Compliant" : "Not Compliant"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right space-x-1">
+                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            {!report.isCompliant && report.email && (
+                              <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
-                      )}
+                        {/* Content Row (Collapsible) */}
+                        {openCollapsible === report.staffMemberId && (
+                            <TableRow className="bg-muted/50 dark:bg-muted/30">
+                            <TableCell colSpan={5}>
+                                <div className="p-4">
+                                <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                <ul className="space-y-2">
+                                    {report.criteriaChecks.map(criterion => (
+                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                        <div className="flex items-center">
+                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                        <div>
+                                            <span>{criterion.name}:</span>
+                                            <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                            {criterion.isMet ? "Met" : "Not Met"}
+                                            </span>
+                                            <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                        </div>
+                                        </div>
+                                        {getExpiryWarningBadge(criterion)}
+                                    </li>
+                                    ))}
+                                </ul>
+                                </div>
+                            </TableCell>
+                            </TableRow>
+                        )}
                     </React.Fragment>
                   ))}
                 </TableBody>
@@ -491,7 +533,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is inclusive of completion date and exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -517,4 +559,3 @@ export default function ReportingPage() {
   );
 
 }
-
