@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle, Loader2, AlertTriangle } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle, Loader2, AlertTriangle, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -59,6 +59,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { convertFileToDataUrl } from "@/lib/utils"; // Ensure this utility exists
+import jsPDF from 'jspdf';
 
 
 const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
@@ -155,15 +156,37 @@ type SquadronGroup = {
 };
 
 
-function downloadTextFile(filename: string, text: string) {
-  const element = document.createElement('a');
-  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-  element.setAttribute('download', filename);
-  element.style.display = 'none';
-  document.body.appendChild(element);
-  element.click();
-  document.body.removeChild(element);
-}
+// Helper function to parse each line of a CSV.
+// Assumes standard CSV quoting rules (commas in fields are quoted, quotes in fields are ""-escaped).
+const parseCsvLine = (line: string): string[] => {
+  const fields: string[] = [];
+  let currentField = "";
+  let inQuotedField = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (inQuotedField && i + 1 < line.length && line[i + 1] === '"') {
+        // Escaped double quote
+        currentField += '"';
+        i++; // Skip the next quote
+      } else {
+        // Start or end of a quoted field
+        inQuotedField = !inQuotedField;
+      }
+    } else if (char === ',' && !inQuotedField) {
+      // End of a field
+      fields.push(currentField.trim());
+      currentField = "";
+    } else {
+      currentField += char;
+    }
+  }
+  fields.push(currentField.trim()); // Add the last field
+  return fields;
+};
+
 
 // Helper function to parse the entire CSV text into an array of string arrays (rows and fields)
 const robustCsvParser = (csvText: string): string[][] => {
@@ -191,24 +214,20 @@ const robustCsvParser = (csvText: string): string[][] => {
             }
         } else { // Not in quoted field
             if (char === '"') {
-                // Start of a new quoted field. If currentField is not empty,
-                // it implies an unquoted quote, which is often a CSV format error.
-                // For this parser, we'll assume quotes primarily start fields or escape quotes.
-                // If currentField has content, we treat the quote as part of an unquoted field.
-                if (currentField === "") { // Only treat as start of quote if field is empty
+                if (currentField === "") {
                     inQuotedField = true;
                 } else {
-                    currentField += char; // Treat as literal char if field already has content
+                    currentField += char; 
                 }
             } else if (char === ',') {
-                currentRow.push(currentField.trim());
+                currentRow.push(currentField); // Keep original spacing for now, trim later if needed
                 currentField = "";
             } else if (char === '\n') {
-                currentRow.push(currentField.trim());
+                currentRow.push(currentField);
                 currentField = "";
-                // Add row if it's not empty or if it's the header (first row being processed)
-                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f) : true) ) {
-                    rows.push([...currentRow]);
+                // Add row if it's not just an empty string from splitting or if it's the header
+                 if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim()) : true) ) {
+                    rows.push([...currentRow].map(f => f.trim())); // Trim fields when row is finalized
                 }
                 currentRow = [];
             } else {
@@ -218,14 +237,13 @@ const robustCsvParser = (csvText: string): string[][] => {
     }
 
     // Add the last field of the last row
-    if (currentField || currentRow.length > 0) { // Add if there's a pending field or if row has started
-        currentRow.push(currentField.trim());
+    if (currentField || currentRow.length > 0) {
+        currentRow.push(currentField);
     }
     // Add the last row if it has content
-    if (currentRow.length > 0 && currentRow.some(f => f)) {
-        rows.push([...currentRow]);
+    if (currentRow.length > 0 && currentRow.some(f => f.trim())) {
+        rows.push([...currentRow].map(f => f.trim())); // Trim fields for the last row
     }
-
     return rows;
 };
 
@@ -432,65 +450,112 @@ export default function TrainingPage() {
   };
 
   const handleExportIndividualRecord = (log: TrainingLog) => {
+    const doc = new jsPDF();
     const recordDate = format(log.completionDate, "yyyy-MM-dd");
-    const filename = `training_record_${log.rank}_${log.staffName.replace(/\s*,\s*|\s+/g, '_')}_${log.courseName.replace(/\s+/g, '_')}_${recordDate}.txt`;
+    const filename = `training_record_${log.rank}_${log.staffName.replace(/\s*,\s*|\s+/g, '_')}_${log.courseName.replace(/\s+/g, '_')}_${recordDate}.pdf`;
 
-    let content = `Training Record\n`;
-    content += `------------------------------------\n`;
-    content += `Rank: ${log.rank}\n`;
-    content += `Staff Name: ${log.staffName}\n`;
-    content += `Squadron: ${log.squadron}\n`;
-    content += `Role at time of training: ${log.currentRole}\n`;
-    content += `Course Name: ${log.courseName}\n`;
-    content += `Completion Date: ${format(log.completionDate, "PPP")}\n\n`;
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const margin = 15;
 
-    if (log.qualificationAchieved) {
-      content += `Qualification Achieved: ${log.qualificationAchieved}\n`;
-    }
-    if (log.instructorQualification) {
-      content += `Instructor Qualification: ${log.instructorQualification}\n`;
-    }
-    if (log.achievementDetails) {
-      content += `Achievements/Awards:\n${log.achievementDetails}\n`;
-    }
-    if (log.certificateFileName) {
-      content += `Certificate Attached: ${log.certificateFileName}\n`;
-    }
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Training Record: ${log.courseName}`, margin, yPos);
+    yPos += sectionSpacing;
 
-    downloadTextFile(filename, content);
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+
+    const addText = (label: string, value?: string | null) => {
+      if (!value || value.trim() === "") return;
+      doc.setFont(undefined, 'bold');
+      doc.text(`${label}:`, margin, yPos);
+      doc.setFont(undefined, 'normal');
+      // Remove label length for text positioning and split text
+      const textLines = doc.splitTextToSize(value, doc.internal.pageSize.getWidth() - margin * 2 - doc.getTextWidth(`${label}: `) - 5);
+      doc.text(textLines, margin + doc.getTextWidth(`${label}: `) + 2, yPos);
+      yPos += (textLines.length * lineSpacing * 0.7) + (lineSpacing * 0.3);
+      if (yPos > doc.internal.pageSize.getHeight() - margin) {
+        doc.addPage();
+        yPos = margin;
+      }
+    };
+    
+    addText("Staff Name", `${log.rank} ${log.staffName}`);
+    addText("Squadron", log.squadron);
+    addText("Role at Training", log.currentRole);
+    addText("Completion Date", format(log.completionDate, "PPP"));
+    addText("Qualification Achieved", log.qualificationAchieved);
+    addText("Instructor Qualification", log.instructorQualification);
+    addText("Achievements/Awards", log.achievementDetails);
+    addText("Certificate Attached", log.certificateFileName);
+
+    doc.save(filename);
   };
 
   const handleExportAllTrainingRecordsForMember = (staffMemberGroup: StaffMemberLogGroup) => {
+    const doc = new jsPDF();
     const staffIdentifier = `${staffMemberGroup.rank}_${staffMemberGroup.staffName.replace(/\s*,\s*|\s+/g, '_')}`;
-    const filename = `all_training_records_${staffIdentifier}.txt`;
+    const filename = `all_training_records_${staffIdentifier}.pdf`;
 
-    let content = `All Training Records for ${staffMemberGroup.rank} ${staffMemberGroup.staffName}\n`;
-    content += `Associated with Squadron(s): ${Array.from(new Set(staffMemberGroup.logs.map(l => l.squadron))).join(', ')}\n`
-    content += `====================================================\n\n`;
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxLineWidth = pageWidth - margin * 2;
+
+    const checkPageBreak = (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+        doc.addPage();
+        yPos = margin;
+      }
+    };
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    checkPageBreak(sectionSpacing);
+    doc.text(`All Training Records for ${staffMemberGroup.rank} ${staffMemberGroup.staffName}`, margin, yPos);
+    yPos += lineSpacing;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    checkPageBreak(lineSpacing);
+    doc.text(`Associated with Squadron(s): ${Array.from(new Set(staffMemberGroup.logs.map(l => l.squadron))).join(', ')}`, margin, yPos);
+    yPos += sectionSpacing * 1.5;
 
     staffMemberGroup.logs.forEach((log, index) => {
-      content += `Record ${index + 1} of ${staffMemberGroup.logs.length}\n`;
-      content += `------------------------------------\n`;
-      content += `Course Name: ${log.courseName}\n`;
-      content += `Squadron at time of training: ${log.squadron}\n`;
-      content += `Role at time of training: ${log.currentRole}\n`;
-      content += `Completion Date: ${format(log.completionDate, "PPP")}\n`;
-      if (log.qualificationAchieved) {
-        content += `Qualification Achieved: ${log.qualificationAchieved}\n`;
-      }
-      if (log.instructorQualification) {
-        content += `Instructor Qualification: ${log.instructorQualification}\n`;
-      }
-      if (log.achievementDetails) {
-        content += `Achievements/Awards:\n${log.achievementDetails}\n`;
-      }
-      if (log.certificateFileName) {
-        content += `Certificate Attached: ${log.certificateFileName}\n`;
-      }
-      content += `------------------------------------\n\n`;
+      checkPageBreak(sectionSpacing * 2 + lineSpacing * 7); // Estimate for one record
+      doc.setLineWidth(0.2);
+      doc.line(margin, yPos - (lineSpacing / 2), pageWidth - margin, yPos - (lineSpacing / 2)); // Separator line
+      
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.text(`Record ${index + 1}: ${log.courseName}`, margin, yPos);
+      yPos += lineSpacing;
+
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      const addDetail = (label: string, value?: string | null) => {
+        if (!value || value.trim() === "") return;
+        checkPageBreak(lineSpacing);
+        const textLines = doc.splitTextToSize(`${label}: ${value}`, maxLineWidth - indent);
+        doc.text(textLines, margin + indent, yPos);
+        yPos += (textLines.length * lineSpacing * 0.7) + (lineSpacing * 0.3);
+      };
+
+      addDetail("Squadron at Training", log.squadron);
+      addDetail("Role at Training", log.currentRole);
+      addDetail("Completion Date", format(log.completionDate, "PPP"));
+      addDetail("Qualification Achieved", log.qualificationAchieved);
+      addDetail("Instructor Qualification", log.instructorQualification);
+      addDetail("Achievements/Awards", log.achievementDetails);
+      addDetail("Certificate", log.certificateFileName);
+      yPos += lineSpacing * 0.5; // Space after each record
     });
 
-    downloadTextFile(filename, content);
+    doc.save(filename);
   };
 
 
@@ -526,49 +591,37 @@ export default function TrainingPage() {
   // Format: "LastName FirstName Rank MemberUID"
   function parseCompositeSurnameField(surnameField: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
       const trimmedField = surnameField.trim();
-      // Regex to capture: (LastName) (FirstName potentially with spaces) (RANK) (MemberUID)
-      // This regex is complex and might need refinement based on actual data variations.
-      // It assumes rank is a single word from RANKS and MemberUID is digits at the end.
-      // A simpler approach if Rank is always a single word:
       const parts = trimmedField.split(/\s+/);
-      if (parts.length < 3) return { lastName: null, firstName: null, rank: null, memberUID: null };
+      if (parts.length < 4) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Min: LName FName Rank UID
 
       const memberUID = parts[parts.length - 1];
-      const rankCandidate = parts[parts.length - 2].toUpperCase(); // Assuming rank is just before UID
+      const rankCandidate = parts[parts.length - 2].toUpperCase();
 
       let rank: typeof RANKS[number] | null = null;
       if ((RANKS as readonly string[]).includes(rankCandidate as typeof RANKS[number])) {
           rank = rankCandidate as typeof RANKS[number];
       } else {
-          // Try to match multi-word ranks if rankCandidate was part of a name
-          // This part needs to be robust if ranks can be like "SQNLDR(AAFC)"
-          let potentialRank = "";
-          for (let i = parts.length - 2; i >=0; i--) {
-              potentialRank = parts.slice(i, parts.length -1).join(" ").toUpperCase();
-              if ((RANKS as readonly string[]).includes(potentialRank as typeof RANKS[number])) {
-                  rank = potentialRank as typeof RANKS[number];
-                  // Adjust parts to correctly isolate first and last names
-                  const nameParts = parts.slice(0, i);
-                  if (nameParts.length > 0) {
-                    const lastName = nameParts.shift() || null;
-                    const firstName = nameParts.join(" ") || null;
-                    if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
-                        return { lastName: null, firstName: null, rank: null, memberUID: null };
-                    }
-                    return { lastName, firstName, rank, memberUID };
-                  }
-                  break; 
-              }
-          }
-          if (!rank) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Rank not found
+         // Attempt to combine last two parts for multi-word ranks like "PLTOFF(AAFC)"
+         if (parts.length >= 3) { // Need at least 3 parts for Name Rank UID
+            const potentialRank = parts.slice(-2).join(" ").toUpperCase();
+             if ((RANKS as readonly string[]).includes(potentialRank as typeof RANKS[number])) {
+                rank = potentialRank as typeof RANKS[number];
+                // Adjust logic if rank was multi-word
+                const lastName = parts[0];
+                const firstName = parts.slice(1, parts.length - 2).join(" ");
+                if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
+                    return { lastName: null, firstName: null, rank: null, memberUID: null };
+                }
+                return { lastName, firstName, rank, memberUID };
+            }
+         }
+        if (!rank) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Rank not found even after trying multi-word
       }
 
-
       const lastName = parts[0];
-      const firstName = parts.slice(1, parts.length - 2).join(" ");
+      const firstName = parts.slice(1, parts.length - 2).join(" "); // All parts between last and rank+uid
 
-
-      if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
+      if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) { // UID should be numeric
           return { lastName: null, firstName: null, rank: null, memberUID: null };
       }
       
@@ -602,7 +655,7 @@ export default function TrainingPage() {
         if (allRows.length < 2) {
           errors.push("CSV must have a header and at least one data row.");
         } else {
-          const header = allRows[0].map(h => h.trim());
+          const header = allRows[0];
           
           const expectedCsvHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
           const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; 
@@ -872,12 +925,12 @@ export default function TrainingPage() {
                           <CardDescription>{staffMemberGroup.logs.length} training record(s)</CardDescription>
                         </div>
                         <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
-                          <Archive className="mr-2 h-4 w-4" /> Export All for Member
+                          <Download className="mr-2 h-4 w-4" /> Export All (PDF)
                         </Button>
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4">
-                      <ScrollArea className="h-[200px] w-full border rounded-md">
+                       <ScrollArea className="h-[300px] w-full border rounded-md">
                         <Table>
                           <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                             <TableRow>
@@ -925,7 +978,7 @@ export default function TrainingPage() {
                                       </DropdownMenuItem>
                                       <DropdownMenuItem onClick={() => handleExportIndividualRecord(log)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
                                         <Download className="mr-2 h-4 w-4" />
-                                        Export Record
+                                        Export Record (PDF)
                                       </DropdownMenuItem>
                                       <DropdownMenuSeparator />
                                       <DropdownMenuItem

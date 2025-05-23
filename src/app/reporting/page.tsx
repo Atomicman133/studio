@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,21 +22,22 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-// Removed Collapsible imports as they are not used directly in the table body anymore
 import type { StaffComplianceReport, ComplianceCriterionCheck } from "./reporting-schema";
 import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
-import { useStaff } from "@/hooks/useStaffData"; // Import hook to fetch staff data
-import { useQuery } from '@tanstack/react-query'; // Import useQuery for training logs
-import { db } from '@/lib/firebase/config'; // Import db config
-import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; // Import Firestore functions
-import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns"; // Import date-fns functions, added isEqual and subYears
+import { useStaff } from "@/hooks/useStaffData"; 
+import { useQuery } from '@tanstack/react-query'; 
+import { db } from '@/lib/firebase/config'; 
+import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore'; 
+import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns";
 import { RANKS } from "../staff/staff-schema";
+import jsPDF from 'jspdf';
+import { useToast } from "@/hooks/use-toast";
 
 
 // --- Fetch Training Logs (copied from training page for this component's scope) ---
-const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; // Use a unique key if needed
+const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; 
 const convertLogTimestamps = (data: any): TrainingLog => {
   return {
     ...data,
@@ -56,28 +57,24 @@ async function fetchTrainingLogs(): Promise<TrainingLog[]> {
 
 
 const getStaffIdentifier = (staffMember: StaffMember): string => {
-  // Ensure serviceNumber exists, fallback if necessary but log a warning.
   if (!staffMember.serviceNumber) {
     console.warn(`Staff member ${staffMember.firstName} ${staffMember.lastName} is missing a service number.`);
-    // Fallback identifier - less reliable
     return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_MISSING_SN`;
   }
   return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
 };
 
 const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[]): string => {
-  // Prioritize matching based on available StaffMember data
   const matchedStaff = staffList.find(sm =>
     sm.rank === log.rank &&
     `${sm.lastName}, ${sm.firstName}` === log.staffName &&
-    sm.squadron === log.squadron // Add squadron match for robustness if available
+    sm.squadron === log.squadron 
   );
 
   if (matchedStaff) {
     return getStaffIdentifier(matchedStaff);
   }
 
-  // Fallback if no exact match found in the current staff list
   console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}. Using log details as fallback identifier.`);
   return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
 };
@@ -90,7 +87,6 @@ const processComplianceReports = (
 
   return staffList.map((staff) => {
     const staffId = getStaffIdentifier(staff);
-    // Filter logs associated with this specific staff member
     const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log, staffList) === staffId);
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
@@ -98,39 +94,34 @@ const processComplianceReports = (
         .filter(log => criterion.identifier(log))
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
-      let isMet = false; // Default to Not Met
+      let isMet = false; 
       let details = "Missing";
       let selectedLog: TrainingLog | undefined = undefined;
 
       if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0]; // Get the most recent relevant log
+        selectedLog = relevantLogs[0]; 
         const completionDate = new Date(selectedLog.completionDate);
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
         } else {
           const today = new Date();
-          today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
+          today.setHours(0, 0, 0, 0); 
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            // Item is compliant if 'today' is strictly BEFORE the expiry date.
-            // It expires ON the expiryDate.
              if (isBefore(today, expiryDate)) {
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
+              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
             } else {
               details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
           } else {
-            // For items without an expiry period (e.g., Code of Conduct, Psych Assessment if yearsToExpire is undefined)
-            isMet = true; // If a valid log exists, it's met
+            isMet = true; 
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
         }
       }
-      // If relevantLogs.length === 0, isMet remains false and details remains "Missing"
-
       return {
         key: criterion.key,
         name: criterion.name,
@@ -149,6 +140,7 @@ const processComplianceReports = (
       squadron: staff.squadron || "N/A",
       isCompliant,
       criteriaChecks,
+      email: staff.email, // Add email for mailing
     };
   })
   .sort((a,b) => {
@@ -180,6 +172,7 @@ export default function ReportingPage() {
     queryKey: [TRAINING_LOGS_QUERY_KEY],
     queryFn: fetchTrainingLogs,
   });
+  const { toast } = useToast();
 
   const [complianceReports, setComplianceReports] = React.useState<StaffComplianceReport[]>([]);
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
@@ -229,6 +222,93 @@ export default function ReportingPage() {
         }
     }
     return null;
+  };
+
+  const generateComplianceReportPdf = (report: StaffComplianceReport): jsPDF => {
+    const doc = new jsPDF();
+    const filename = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
+    
+    let yPos = 15;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const margin = 15;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxLineWidth = pageWidth - margin * 2;
+
+    const checkPageBreak = (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+        doc.addPage();
+        yPos = margin;
+      }
+    };
+
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    checkPageBreak(sectionSpacing);
+    doc.text(`Compliance Report: ${report.staffMemberRank} ${report.staffMemberName}`, margin, yPos);
+    yPos += lineSpacing;
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    checkPageBreak(lineSpacing);
+    doc.text(`Squadron: ${report.squadron}`, margin, yPos);
+    yPos += lineSpacing;
+    checkPageBreak(lineSpacing);
+    doc.text(`Overall Status: ${report.isCompliant ? "Compliant" : "Not Compliant"}`, margin, yPos);
+    yPos += sectionSpacing * 1.5;
+
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    checkPageBreak(lineSpacing);
+    doc.text("Compliance Details:", margin, yPos);
+    yPos += lineSpacing * 1.2;
+
+    report.criteriaChecks.forEach(criterion => {
+      checkPageBreak(lineSpacing * 3); // Estimate for a criterion
+      doc.setFontSize(11);
+      doc.setFont(undefined, 'bold');
+      doc.text(criterion.name, margin, yPos);
+      yPos += lineSpacing * 0.8;
+
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(criterion.isMet ? 0 : 200); // Black for met, reddish for not met
+      const statusText = criterion.isMet ? "Met" : "Not Met";
+      const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, maxLineWidth - indent);
+      doc.text(detailLines, margin + indent, yPos);
+      doc.setTextColor(0); // Reset color
+      yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
+    });
+    
+    return doc;
+  };
+
+  const handleEmailComplianceReport = (report: StaffComplianceReport) => {
+    if (report.isCompliant) {
+      toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email sent.` });
+      return;
+    }
+
+    const pdfDoc = generateComplianceReportPdf(report);
+    pdfDoc.save(`compliance_report_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`);
+
+
+    const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
+      .map(c => `  - ${c.name}: ${c.details}`)
+      .join("\n");
+
+    const subject = `Action Required: Compliance Update for ${report.staffMemberName}`;
+    const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items. For your reference, a detailed compliance report has been generated and downloaded to your computer (it's named: compliance_report_${report.staffMemberName.replace(/\s+/g, '_')}.pdf). Please attach this PDF if you are forwarding this email or replying.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+
+    const mailtoLink = `mailto:${report.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    
+    window.location.href = mailtoLink;
+
+    toast({
+      title: "Compliance Report Downloaded",
+      description: "Please attach the downloaded PDF to the email that has been opened.",
+      duration: 10000,
+    });
   };
 
 
@@ -287,6 +367,7 @@ export default function ReportingPage() {
                     <TableHead>Squadron</TableHead>
                     <TableHead>Staff Member</TableHead>
                     <TableHead>Overall Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -294,7 +375,7 @@ export default function ReportingPage() {
                     <React.Fragment key={report.staffMemberId}>
                       <TableRow
                         onClick={() => toggleCollapsible(report.staffMemberId)}
-                        className="cursor-pointer hover:bg-muted/50"
+                        className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
                         data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
                       >
                         <TableCell>
@@ -313,10 +394,17 @@ export default function ReportingPage() {
                             {report.isCompliant ? "Compliant" : "Not Compliant"}
                           </Badge>
                         </TableCell>
+                        <TableCell className="text-right">
+                          {!report.isCompliant && (
+                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
+                              <Mail className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                       {openCollapsible === report.staffMemberId && (
                         <TableRow className="bg-muted/50 dark:bg-muted/30">
-                          <TableCell colSpan={4}> {/* Ensure colSpan matches number of columns in header */}
+                          <TableCell colSpan={5}>
                             <div className="p-4">
                               <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                               <ul className="space-y-2">
@@ -370,7 +458,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} years, check is exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -388,7 +476,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
           </p>
         </CardContent>
       </Card>
@@ -396,3 +484,4 @@ export default function ReportingPage() {
   );
 
 }
+

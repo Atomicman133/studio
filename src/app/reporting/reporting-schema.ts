@@ -11,12 +11,13 @@ export interface ComplianceCriterionCheck {
 }
 
 export interface StaffComplianceReport {
-  staffMemberId: string; // Assuming StaffMember has an ID or use generated identifier
-  staffMemberName: string; // Full name for display
+  staffMemberId: string; 
+  staffMemberName: string; 
   staffMemberRank: string;
   isCompliant: boolean;
   criteriaChecks: ComplianceCriterionCheck[];
-  squadron: string; // Use squadron from StaffMember profile for consistency
+  squadron: string; 
+  email?: string | null; // Add email to facilitate emailing
 }
 
 // Helper function for flexible keyword matching (case-insensitive)
@@ -40,7 +41,7 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
   {
     key: 'wwcc',
     name: 'Working With Children Check',
-    yearsToExpire: 3, // Normal validity period, e.g., 3 years
+    yearsToExpire: 3, 
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['working with children', 'wwcc', 'Working With Children - WA - Certified']) || matchesKeywords(log.qualificationAchieved, ['working with children', 'wwcc', 'Working With Children - WA - Certified'])
   },
