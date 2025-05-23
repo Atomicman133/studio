@@ -107,8 +107,8 @@ const processComplianceReports = (
       let selectedLog: TrainingLog | undefined = undefined;
 
       if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0];
-        const completionDate = new Date(selectedLog.completionDate); // Ensure it's a Date object
+        selectedLog = relevantLogs[0]; // Get the most recent relevant log
+        const completionDate = new Date(selectedLog.completionDate);
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
@@ -117,18 +117,17 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0); // Start of today for consistent comparison
 
           if (criterion.yearsToExpire) {
-              const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-             
-              // Check if 'today' is strictly BEFORE the expiry date
-              if (isBefore(today, expiryDate)) { 
-                  isMet = true;
-                  details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
-              } else {
-                  // Expired (today is on or after expiry date)
-                  details = `Out of Date (Completed: ${format(completionDate, 'dd/MM/yyyy')})`;
-              }
+            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+            // Item is compliant if 'today' is strictly BEFORE the expiry date.
+            // It expires ON the expiryDate.
+            if (isBefore(today, expiryDate)) {
+              isMet = true;
+              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
+            } else {
+              details = `Out of Date. Completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+            }
           } else {
-            // Logic for non-expiring items (CoC, Psych) - WWCC now has expiry
+            // For items without an expiry period (e.g., Code of Conduct, Psych Assessment if yearsToExpire is undefined)
             isMet = true; // If a valid log exists, it's met
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
@@ -139,7 +138,7 @@ const processComplianceReports = (
       return {
         key: criterion.key,
         name: criterion.name,
-        isMet, // Use the calculated isMet value
+        isMet,
         details,
         relevantLog: selectedLog,
       };
@@ -151,13 +150,13 @@ const processComplianceReports = (
       staffMemberId: staff.id || staffId,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
-      squadron: staff.squadron || "N/A", // Use squadron from staff profile for consistency
+      squadron: staff.squadron || "N/A",
       isCompliant,
       criteriaChecks,
     };
   })
   .sort((a,b) => {
-    const squadronCompare = (a.squadron || "ZZZ").localeCompare(b.squadron || "ZZZ"); // Sort "Unassigned" last
+    const squadronCompare = (a.squadron || "ZZZ").localeCompare(b.squadron || "ZZZ");
     if (squadronCompare !== 0) {
         return squadronCompare;
     }
@@ -166,16 +165,13 @@ const processComplianceReports = (
     const rankAIndex = rankOrder.indexOf(a.staffMemberRank as typeof RANKS[number]);
     const rankBIndex = rankOrder.indexOf(b.staffMemberRank as typeof RANKS[number]);
 
-     // Handle cases where rank might not be in RANKS (shouldn't happen with validation)
     const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
     const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
-     // Sort numerically ascending index (higher rank first)
     if (effectiveRankAIndex !== effectiveRankBIndex) {
         return effectiveRankAIndex - effectiveRankBIndex;
     }
 
-    // If ranks are the same, sort by name
     const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName);
     return lastNameCompare;
   });
@@ -193,23 +189,17 @@ export default function ReportingPage() {
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    // Only process when both staff and logs data are available and not loading
-    if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) { // Ensure trainingLogs is defined
+    if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) { 
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      // If loading is finished but data is empty or incomplete, clear reports
       setComplianceReports([]);
     }
-  }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]); // Depend on fetched data and loading states
+  }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]); 
 
 
   const toggleCollapsible = (staffMemberId: string) => {
     setOpenCollapsible(prev => (prev === staffMemberId ? null : staffMemberId));
-  };
-
-  const getOverallStatusIcon = (isCompliant: boolean) => {
-    return isCompliant ? <CheckCircle2 className="h-5 w-5 text-green-500" /> : <XCircle className="h-5 w-5 text-destructive" />;
   };
 
   const getDaysToExpiry = (completionDate: Date, yearsToExpire: number): number | null => {
@@ -218,30 +208,23 @@ export default function ReportingPage() {
     if (!isValidDate(expiryDate)) return null;
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today
+    today.setHours(0, 0, 0, 0); 
 
-    
-    // Return days left only if it's not expired yet (today is strictly BEFORE expiry day)
      if (isBefore(today, expiryDate)) {
-        return differenceInDays(expiryDate, today); // Days remaining including today until expiry
+        return differenceInDays(expiryDate, today);
      }
-     return null; // Return null if expired (today is on or after expiry day)
+     return null; 
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
-     // No badge if not met or no relevant log
     if (!criterion.isMet || !criterion.relevantLog) return null;
 
-    // Find config for the criterion
     const config = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === criterion.key);
 
-    // No badge if no expiry years configured or completion date is invalid
     if (!config || !config.yearsToExpire || !isValidDate(new Date(criterion.relevantLog.completionDate))) return null;
 
-    // Calculate days left based on completion date and configured years
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    // Only show badge if not expired yet (daysLeft is not null and >= 0)
     if (daysLeft !== null && daysLeft >= 0) {
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
@@ -249,8 +232,7 @@ export default function ReportingPage() {
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
     }
-
-    return null; // No badge if expired or calculation failed
+    return null;
   };
 
 
@@ -315,10 +297,10 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                     <Collapsible
                       key={report.staffMemberId}
-                      asChild
                       open={openCollapsible === report.staffMemberId}
                       onOpenChange={() => toggleCollapsible(report.staffMemberId)}
                     >
+                      {/* Use React.Fragment because Collapsible with asChild needs a single valid child */}
                       <React.Fragment>
                          {/* Trigger Row */}
                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10">
@@ -426,3 +408,6 @@ export default function ReportingPage() {
   );
 
 }
+
+
+    
