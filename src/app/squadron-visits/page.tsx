@@ -63,9 +63,13 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from 'jspdf';
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 
 
 const VISITS_QUERY_KEY = 'squadronVisits';
+const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
+const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
+
 
 // Helper to convert Firestore Timestamps to JS Dates
 const convertVisitTimestamps = (data: any): SquadronVisit => {
@@ -320,28 +324,39 @@ export default function SquadronVisitsPage() {
     return "All Actions Addressed";
   }
 
-  const handleExportVisitAsPdf = (visit: SquadronVisit) => {
+  const handleExportVisitAsPdf = async (visit: SquadronVisit) => {
     const doc = new jsPDF();
     const visitDateFormatted = format(visit.visitDate, "yyyy-MM-dd");
     const filename = `squadron_visit_${visit.squadronName.replace(/\s+/g, '_')}_${visitDateFormatted}.pdf`;
 
-    let yPos = 15;
+    const margin = 15;
+    let yPos = margin;
     const lineSpacing = 7;
     const sectionSpacing = 10;
     const indent = 5;
     const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
     const maxLineWidth = pageWidth - (margin * 2);
+    let headerHeight = 0;
+    let footerHeight = 0;
 
-    const checkPageBreak = (neededHeight: number) => {
-        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5;
+    };
+    await setPageLayout();
+    
+    const checkPageBreak = async (neededHeight: number) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
             doc.addPage();
-            yPos = margin;
+            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+            yPos = margin + headerHeight + 5;
         }
     };
     
-    const addSectionTitle = (title: string) => {
-        checkPageBreak(lineSpacing * 2);
+    const addSectionTitle = async (title: string) => {
+        await checkPageBreak(lineSpacing * 2 + 14);
         doc.setFontSize(14);
         doc.setFont(undefined, 'bold');
         doc.text(title, margin, yPos);
@@ -350,71 +365,74 @@ export default function SquadronVisitsPage() {
         doc.setFont(undefined, 'normal');
     };
 
-    const addText = (text: string, isBold = false, customIndent = indent) => {
+    const addText = async (text: string, isBold = false, customIndent = indent) => {
       if (!text || text.trim() === "") return;
-      checkPageBreak(lineSpacing);
+      await checkPageBreak(lineSpacing);
       doc.setFont(undefined, isBold ? 'bold' : 'normal');
       const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      await checkPageBreak(lines.length * (lineSpacing * 0.8));
       doc.text(lines, margin + customIndent, yPos);
       yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3);
     };
     
-    const addCheckboxItem = (label: string, checked?: boolean) => {
-        addText(`${label}: ${checked ? 'Yes' : 'No'}`, false, indent + 5);
+    const addCheckboxItem = async (label: string, checked?: boolean) => {
+        await addText(`${label}: ${checked ? 'Yes' : 'No'}`, false, indent + 5);
     };
 
     // --- PDF Header ---
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing + 18);
     doc.text(`Squadron Visit Report: ${visit.squadronName}`, margin, yPos);
     yPos += sectionSpacing;
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
-    addText(`Visited on: ${format(visit.visitDate, "PPP")}`);
-    addText(`RXO: ${visit.rxoName}`);
-    addText(`Squadron CO: ${visit.coName}`);
+    await addText(`Visited on: ${format(visit.visitDate, "PPP")}`);
+    await addText(`RXO: ${visit.rxoName}`);
+    await addText(`Squadron CO: ${visit.coName}`);
     yPos += sectionSpacing * 0.5;
 
     // --- Discussion Sections ---
-    discussionSectionsConfig.forEach(section => {
-      addSectionTitle(section.title);
-      section.items.forEach(item => {
-        addCheckboxItem(item.label, visit[item.name as keyof SquadronVisit] as boolean | undefined);
-      });
+    for (const section of discussionSectionsConfig) {
+      await addSectionTitle(section.title);
+      for (const item of section.items) {
+        await addCheckboxItem(item.label, visit[item.name as keyof SquadronVisit] as boolean | undefined);
+      }
       if (section.textField && visit[section.textField.name as keyof SquadronVisit]) {
-        addText(`${section.textField.label}:`, true);
-        addText(visit[section.textField.name as keyof SquadronVisit] as string);
+        await addText(`${section.textField.label}:`, true);
+        await addText(visit[section.textField.name as keyof SquadronVisit] as string);
       }
       if (visit[section.notesField as keyof SquadronVisit]) {
-        addText("Additional Notes:", true);
-        addText(visit[section.notesField as keyof SquadronVisit] as string);
+        await addText("Additional Notes:", true);
+        await addText(visit[section.notesField as keyof SquadronVisit] as string);
       }
       yPos += sectionSpacing * 0.5;
-    });
+    }
 
     // --- General Comments ---
     if (visit.generalComments) {
-      addSectionTitle("General Comments / Overall Notes");
-      addText(visit.generalComments);
+      await addSectionTitle("General Comments / Overall Notes");
+      await addText(visit.generalComments);
       yPos += sectionSpacing * 0.5;
     }
 
     // --- Action Items ---
     if (visit.actionItems && visit.actionItems.length > 0) {
-      addSectionTitle("Action Items / Follow-Up");
-      visit.actionItems.forEach((item, index) => {
-        checkPageBreak(lineSpacing * 5); // Estimate space for an action item
-        addText(`Action Item ${index + 1}: ${item.description}`, true, 0); // No indent for item title
-        addText(`Responsible: ${item.responsible}`);
-        addText(`Due Date: ${item.dueDate ? format(item.dueDate, "PPP") : "N/A"}`);
-        addText(`Status: ${item.status}`);
+      await addSectionTitle("Action Items / Follow-Up");
+      for (const [index, item] of visit.actionItems.entries()) {
+        await checkPageBreak(lineSpacing * 5 + 12); // Estimate space for an action item
+        await addText(`Action Item ${index + 1}: ${item.description}`, true, 0); // No indent for item title
+        await addText(`Responsible: ${item.responsible}`);
+        await addText(`Due Date: ${item.dueDate ? format(item.dueDate, "PPP") : "N/A"}`);
+        await addText(`Status: ${item.status}`);
         yPos += lineSpacing * 0.5; // Extra space between items
-      });
+      }
     } else {
-       addSectionTitle("Action Items / Follow-Up");
-       addText("No action items recorded for this visit.");
+       await addSectionTitle("Action Items / Follow-Up");
+       await addText("No action items recorded for this visit.");
     }
 
+    addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
   };
 
@@ -717,4 +735,3 @@ export default function SquadronVisitsPage() {
     </div>
   );
 }
-

@@ -58,11 +58,14 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
-import { convertFileToDataUrl } from "@/lib/utils"; // Ensure this utility exists
+import { convertFileToDataUrl, addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils"; 
 import jsPDF from 'jspdf';
 
 
 const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
+const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
+const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
+
 
 // Helper to convert Firestore Timestamps
 export const convertLogTimestamps = (data: any): TrainingLog => {
@@ -157,7 +160,6 @@ type SquadronGroup = {
 
 
 // Helper function to parse each line of a CSV.
-// Assumes standard CSV quoting rules (commas in fields are quoted, quotes in fields are ""-escaped).
 const parseCsvLine = (line: string): string[] => {
   const fields: string[] = [];
   let currentField = "";
@@ -210,24 +212,23 @@ const robustCsvParser = (csvText: string): string[][] => {
                     inQuotedField = false;
                 }
             } else {
-                currentField += char; // Includes newlines if they are within quotes
+                currentField += char; 
             }
-        } else { // Not in quoted field
+        } else { 
             if (char === '"') {
-                if (currentField === "") {
+                if (currentField.trim() === "") { // Only treat as start of quote if field is empty
                     inQuotedField = true;
-                } else {
+                } else { // Treat as literal quote if field already has content
                     currentField += char; 
                 }
             } else if (char === ',') {
-                currentRow.push(currentField); // Keep original spacing for now, trim later if needed
+                currentRow.push(currentField); 
                 currentField = "";
             } else if (char === '\n') {
                 currentRow.push(currentField);
                 currentField = "";
-                // Add row if it's not just an empty string from splitting or if it's the header
-                 if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim()) : true) ) {
-                    rows.push([...currentRow].map(f => f.trim())); // Trim fields when row is finalized
+                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim()) : true) ) {
+                    rows.push([...currentRow].map(f => f.trim()));
                 }
                 currentRow = [];
             } else {
@@ -235,14 +236,11 @@ const robustCsvParser = (csvText: string): string[][] => {
             }
         }
     }
-
-    // Add the last field of the last row
     if (currentField || currentRow.length > 0) {
         currentRow.push(currentField);
     }
-    // Add the last row if it has content
     if (currentRow.length > 0 && currentRow.some(f => f.trim())) {
-        rows.push([...currentRow].map(f => f.trim())); // Trim fields for the last row
+        rows.push([...currentRow].map(f => f.trim()));
     }
     return rows;
 };
@@ -251,9 +249,8 @@ const robustCsvParser = (csvText: string): string[][] => {
 export default function TrainingPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { data: staffList = [], isLoading: isLoadingStaff } = useStaff(); // Fetch staff data
+  const { data: staffList = [], isLoading: isLoadingStaff } = useStaff(); 
 
-  // --- React Query for Training Logs ---
   const { data: trainingLogsList = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
     queryKey: [TRAINING_LOGS_QUERY_KEY],
     queryFn: fetchTrainingLogs,
@@ -303,7 +300,6 @@ export default function TrainingPage() {
     }
   });
 
-  // --- End React Query for Training Logs ---
 
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingLog, setEditingLog] = React.useState<TrainingLog | null>(null);
@@ -316,7 +312,7 @@ export default function TrainingPage() {
   const squadronStaffGroups = React.useMemo(() => {
     const logsBySquadron: Record<string, TrainingLog[]> = {};
     trainingLogsList.forEach(log => {
-      const sqn = log.squadron || "Unassigned"; // Handle undefined squadron
+      const sqn = log.squadron || "Unassigned"; 
       if (!logsBySquadron[sqn]) {
         logsBySquadron[sqn] = [];
       }
@@ -347,12 +343,8 @@ export default function TrainingPage() {
             if (rankAIndex === -1 && rankBIndex === -1) return a.staffName.localeCompare(b.staffName);
             if (rankAIndex === -1) return 1;
             if (rankBIndex === -1) return -1;
-
-            // Corrected rank comparison: Higher rank (lower index) should come first.
             const rankComparison = rankAIndex - rankBIndex;
             if (rankComparison !== 0) return rankComparison;
-
-            // If ranks are the same, sort by name
             return a.staffName.localeCompare(b.staffName);
           });
 
@@ -374,11 +366,11 @@ export default function TrainingPage() {
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
-        return; // Prevent submission if file conversion fails
+        return; 
       }
     }
 
-    const newLog: Omit<TrainingLog, 'id'> = { // Use Omit here as ID is generated by backend
+    const newLog: Omit<TrainingLog, 'id'> = { 
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -388,10 +380,10 @@ export default function TrainingPage() {
       qualificationAchieved: data.qualificationAchieved,
       instructorQualification: data.instructorQualification,
       achievementDetails: data.achievementDetails,
-      certificateFileName: certificateInfo.certificateFileName, // Use processed info
-      certificateDataUrl: certificateInfo.certificateDataUrl,   // Use processed info
+      certificateFileName: certificateInfo.certificateFileName, 
+      certificateDataUrl: certificateInfo.certificateDataUrl,   
     };
-    addLogMutation.mutate(newLog); // Use mutation
+    addLogMutation.mutate(newLog); 
   };
 
   const handleUpdateLog = async (data: TrainingLogFormData) => {
@@ -405,16 +397,14 @@ export default function TrainingPage() {
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
-        return; // Prevent submission if file conversion fails
+        return; 
       }
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
-      // File was explicitly removed
       certificateUpdates = { certificateFileName: undefined, certificateDataUrl: undefined };
     }
-    // If no new file and not explicitly removed, keep existing (no changes to certificateUpdates needed)
-
+    
     const updatedLog: TrainingLog = {
-      id: editingLog.id, // Keep existing ID
+      id: editingLog.id, 
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -428,7 +418,7 @@ export default function TrainingPage() {
       certificateDataUrl: certificateUpdates.hasOwnProperty('certificateDataUrl') ? certificateUpdates.certificateDataUrl : editingLog.certificateDataUrl,
     };
 
-    updateLogMutation.mutate(updatedLog); // Use mutation
+    updateLogMutation.mutate(updatedLog); 
   };
 
   const handleEdit = (log: TrainingLog) => {
@@ -445,90 +435,120 @@ export default function TrainingPage() {
 
   const handleDeleteConfirm = () => {
     if (logToDelete && logToDelete.id) {
-      deleteLogMutation.mutate(logToDelete.id); // Use mutation
+      deleteLogMutation.mutate(logToDelete.id); 
     }
   };
 
-  const handleExportIndividualRecord = (log: TrainingLog) => {
+  const handleExportIndividualRecord = async (log: TrainingLog) => {
     const doc = new jsPDF();
     const recordDate = format(log.completionDate, "yyyy-MM-dd");
     const filename = `training_record_${log.rank}_${log.staffName.replace(/\s*,\s*|\s+/g, '_')}_${log.courseName.replace(/\s+/g, '_')}_${recordDate}.pdf`;
 
-    let yPos = 15;
+    const margin = 15;
+    let yPos = margin;
     const lineSpacing = 7;
     const sectionSpacing = 10;
-    const margin = 15;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxLineWidth = pageWidth - (margin * 2);
+    let headerHeight = 0;
+    let footerHeight = 0;
+
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5;
+    };
+    await setPageLayout();
+
+    const checkPageBreak = async (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+        doc.addPage();
+        await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+        yPos = margin + headerHeight + 5;
+      }
+    };
 
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing + 16);
     doc.text(`Training Record: ${log.courseName}`, margin, yPos);
     yPos += sectionSpacing;
 
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
 
-    const addText = (label: string, value?: string | null) => {
+    const addText = async (label: string, value?: string | null) => {
       if (!value || value.trim() === "") return;
       doc.setFont(undefined, 'bold');
+      await checkPageBreak(lineSpacing);
       doc.text(`${label}:`, margin, yPos);
       doc.setFont(undefined, 'normal');
-      // Remove label length for text positioning and split text
-      const textLines = doc.splitTextToSize(value, doc.internal.pageSize.getWidth() - margin * 2 - doc.getTextWidth(`${label}: `) - 5);
+      const textLines = doc.splitTextToSize(value, maxLineWidth - doc.getTextWidth(`${label}: `) - 5);
+      await checkPageBreak(textLines.length * (lineSpacing * 0.7));
       doc.text(textLines, margin + doc.getTextWidth(`${label}: `) + 2, yPos);
       yPos += (textLines.length * lineSpacing * 0.7) + (lineSpacing * 0.3);
-      if (yPos > doc.internal.pageSize.getHeight() - margin) {
-        doc.addPage();
-        yPos = margin;
-      }
     };
     
-    addText("Staff Name", `${log.rank} ${log.staffName}`);
-    addText("Squadron", log.squadron);
-    addText("Role at Training", log.currentRole);
-    addText("Completion Date", format(log.completionDate, "PPP"));
-    addText("Qualification Achieved", log.qualificationAchieved);
-    addText("Instructor Qualification", log.instructorQualification);
-    addText("Achievements/Awards", log.achievementDetails);
-    addText("Certificate Attached", log.certificateFileName);
+    await addText("Staff Name", `${log.rank} ${log.staffName}`);
+    await addText("Squadron", log.squadron);
+    await addText("Role at Training", log.currentRole);
+    await addText("Completion Date", format(log.completionDate, "PPP"));
+    await addText("Qualification Achieved", log.qualificationAchieved);
+    await addText("Instructor Qualification", log.instructorQualification);
+    await addText("Achievements/Awards", log.achievementDetails);
+    await addText("Certificate Attached", log.certificateFileName);
 
+    addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
   };
 
-  const handleExportAllTrainingRecordsForMember = (staffMemberGroup: StaffMemberLogGroup) => {
+  const handleExportAllTrainingRecordsForMember = async (staffMemberGroup: StaffMemberLogGroup) => {
     const doc = new jsPDF();
     const staffIdentifier = `${staffMemberGroup.rank}_${staffMemberGroup.staffName.replace(/\s*,\s*|\s+/g, '_')}`;
     const filename = `all_training_records_${staffIdentifier}.pdf`;
 
-    let yPos = 15;
+    const margin = 15;
+    let yPos = margin;
     const lineSpacing = 7;
     const sectionSpacing = 10;
     const indent = 5;
     const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
     const maxLineWidth = pageWidth - margin * 2;
+    let headerHeight = 0;
+    let footerHeight = 0;
+    
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5;
+    };
+    await setPageLayout();
 
-    const checkPageBreak = (neededHeight: number) => {
-      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
+    const checkPageBreak = async (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
         doc.addPage();
-        yPos = margin;
+        await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+        yPos = margin + headerHeight + 5;
       }
     };
 
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
-    checkPageBreak(sectionSpacing);
+    await checkPageBreak(sectionSpacing + 18);
     doc.text(`All Training Records for ${staffMemberGroup.rank} ${staffMemberGroup.staffName}`, margin, yPos);
     yPos += lineSpacing;
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
-    checkPageBreak(lineSpacing);
+    await checkPageBreak(lineSpacing);
     doc.text(`Associated with Squadron(s): ${Array.from(new Set(staffMemberGroup.logs.map(l => l.squadron))).join(', ')}`, margin, yPos);
     yPos += sectionSpacing * 1.5;
 
-    staffMemberGroup.logs.forEach((log, index) => {
-      checkPageBreak(sectionSpacing * 2 + lineSpacing * 7); // Estimate for one record
+    for (const [index, log] of staffMemberGroup.logs.entries()) {
+      await checkPageBreak(sectionSpacing * 2 + lineSpacing * 7 + 12); 
       doc.setLineWidth(0.2);
-      doc.line(margin, yPos - (lineSpacing / 2), pageWidth - margin, yPos - (lineSpacing / 2)); // Separator line
+      doc.line(margin, yPos - (lineSpacing / 2), pageWidth - margin, yPos - (lineSpacing / 2)); 
       
       doc.setFontSize(12);
       doc.setFont(undefined, 'bold');
@@ -537,24 +557,25 @@ export default function TrainingPage() {
 
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      const addDetail = (label: string, value?: string | null) => {
+      const addDetail = async (label: string, value?: string | null) => {
         if (!value || value.trim() === "") return;
-        checkPageBreak(lineSpacing);
+        await checkPageBreak(lineSpacing);
         const textLines = doc.splitTextToSize(`${label}: ${value}`, maxLineWidth - indent);
+        await checkPageBreak(textLines.length * (lineSpacing * 0.7));
         doc.text(textLines, margin + indent, yPos);
         yPos += (textLines.length * lineSpacing * 0.7) + (lineSpacing * 0.3);
       };
 
-      addDetail("Squadron at Training", log.squadron);
-      addDetail("Role at Training", log.currentRole);
-      addDetail("Completion Date", format(log.completionDate, "PPP"));
-      addDetail("Qualification Achieved", log.qualificationAchieved);
-      addDetail("Instructor Qualification", log.instructorQualification);
-      addDetail("Achievements/Awards", log.achievementDetails);
-      addDetail("Certificate", log.certificateFileName);
-      yPos += lineSpacing * 0.5; // Space after each record
-    });
-
+      await addDetail("Squadron at Training", log.squadron);
+      await addDetail("Role at Training", log.currentRole);
+      await addDetail("Completion Date", format(log.completionDate, "PPP"));
+      await addDetail("Qualification Achieved", log.qualificationAchieved);
+      await addDetail("Instructor Qualification", log.instructorQualification);
+      await addDetail("Achievements/Awards", log.achievementDetails);
+      await addDetail("Certificate", log.certificateFileName);
+      yPos += lineSpacing * 0.5; 
+    }
+    addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
   };
 
@@ -575,7 +596,6 @@ export default function TrainingPage() {
   };
 
   const parseDate = (dateString: string): Date | null => {
-    // Add 'dd/MM/yy' to the list of formats to try
     const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd", "dd/MM/yy"];
     for (const fmt of formatsToTry) {
       const parsed = parseDateFns(dateString, fmt, new Date());
@@ -583,48 +603,41 @@ export default function TrainingPage() {
     }
     const directParsed = new Date(dateString);
     if (isValidDate(directParsed)) return directParsed;
-
     return null;
   };
 
-  // Helper function to parse the "Surname" CSV field
-  // Format: "LastName FirstName Rank MemberUID"
   function parseCompositeSurnameField(surnameField: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
       const trimmedField = surnameField.trim();
       const parts = trimmedField.split(/\s+/);
-      if (parts.length < 4) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Min: LName FName Rank UID
+      
+      if (parts.length < 3) return { lastName: null, firstName: null, rank: null, memberUID: null }; 
 
       const memberUID = parts[parts.length - 1];
       const rankCandidate = parts[parts.length - 2].toUpperCase();
-
       let rank: typeof RANKS[number] | null = null;
+
       if ((RANKS as readonly string[]).includes(rankCandidate as typeof RANKS[number])) {
           rank = rankCandidate as typeof RANKS[number];
       } else {
-         // Attempt to combine last two parts for multi-word ranks like "PLTOFF(AAFC)"
-         if (parts.length >= 3) { // Need at least 3 parts for Name Rank UID
-            const potentialRank = parts.slice(-2).join(" ").toUpperCase();
-             if ((RANKS as readonly string[]).includes(potentialRank as typeof RANKS[number])) {
-                rank = potentialRank as typeof RANKS[number];
-                // Adjust logic if rank was multi-word
-                const lastName = parts[0];
-                const firstName = parts.slice(1, parts.length - 2).join(" ");
-                if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
-                    return { lastName: null, firstName: null, rank: null, memberUID: null };
-                }
-                return { lastName, firstName, rank, memberUID };
+         const potentialRank = parts.slice(-2).join(" ").toUpperCase();
+         if ((RANKS as readonly string[]).includes(potentialRank as typeof RANKS[number])) {
+            rank = potentialRank as typeof RANKS[number];
+            const lastName = parts[0];
+            const firstName = parts.slice(1, parts.length - 2).join(" ");
+            if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
+                return { lastName: null, firstName: null, rank: null, memberUID: null };
             }
-         }
-        if (!rank) return { lastName: null, firstName: null, rank: null, memberUID: null }; // Rank not found even after trying multi-word
+            return { lastName, firstName, rank, memberUID };
+        }
+        if (!rank) return { lastName: null, firstName: null, rank: null, memberUID: null };
       }
 
       const lastName = parts[0];
-      const firstName = parts.slice(1, parts.length - 2).join(" "); // All parts between last and rank+uid
+      const firstName = parts.slice(1, parts.length - 2).join(" "); 
 
-      if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) { // UID should be numeric
+      if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
           return { lastName: null, firstName: null, rank: null, memberUID: null };
       }
-      
       return { lastName, firstName, rank, memberUID };
   }
 
@@ -638,7 +651,7 @@ export default function TrainingPage() {
     setIsImportingAccomplishments(true);
 
     const reader = new FileReader();
-    reader.onload = async (e) => { // Make async
+    reader.onload = async (e) => { 
       try {
         const text = e.target?.result as string;
         if (!text) {
@@ -647,7 +660,7 @@ export default function TrainingPage() {
           return;
         }
 
-        const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; // Logs to be sent to backend
+        const newLogsToAdd: Omit<TrainingLog, 'id'>[] = []; 
         const errors: string[] = [];
         
         const allRows = robustCsvParser(text);
@@ -689,9 +702,9 @@ export default function TrainingPage() {
           const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
           let preliminaryParsingOk = true;
 
-          for (let i = 1; i < allRows.length; i++) { // Start from 1 to skip header
+          for (let i = 1; i < allRows.length; i++) { 
               const values = allRows[i];
-              if (values.every(val => val.trim() === "")) continue; // Skip genuinely empty rows
+              if (values.every(val => val.trim() === "")) continue; 
 
               if (values.length !== header.length) {
                   errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${allRows[i].join(",").substring(0,100)}..."`);
@@ -725,7 +738,7 @@ export default function TrainingPage() {
               const parsedNameRankUid = parseCompositeSurnameField(surnameField);
 
               if (!parsedNameRankUid.memberUID || !parsedNameRankUid.rank || !parsedNameRankUid.firstName || !parsedNameRankUid.lastName) {
-                  errors.push(`Row ${i + 1}: Could not parse "Surname" field: "${surnameField}". Expected "LastName FirstName Rank MemberUID". Make sure rank is valid.`);
+                  errors.push(`Row ${i + 1}: Could not parse "Surname" field: "${surnameField}". Expected "LastName FirstName Rank MemberUID". Make sure rank is valid and UID is present.`);
                   preliminaryParsingOk = false;
                   continue;
               }
@@ -1019,7 +1032,7 @@ export default function TrainingPage() {
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import training accomplishments, upload a CSV file. The header row is required.
-          The system expects the following headers (order matters for this list, but the parser will find them by name):
+          The system expects the following headers:
           <code className="block whitespace-pre-wrap bg-muted p-2 rounded-md my-2 text-xs">Unit_1,Surname,EffectiveDate,EndDate,ChangeType,StatusName,Details,Comment</code>
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>Unit_1</code>: (Text) Ignored by the system.</li>
@@ -1035,7 +1048,7 @@ export default function TrainingPage() {
             <li><code>Comment</code>: (Text) Ignored by the system.</li>
           </ul>
           <p className="mt-2 text-xs">
-            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing accomplishments. The CSV file must be well-formed (fields containing commas or newlines must be enclosed in double quotes, and double quotes within fields must be escaped as `""`).
+            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing accomplishments. The CSV file must be well-formed.
           </p>
         </AlertDescription>
       </Alert>
@@ -1213,4 +1226,3 @@ export default function TrainingPage() {
     </div>
   );
 }
-

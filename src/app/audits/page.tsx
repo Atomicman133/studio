@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -55,8 +56,11 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from 'jspdf';
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 
 const AUDITS_QUERY_KEY = 'safetyAudits';
+const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
+const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
 // Helper to convert Firestore Timestamps to JS Dates in audit data
 const convertAuditTimestamps = (data: any): SafetyAudit => {
@@ -237,29 +241,41 @@ export default function AuditsPage() {
     return "All Clear";
   }
 
-  const handleExportAuditAsPdf = (audit: SafetyAudit) => {
+  const handleExportAuditAsPdf = async (audit: SafetyAudit) => {
     const doc = new jsPDF();
     const auditDateFormatted = format(audit.auditDate, "yyyy-MM-dd");
     const filename = `safety_audit_${audit.auditTitle.replace(/\s+/g, '_')}_${auditDateFormatted}.pdf`;
 
-    let yPos = 15;
+    const margin = 15;
+    let yPos = margin;
     const lineSpacing = 7;
     const sectionSpacing = 10;
     const indent = 5;
     const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
     const maxLineWidth = pageWidth - (margin * 2);
+    let headerHeight = 0;
+    let footerHeight = 0;
 
-    const checkPageBreak = (neededHeight: number) => {
-        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin) {
-            doc.addPage();
-            yPos = margin;
-        }
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5; // Start content below header
     };
     
-    const addTextSection = (title: string, text?: string | null, isBold = false, customIndent = indent, titleFontSize = 12, textFontSize = 10) => {
+    await setPageLayout();
+
+    const checkPageBreak = async (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+        doc.addPage();
+        await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+        yPos = margin + headerHeight + 5; // Reset yPos for new page
+      }
+    };
+    
+    const addTextSection = async (title: string, text?: string | null, isBold = false, customIndent = indent, titleFontSize = 12, textFontSize = 10) => {
       if (!text || text.trim() === "") return;
-      checkPageBreak(lineSpacing * 2); // Estimate for title + a bit of text
+      await checkPageBreak(lineSpacing * 2 + titleFontSize + textFontSize); // Estimate for title + a bit of text
       
       doc.setFontSize(titleFontSize);
       doc.setFont(undefined, 'bold');
@@ -269,6 +285,7 @@ export default function AuditsPage() {
       doc.setFontSize(textFontSize);
       doc.setFont(undefined, isBold ? 'bold' : 'normal');
       const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      await checkPageBreak(lines.length * (lineSpacing * 0.8));
       doc.text(lines, margin + customIndent, yPos);
       yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3); // Spacing after text block
     };
@@ -276,34 +293,35 @@ export default function AuditsPage() {
     // --- PDF Header ---
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing * 1.2 + 18);
     doc.text(`Safety Audit Report: ${audit.auditTitle}`, margin, yPos);
     yPos += sectionSpacing * 1.2;
 
     // --- Basic Audit Information ---
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
-    addTextSection("Date of Audit:", format(audit.auditDate, "PPP"), false, 0);
-    addTextSection("Auditor(s):", audit.auditorName, false, 0);
-    addTextSection("Type of Audit:", audit.auditType, false, 0);
-    addTextSection("Scope of Audit:", audit.scope, false, 0);
+    await addTextSection("Date of Audit:", format(audit.auditDate, "PPP"), false, 0);
+    await addTextSection("Auditor(s):", audit.auditorName, false, 0);
+    await addTextSection("Type of Audit:", audit.auditType, false, 0);
+    await addTextSection("Scope of Audit:", audit.scope, false, 0);
     yPos += sectionSpacing * 0.5;
 
     // --- Overall Summary ---
     if (audit.summary) {
-      addTextSection("Overall Summary:", audit.summary, false, 0, 14);
+      await addTextSection("Overall Summary:", audit.summary, false, 0, 14);
       yPos += sectionSpacing * 0.5;
     }
 
     // --- Findings ---
     if (audit.findings && audit.findings.length > 0) {
-      checkPageBreak(sectionSpacing);
+      await checkPageBreak(sectionSpacing + 16);
       doc.setFontSize(16);
       doc.setFont(undefined, 'bold');
       doc.text("Findings / Corrective Actions", margin, yPos);
       yPos += sectionSpacing;
 
-      audit.findings.forEach((finding, index) => {
-        checkPageBreak(lineSpacing * 6); // Estimate space for a finding
+      for (const [index, finding] of audit.findings.entries()) {
+        await checkPageBreak(lineSpacing * 6 + 12); // Estimate space for a finding
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         doc.text(`Finding ${index + 1}:`, margin, yPos);
@@ -311,35 +329,36 @@ export default function AuditsPage() {
 
         doc.setFontSize(10);
         doc.setFont(undefined, 'normal');
-        addTextSection("Description:", finding.description, false, indent);
-        addTextSection("Severity:", finding.severity, false, indent);
+        await addTextSection("Description:", finding.description, false, indent);
+        await addTextSection("Severity:", finding.severity, false, indent);
         if (finding.recommendedAction) {
-          addTextSection("Recommended Action:", finding.recommendedAction, false, indent);
+          await addTextSection("Recommended Action:", finding.recommendedAction, false, indent);
         }
         if (finding.assignedTo) {
-          addTextSection("Assigned To:", finding.assignedTo, false, indent);
+          await addTextSection("Assigned To:", finding.assignedTo, false, indent);
         }
         if (finding.dueDate) {
-          addTextSection("Due Date:", format(finding.dueDate, "PPP"), false, indent);
+          await addTextSection("Due Date:", format(finding.dueDate, "PPP"), false, indent);
         }
-        addTextSection("Status:", finding.status, false, indent);
+        await addTextSection("Status:", finding.status, false, indent);
         
         yPos += lineSpacing * 0.7; // Space between findings
         if (index < audit.findings!.length - 1) {
-            checkPageBreak(lineSpacing * 0.5);
+            await checkPageBreak(lineSpacing * 0.5 + 1); // For line
             doc.setDrawColor(200); // Light grey line
             doc.line(margin, yPos, pageWidth - margin, yPos);
             yPos += lineSpacing * 0.5;
         }
-      });
+      }
     } else {
-      checkPageBreak(sectionSpacing);
+      await checkPageBreak(sectionSpacing + 12);
       doc.setFontSize(12);
       doc.setFont(undefined, 'italic');
       doc.text("No specific findings or CAPAs recorded for this audit.", margin, yPos);
       yPos += sectionSpacing;
     }
-
+    
+    addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
   };
 
@@ -616,8 +635,3 @@ export default function AuditsPage() {
     </div>
   );
 }
-
-
-    
-
-    

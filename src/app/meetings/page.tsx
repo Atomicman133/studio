@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -55,10 +56,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
-import { convertFileToDataUrl } from "@/lib/utils";
+import { convertFileToDataUrl, addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 
 
 const MEETINGS_QUERY_KEY = 'meetings';
+const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
+const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
 // Helper to convert Firestore Timestamps to JS Dates in meeting data
 const convertMeetingTimestamps = (data: any): Meeting => {
@@ -234,53 +237,71 @@ export default function MeetingsPage() {
     }
   };
 
-  const handleExportMinutesAsPdf = (meeting: Meeting) => {
+  const handleExportMinutesAsPdf = async (meeting: Meeting) => {
     const doc = new jsPDF();
     const meetingDate = format(meeting.date, "yyyy-MM-dd");
     const filename = `meeting_minutes_${meeting.title.replace(/\s+/g, '_')}_${meetingDate}.pdf`;
 
-    let yPos = 15;
+    const margin = 15;
+    let yPos = margin;
     const lineSpacing = 7;
     const sectionSpacing = 10;
     const indent = 5;
     const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
     const maxLineWidth = pageWidth - (margin * 2);
+    let headerHeight = 0;
+    let footerHeight = 0;
+    
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5; // Start content below header
+    };
+    await setPageLayout();
 
-    const addTextSection = (title: string, text?: string) => {
+    const checkPageBreak = async (neededHeight: number) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) { // Consider footer height
+            doc.addPage();
+            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin); // Add to new page
+            yPos = margin + headerHeight + 5; // Reset yPos for new page
+        }
+    };
+
+    const addTextSection = async (title: string, text?: string | null, titleFontSize = 12, textFontSize = 10) => {
       if (!text || text.trim() === "") return;
-      if (yPos > doc.internal.pageSize.getHeight() - margin - sectionSpacing - 20) { // Added buffer for section
-        doc.addPage();
-        yPos = margin;
-      }
-      doc.setFontSize(12);
+      await checkPageBreak(lineSpacing * 2 + titleFontSize + textFontSize); 
+      doc.setFontSize(titleFontSize);
       doc.setFont(undefined, 'bold');
       doc.text(title, margin, yPos);
       yPos += lineSpacing;
 
-      doc.setFontSize(10);
+      doc.setFontSize(textFontSize);
       doc.setFont(undefined, 'normal');
       const lines = doc.splitTextToSize(text, maxLineWidth - indent);
+      await checkPageBreak(lines.length * (lineSpacing * 0.8));
       doc.text(lines, margin + indent, yPos);
       yPos += lines.length * (lineSpacing * 0.8) + sectionSpacing * 0.7;
     };
 
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing * 1.2 + 16);
     doc.text(`Meeting Minutes: ${meeting.title}`, margin, yPos);
     yPos += sectionSpacing * 1.2;
 
-    addTextSection("Date:", format(meeting.date, "PPP p"));
-    addTextSection("Attendees:", meeting.attendees);
+    await addTextSection("Date:", format(meeting.date, "PPP p"));
+    await addTextSection("Attendees:", meeting.attendees);
 
     if (meeting.agendaDocumentFileName) {
-      addTextSection("Agenda Document:", `${meeting.agendaDocumentFileName} (Uploaded)`);
+      await addTextSection("Agenda Document:", `${meeting.agendaDocumentFileName} (Uploaded)`);
     }
-    addTextSection("Agenda Notes:", meeting.agendaNotes);
-    addTextSection("Discussion Points:", meeting.discussionPoints);
-    addTextSection("Decisions Made:", meeting.decisionsMade);
-    addTextSection("Action Items:", meeting.actionItemsText);
+    await addTextSection("Agenda Notes:", meeting.agendaNotes);
+    await addTextSection("Discussion Points:", meeting.discussionPoints);
+    await addTextSection("Decisions Made:", meeting.decisionsMade);
+    await addTextSection("Action Items:", meeting.actionItemsText);
 
+    addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
   };
 
