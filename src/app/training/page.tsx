@@ -89,24 +89,23 @@ async function fetchTrainingLogs(): Promise<TrainingLog[]> {
 // --- Add Training Log ---
 async function addTrainingLog(newLogData: Omit<TrainingLog, 'id'>): Promise<string> {
   const collectionRef = collection(db, 'trainingLogs');
-  const dataToSave = {
+  const dataToSave: any = { // Use any for temp flexibility before cleaning
     ...newLogData,
     completionDate: Timestamp.fromDate(newLogData.completionDate),
-    // Ensure optional fields that might be missing are handled (Firestore omits them)
     qualificationAchieved: newLogData.qualificationAchieved || null,
     instructorQualification: newLogData.instructorQualification || null,
     achievementDetails: newLogData.achievementDetails || null,
     certificateFileName: newLogData.certificateFileName || null,
     certificateDataUrl: newLogData.certificateDataUrl || null,
+    serviceNumber: newLogData.serviceNumber || null, // Ensure serviceNumber is included
   };
-  // Remove null fields before saving, as Firestore might prefer omission over null for some use cases
+  
   Object.keys(dataToSave).forEach(key => {
       const typedKey = key as keyof typeof dataToSave;
       if (dataToSave[typedKey] === null || dataToSave[typedKey] === undefined) {
           delete dataToSave[typedKey];
       }
   });
-
 
   const docRef = await addDoc(collectionRef, dataToSave);
   return docRef.id;
@@ -117,18 +116,17 @@ async function updateTrainingLog(updatedLog: TrainingLog): Promise<void> {
   if (!updatedLog.id) throw new Error("Log ID is required for update.");
   const docRef = doc(db, 'trainingLogs', updatedLog.id);
   const { id, ...dataToUpdate } = updatedLog;
-  const dataToSave = {
+  const dataToSave: any = { // Use any for temp flexibility
     ...dataToUpdate,
     completionDate: Timestamp.fromDate(dataToUpdate.completionDate),
-     // Ensure optional fields are explicitly set to null if empty/undefined before saving
      qualificationAchieved: dataToUpdate.qualificationAchieved || null,
      instructorQualification: dataToUpdate.instructorQualification || null,
      achievementDetails: dataToUpdate.achievementDetails || null,
      certificateFileName: dataToUpdate.certificateFileName || null,
      certificateDataUrl: dataToUpdate.certificateDataUrl || null,
+     serviceNumber: dataToUpdate.serviceNumber || null, // Ensure serviceNumber is included
   };
 
-  // Remove null fields before saving
   Object.keys(dataToSave).forEach(key => {
        const typedKey = key as keyof typeof dataToSave;
       if (dataToSave[typedKey] === null || dataToSave[typedKey] === undefined) {
@@ -159,44 +157,13 @@ type SquadronGroup = {
 };
 
 
-// Helper function to parse each line of a CSV.
-const parseCsvLine = (line: string): string[] => {
-  const fields: string[] = [];
-  let currentField = "";
-  let inQuotedField = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (char === '"') {
-      if (inQuotedField && i + 1 < line.length && line[i + 1] === '"') {
-        // Escaped double quote
-        currentField += '"';
-        i++; // Skip the next quote
-      } else {
-        // Start or end of a quoted field
-        inQuotedField = !inQuotedField;
-      }
-    } else if (char === ',' && !inQuotedField) {
-      // End of a field
-      fields.push(currentField.trim());
-      currentField = "";
-    } else {
-      currentField += char;
-    }
-  }
-  fields.push(currentField.trim()); // Add the last field
-  return fields;
-};
-
-
-// Helper function to parse the entire CSV text into an array of string arrays (rows and fields)
+// Helper function to parse each line of a CSV, handles quoted fields with commas and escaped quotes.
 const robustCsvParser = (csvText: string): string[][] => {
     const rows: string[][] = [];
     let currentRow: string[] = [];
     let currentField = "";
     let inQuotedField = false;
-    const normalizedText = csvText.replace(/\r\n|\r/g, '\n'); // Normalize line endings
+    const normalizedText = csvText.replace(/\r\n|\r/g, '\n'); 
 
     for (let i = 0; i < normalizedText.length; i++) {
         const char = normalizedText[i];
@@ -204,11 +171,9 @@ const robustCsvParser = (csvText: string): string[][] => {
         if (inQuotedField) {
             if (char === '"') {
                 if (i + 1 < normalizedText.length && normalizedText[i + 1] === '"') {
-                    // Escaped double quote
                     currentField += '"';
-                    i++; // Skip next quote
+                    i++; 
                 } else {
-                    // End of quoted field
                     inQuotedField = false;
                 }
             } else {
@@ -216,19 +181,19 @@ const robustCsvParser = (csvText: string): string[][] => {
             }
         } else { 
             if (char === '"') {
-                if (currentField.trim() === "") { // Only treat as start of quote if field is empty
+                 if (currentField.trim() === "") { 
                     inQuotedField = true;
-                } else { // Treat as literal quote if field already has content
+                } else { 
                     currentField += char; 
                 }
             } else if (char === ',') {
-                currentRow.push(currentField); 
+                currentRow.push(currentField.trim()); 
                 currentField = "";
             } else if (char === '\n') {
-                currentRow.push(currentField);
+                currentRow.push(currentField.trim());
                 currentField = "";
-                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim()) : true) ) {
-                    rows.push([...currentRow].map(f => f.trim()));
+                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim() !== "") : true) ) {
+                    rows.push([...currentRow]);
                 }
                 currentRow = [];
             } else {
@@ -237,10 +202,10 @@ const robustCsvParser = (csvText: string): string[][] => {
         }
     }
     if (currentField || currentRow.length > 0) {
-        currentRow.push(currentField);
+        currentRow.push(currentField.trim());
     }
-    if (currentRow.length > 0 && currentRow.some(f => f.trim())) {
-        rows.push([...currentRow].map(f => f.trim()));
+    if (currentRow.length > 0 && currentRow.some(f => f.trim() !== "")) {
+        rows.push([...currentRow]);
     }
     return rows;
 };
@@ -370,6 +335,22 @@ export default function TrainingPage() {
       }
     }
 
+    // Attempt to find matching staff member to populate serviceNumber
+    let serviceNumberToSave: string | undefined = undefined;
+    if (data.staffName && data.rank && data.squadron && staffList.length > 0) {
+        const matchedStaff = staffList.find(sm => 
+            sm.rank === data.rank && 
+            `${sm.lastName}, ${sm.firstName}` === data.staffName &&
+            sm.squadron === data.squadron
+        );
+        if (matchedStaff && matchedStaff.serviceNumber) {
+            serviceNumberToSave = matchedStaff.serviceNumber;
+        } else {
+            console.warn(`Manual Log: Could not find exact staff match for ${data.staffName}, ${data.rank}, ${data.squadron} to add serviceNumber.`);
+        }
+    }
+
+
     const newLog: Omit<TrainingLog, 'id'> = { 
       rank: data.rank,
       staffName: data.staffName,
@@ -381,7 +362,8 @@ export default function TrainingPage() {
       instructorQualification: data.instructorQualification,
       achievementDetails: data.achievementDetails,
       certificateFileName: certificateInfo.certificateFileName, 
-      certificateDataUrl: certificateInfo.certificateDataUrl,   
+      certificateDataUrl: certificateInfo.certificateDataUrl,
+      serviceNumber: serviceNumberToSave, // Add serviceNumber here
     };
     addLogMutation.mutate(newLog); 
   };
@@ -400,7 +382,25 @@ export default function TrainingPage() {
         return; 
       }
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
+      // This handles explicit removal of a certificate via the form
       certificateUpdates = { certificateFileName: undefined, certificateDataUrl: undefined };
+    }
+
+    // Attempt to find matching staff member to update serviceNumber if details changed
+    let serviceNumberToSave: string | undefined = editingLog.serviceNumber; // Default to existing
+    if (data.staffName && data.rank && data.squadron && staffList.length > 0) {
+        const matchedStaff = staffList.find(sm => 
+            sm.rank === data.rank && 
+            `${sm.lastName}, ${sm.firstName}` === data.staffName &&
+            sm.squadron === data.squadron
+        );
+        if (matchedStaff && matchedStaff.serviceNumber) {
+            serviceNumberToSave = matchedStaff.serviceNumber;
+        } else {
+             // If details change and no match is found, we might want to clear the service number or keep the old one.
+             // For now, if no new match, keep the old one if it existed. If it didn't, it remains undefined.
+            console.warn(`Manual Log Update: Could not find exact staff match for ${data.staffName}, ${data.rank}, ${data.squadron} to update serviceNumber. Previous: ${serviceNumberToSave}`);
+        }
     }
     
     const updatedLog: TrainingLog = {
@@ -416,6 +416,7 @@ export default function TrainingPage() {
       achievementDetails: data.achievementDetails,
       certificateFileName: certificateUpdates.hasOwnProperty('certificateFileName') ? certificateUpdates.certificateFileName : editingLog.certificateFileName,
       certificateDataUrl: certificateUpdates.hasOwnProperty('certificateDataUrl') ? certificateUpdates.certificateDataUrl : editingLog.certificateDataUrl,
+      serviceNumber: serviceNumberToSave, // Add serviceNumber here
     };
 
     updateLogMutation.mutate(updatedLog); 
@@ -608,37 +609,47 @@ export default function TrainingPage() {
 
   function parseCompositeSurnameField(surnameField: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
       const trimmedField = surnameField.trim();
-      const parts = trimmedField.split(/\s+/);
+      // Regex to capture "LastName FirstName Rank MemberUID"
+      // Assumes LastName is one word, FirstName can be multiple words, Rank is from RANKS, UID is numeric
+      // This is complex due to multi-word first names and ranks containing (AAFC)
       
-      if (parts.length < 3) return { lastName: null, firstName: null, rank: null, memberUID: null }; 
+      // Try to find a rank first by iterating through RANKS (longest first to avoid partial matches like "AC" for "AC(AAFC)")
+      const sortedRanks = [...RANKS].sort((a, b) => b.length - a.length);
+      let foundRank: typeof RANKS[number] | null = null;
+      let rankIndex = -1;
 
-      const memberUID = parts[parts.length - 1];
-      const rankCandidate = parts[parts.length - 2].toUpperCase();
-      let rank: typeof RANKS[number] | null = null;
-
-      if ((RANKS as readonly string[]).includes(rankCandidate as typeof RANKS[number])) {
-          rank = rankCandidate as typeof RANKS[number];
-      } else {
-         const potentialRank = parts.slice(-2).join(" ").toUpperCase();
-         if ((RANKS as readonly string[]).includes(potentialRank as typeof RANKS[number])) {
-            rank = potentialRank as typeof RANKS[number];
-            const lastName = parts[0];
-            const firstName = parts.slice(1, parts.length - 2).join(" ");
-            if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
-                return { lastName: null, firstName: null, rank: null, memberUID: null };
-            }
-            return { lastName, firstName, rank, memberUID };
-        }
-        if (!rank) return { lastName: null, firstName: null, rank: null, memberUID: null };
+      for (const r of sortedRanks) {
+          const rIndex = trimmedField.toUpperCase().lastIndexOf(" " + r + " "); // Ensure it's a whole word rank
+          if (rIndex > 0) { // Rank should not be at the beginning
+              const potentialUID = trimmedField.substring(rIndex + r.length + 2).trim();
+              if (potentialUID.match(/^\d+$/)) {
+                  foundRank = r;
+                  rankIndex = rIndex + 1; // +1 to skip the space before rank
+                  break;
+              }
+          }
       }
 
-      const lastName = parts[0];
-      const firstName = parts.slice(1, parts.length - 2).join(" "); 
-
-      if (!lastName || !firstName || !rank || !memberUID.match(/^\d+$/)) {
+      if (!foundRank || rankIndex === -1) {
           return { lastName: null, firstName: null, rank: null, memberUID: null };
       }
-      return { lastName, firstName, rank, memberUID };
+      
+      const memberUID = trimmedField.substring(rankIndex + foundRank.length).trim();
+      const namePart = trimmedField.substring(0, rankIndex -1).trim(); // -1 to remove space before rank
+
+      const nameParts = namePart.split(/\s+/);
+      if (nameParts.length < 2) {
+          return { lastName: null, firstName: null, rank: foundRank, memberUID }; // Not enough parts for first/last
+      }
+      
+      const lastName = nameParts[0];
+      const firstName = nameParts.slice(1).join(" ");
+
+      if (!lastName || !firstName || !memberUID.match(/^\d+$/)) {
+          return { lastName: null, firstName: null, rank: foundRank, memberUID: null };
+      }
+
+      return { lastName, firstName, rank: foundRank, memberUID };
   }
 
 
@@ -668,7 +679,7 @@ export default function TrainingPage() {
         if (allRows.length < 2) {
           errors.push("CSV must have a header and at least one data row.");
         } else {
-          const header = allRows[0];
+          const header = allRows[0].map(h => h.trim());
           
           const expectedCsvHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
           const requiredDataHeaders = ["Surname", "EffectiveDate", "StatusName", "Details"]; 
@@ -699,7 +710,6 @@ export default function TrainingPage() {
               return;
           }
           
-          const membersToProcess: Array<{ staffMember: StaffMember, csvRowData: Record<string, string>, rowIndex: number }> = [];
           let preliminaryParsingOk = true;
 
           for (let i = 1; i < allRows.length; i++) { 
@@ -730,7 +740,7 @@ export default function TrainingPage() {
               
               const surnameField = csvRowData["Surname"];
               if (!surnameField) {
-                  errors.push(`Row ${i + 1}: Missing "Surname" field (containing Name, Rank, UID).`);
+                  errors.push(`Row ${i + 1}: Missing "Surname" field (containing LastName FirstName Rank MemberUID).`);
                   preliminaryParsingOk = false;
                   continue;
               }
@@ -746,73 +756,57 @@ export default function TrainingPage() {
               const matchedStaff = staffList.find(sm => sm.serviceNumber === parsedNameRankUid.memberUID);
 
               if (!matchedStaff) {
-                  errors.push(`Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`);
-                  preliminaryParsingOk = false;
-              } else {
-                  membersToProcess.push({ staffMember: matchedStaff, csvRowData, rowIndex: i + 1 });
+                  errors.push(`Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists. Skipping accomplishment.`);
+                  continue; // Skip this accomplishment if staff member not found
               }
-          }
-
-          if (!preliminaryParsingOk) {
-              toast({
-                  variant: "destructive",
-                  title: "CSV Import Failed: Data Issues",
-                  description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
-                  duration: 15000,
-              });
-              if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
-              setIsImportingAccomplishments(false); 
-              return;
-          }
-
-          membersToProcess.forEach(({ staffMember, csvRowData, rowIndex }) => {
+              
               const accomplishmentDetails = csvRowData["Details"];
               const effectiveDateStr = csvRowData["EffectiveDate"];
-              const parsedSurnameData = parseCompositeSurnameField(csvRowData["Surname"]); 
-
+              
               if (!accomplishmentDetails) {
-                  errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "Details" (Accomplishment).`);
-                  return;
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaff.serviceNumber}): Missing "Details" (Accomplishment).`);
+                  preliminaryParsingOk = false;
+                  continue;
               }
               if (!effectiveDateStr) {
-                  errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Missing "EffectiveDate".`);
-                  return;
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaff.serviceNumber}): Missing "EffectiveDate".`);
+                  preliminaryParsingOk = false;
+                  continue;
               }
               
               const completionDate = parseDate(effectiveDateStr);
               if (!completionDate) {
-                  errors.push(`Row ${rowIndex} (UID: ${staffMember.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.`);
-                  return;
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaff.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}". Use DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.`);
+                  preliminaryParsingOk = false;
+                  continue;
               }
 
               const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
-                rank: parsedSurnameData.rank!, 
-                staffName: `${parsedSurnameData.lastName}, ${parsedSurnameData.firstName}`,
-                squadron: staffMember.squadron || "N/A", 
-                currentRole: staffMember.role || "N/A",  
+                rank: parsedNameRankUid.rank!, 
+                staffName: `${parsedNameRankUid.lastName}, ${parsedNameRankUid.firstName}`,
+                squadron: matchedStaff.squadron || "N/A", 
+                currentRole: matchedStaff.role || "N/A",  
                 courseName: accomplishmentDetails,
                 completionDate: completionDate,
                 qualificationAchieved: accomplishmentDetails, 
                 instructorQualification: "", 
-                achievementDetails: "", 
+                achievementDetails: "",
+                serviceNumber: matchedStaff.serviceNumber, // Explicitly add serviceNumber
               };
               newLogsToAdd.push(newLog as Omit<TrainingLog, 'id'>);
-          });
+          }
         }
 
         let importedCount = 0;
-        if (newLogsToAdd.length > 0 && errors.length === 0) { 
+        if (newLogsToAdd.length > 0) { // Process valid new logs even if some rows had errors
           for (const log of newLogsToAdd) {
              try {
                  await addLogMutation.mutateAsync(log);
                  importedCount++;
              } catch (err: any) {
-                 errors.push(`Failed to import accomplishment "${log.courseName}" for ${log.rank} ${log.staffName}: ${err.message}`);
+                 errors.push(`Failed to import accomplishment "${log.courseName}" for ${log.rank} ${log.staffName} (SN: ${log.serviceNumber}): ${err.message}`);
              }
           }
-           if (importedCount > 0) {
-              toast({ title: "Import Processing Complete", description: `${importedCount} accomplishment(s) added.` });
-           }
         }
         
         if (errors.length > 0) {
@@ -835,8 +829,12 @@ export default function TrainingPage() {
               ),
               duration: 15000,
           });
+        } else if (importedCount > 0) {
+             toast({ title: "Import Successful", description: `${importedCount} accomplishment(s) added.` });
         } else if (allRows.length <= 1 && importedCount === 0){ 
              toast({ title: "Import Information", description: "CSV file has no data rows to import." });
+        } else if (newLogsToAdd.length === 0 && errors.length === 0 && allRows.length > 1) {
+             toast({ title: "Import Information", description: "No new accomplishments to import after processing the CSV." });
         }
 
 
@@ -1032,23 +1030,20 @@ export default function TrainingPage() {
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import training accomplishments, upload a CSV file. The header row is required.
-          The system expects the following headers:
+          The system expects the following headers in this order:
           <code className="block whitespace-pre-wrap bg-muted p-2 rounded-md my-2 text-xs">Unit_1,Surname,EffectiveDate,EndDate,ChangeType,StatusName,Details,Comment</code>
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
-            <li><code>Unit_1</code>: (Text) Ignored by the system.</li>
-            <li><code>Surname</code>: (Text, Required) Format: "LastName FirstName Rank MemberUID".
-                Example: "Doe John FLTLT(AAFC) 8001234".
-                Rank must be one of: {RANKS.join(", ")}. MemberUID is the Service Number and is used to match an existing staff profile. If the staff profile is not found for the UID, the row is skipped.
-            </li>
-            <li><code>EffectiveDate</code>: (Date, Required) Completion date of the accomplishment. Recommended formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or DD/MM/YY.</li>
-            <li><code>EndDate</code>: (Date) Ignored by the system.</li>
-            <li><code>ChangeType</code>: (Text) Ignored by the system.</li>
-            <li><code>StatusName</code>: (Text, Required) If this field contains "Historical" (case-insensitive), the entire record will be skipped.</li>
-            <li><code>Details</code>: (Text, Required) This will be used as the Course Name and Qualification Achieved for the training log.</li>
-            <li><code>Comment</code>: (Text) Ignored by the system.</li>
+            <li><code>Unit_1</code>: Ignored.</li>
+            <li><code>Surname</code>: (Text, Required) Format: "LastName FirstName Rank MemberUID". Example: "Doe Jane FLTLT(AAFC) 8001234". Rank must be valid. MemberUID (Service Number) is used to match an existing staff profile. If no profile found, accomplishment is skipped.</li>
+            <li><code>EffectiveDate</code>: (Date, Required) Completion date. Try formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD.</li>
+            <li><code>EndDate</code>: Ignored.</li>
+            <li><code>ChangeType</code>: Ignored.</li>
+            <li><code>StatusName</code>: (Text) If this field contains "Historical" (case-insensitive), the record is skipped.</li>
+            <li><code>Details</code>: (Text, Required) Used as Course Name and Qualification Achieved.</li>
+            <li><code>Comment</code>: Ignored.</li>
           </ul>
           <p className="mt-2 text-xs">
-            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing accomplishments. The CSV file must be well-formed.
+            <strong>Important:</strong> Ensure staff profiles exist in Staff Management for each `MemberUID` before importing.
           </p>
         </AlertDescription>
       </Alert>
@@ -1094,7 +1089,7 @@ export default function TrainingPage() {
                     <div className="space-y-4 py-4">
                         <div>
                             <h3 className="font-semibold text-sm mb-1">Staff Member</h3>
-                            <p className="text-sm text-muted-foreground">{viewingLog.rank} {viewingLog.staffName}</p>
+                            <p className="text-sm text-muted-foreground">{viewingLog.rank} {viewingLog.staffName} (SN: {viewingLog.serviceNumber || "N/A"})</p>
                         </div>
                         <div>
                             <h3 className="font-semibold text-sm mb-1">Squadron</h3>

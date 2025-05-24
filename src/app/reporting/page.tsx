@@ -60,38 +60,16 @@ async function fetchTrainingLogs(): Promise<TrainingLog[]> {
 // --- End Fetch Training Logs ---
 
 
-const getStaffIdentifier = (staffMember: StaffMember): string => {
-  if (!staffMember.serviceNumber) {
-    console.warn(`Staff member ${staffMember.firstName} ${staffMember.lastName} is missing a service number.`);
-    return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_MISSING_SN`;
-  }
-  return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
-};
-
-const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[]): string => {
-  const matchedStaff = staffList.find(sm =>
-    sm.rank === log.rank &&
-    `${sm.lastName}, ${sm.firstName}` === log.staffName &&
-    sm.squadron === log.squadron
-  );
-
-  if (matchedStaff) {
-    return getStaffIdentifier(matchedStaff);
-  }
-
-  console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}, ${log.squadron}. Using log details as fallback identifier.`);
-  return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
-};
-
-
 const processComplianceReports = (
   staffList: StaffMember[],
   trainingLogs: TrainingLog[]
 ): StaffComplianceReport[] => {
 
   return staffList.map((staff) => {
-    const staffId = getStaffIdentifier(staff);
-    const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log, staffList) === staffId);
+    // Match logs to staff member using serviceNumber, if available and matches
+    const memberLogs = trainingLogs.filter(log => 
+        log.serviceNumber && staff.serviceNumber && log.serviceNumber === staff.serviceNumber
+    );
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
       const relevantLogs = memberLogs
@@ -113,17 +91,15 @@ const processComplianceReports = (
           today.setHours(0, 0, 0, 0);
 
           if (criterion.yearsToExpire) {
-            // Valid IF today is strictly BEFORE the expiry date (calculated as completionDate + yearsToExpire).
-            // AND IF today is ON OR AFTER the completion date.
-            // The item expires ON the calculated expiry date (exclusive of this day for validity).
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            if (isBefore(today, expiryDate) && (isAfter(today, completionDate) || isEqual(today, completionDate))) {
+             // Valid IF today is strictly BEFORE the expiry date.
+            if (isBefore(today, expiryDate)) {
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`; // Display as valid until day *before* actual expiry.
+              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
-          } else { // No expiry, just needs to exist
+          } else { 
             isMet = true;
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
@@ -141,7 +117,7 @@ const processComplianceReports = (
     const isCompliant = criteriaChecks.every(c => c.isMet);
 
     return {
-      staffMemberId: staff.id || staffId,
+      staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
@@ -189,7 +165,7 @@ export default function ReportingPage() {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      setComplianceReports([]);
+      setComplianceReports([]); // Clear reports if no data or loading finished with no data
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
 
@@ -209,7 +185,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return 0; // Return 0 if expired or on expiry day
+     return 0; 
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -221,7 +197,7 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft > 0) { // Only show if not expired
+    if (daysLeft !== null && daysLeft > 0) { 
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         } else if (daysLeft <= 90) {
@@ -256,7 +232,7 @@ export default function ReportingPage() {
 
     const checkPageBreak = async (neededHeight: number) => {
       if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
-        addPageNumbers(doc, footerHeight, margin); // Add page number before adding new page
+        addPageNumbers(doc, footerHeight, margin); 
         doc.addPage();
         await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
         yPos = margin + headerHeight + 5;
@@ -300,7 +276,7 @@ export default function ReportingPage() {
       doc.setTextColor(0);
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     }
-    addPageNumbers(doc, footerHeight, margin); // Add page numbers to the last page
+    addPageNumbers(doc, footerHeight, margin); 
     return doc;
   };
 
@@ -323,8 +299,6 @@ export default function ReportingPage() {
 
     const pdfDoc = await generateComplianceReportPdf(report);
     const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
-
-    // Get PDF as base64 string
     const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
 
     const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
@@ -336,26 +310,20 @@ export default function ReportingPage() {
     const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
     const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
-
     let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`;
     emlContent += `To: ${emailTo}\r\n`;
     emlContent += `Subject: ${subject}\r\n`;
     emlContent += `MIME-Version: 1.0\r\n`;
     emlContent += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
-
-    // Text part
     emlContent += `--${boundary}\r\n`;
     emlContent += `Content-Type: text/plain; charset="UTF-8"\r\n`;
     emlContent += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
     emlContent += `${body}\r\n\r\n`;
-
-    // Attachment part
     emlContent += `--${boundary}\r\n`;
     emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`;
     emlContent += `Content-Transfer-Encoding: base64\r\n`;
     emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`;
     emlContent += `${pdfBase64}\r\n\r\n`;
-
     emlContent += `--${boundary}--`;
 
     const emlFileName = `Compliance_Email_for_${report.staffMemberName.replace(/\s+/g, '_')}.eml`;
@@ -551,7 +519,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching. This is updated to primarily use Service Number where available.
           </p>
         </CardContent>
       </Card>
