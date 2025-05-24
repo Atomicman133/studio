@@ -36,22 +36,24 @@ import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
+import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps } from "../training/page";
+
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
 
 // --- Fetch Training Logs (copied from training page for this component's scope) ---
-export const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; // Exporting for use in dialog
-const convertLogTimestamps = (data: any): TrainingLog => {
-  return {
-    ...data,
-    completionDate: data.completionDate instanceof Timestamp ? data.completionDate.toDate() : data.completionDate,
-    // Ensure serviceNumber is included if present
-    serviceNumber: data.serviceNumber || undefined,
-  };
-};
-async function fetchTrainingLogs(): Promise<TrainingLog[]> {
+// export const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; // Exporting for use in dialog
+// const convertLogTimestamps = (data: any): TrainingLog => {
+//   return {
+//     ...data,
+//     completionDate: data.completionDate instanceof Timestamp ? data.completionDate.toDate() : data.completionDate,
+//     // Ensure serviceNumber is included if present
+//     serviceNumber: data.serviceNumber || undefined,
+//   };
+// };
+async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   const collectionRef = collection(db, 'trainingLogs');
   const q = query(collectionRef, orderBy('completionDate', 'desc'));
   const snapshot = await getDocs(q);
@@ -98,14 +100,13 @@ const processComplianceReports = (
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-             // Check if "today" is strictly BEFORE the expiryDate (exclusive of expiry day)
             if (isBefore(today, expiryDate)) {
               isMet = true;
               details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
-          } else {
+          } else { // No expiry, just check for existence
             isMet = true;
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
@@ -160,7 +161,7 @@ export default function ReportingPage() {
   const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
     queryKey: [TRAINING_LOGS_QUERY_KEY],
-    queryFn: fetchTrainingLogs,
+    queryFn: fetchLocalTrainingLogs,
   });
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -222,12 +223,14 @@ export default function ReportingPage() {
 
   const generateComplianceReportPdf = async (report: StaffComplianceReport): Promise<jsPDF> => {
     const doc = new jsPDF();
-    resetLetterheadCache(); // Ensure fresh images if they were changed
+    resetLetterheadCache();
 
     let yPos = 15;
     const lineSpacing = 7;
     const sectionSpacing = 10;
     const indent = 5;
+    const iconSize = 3; // Small size for drawn icons
+    const iconTextSpacing = 2;
     const margin = 15;
     const pageWidth = doc.internal.pageSize.getWidth();
     const maxLineWidth = pageWidth - margin * 2;
@@ -272,25 +275,49 @@ export default function ReportingPage() {
     yPos += lineSpacing * 1.2;
 
     for (const criterion of report.criteriaChecks) {
-      await checkPageBreak(lineSpacing * 3);
+      await checkPageBreak(lineSpacing * 3); // Estimate space for icon + text
+
+      // Draw Icon
+      const iconX = margin;
+      const iconY = yPos - (iconSize / 2); // Center icon vertically with the first line of text
+      doc.setLineWidth(0.5);
+
+      if (criterion.isMet) {
+        doc.setDrawColor(0, 128, 0); // Green
+        // Draw tick: line1 (down-left), line2 (up-right)
+        doc.line(iconX, iconY + iconSize * 0.6, iconX + iconSize * 0.4, iconY + iconSize);
+        doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY);
+      } else {
+        doc.setDrawColor(255, 0, 0); // Red
+        // Draw cross: line1 (top-left to bottom-right), line2 (top-right to bottom-left)
+        doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
+        doc.line(iconX + iconSize, iconY, iconX, iconY + iconSize);
+      }
+      doc.setDrawColor(0); // Reset to black for text
+
+      const textX = iconX + iconSize + iconTextSpacing;
+      const textMaxWidth = maxLineWidth - (iconSize + iconTextSpacing);
+
       doc.setFontSize(11);
       doc.setFont(undefined, 'bold');
-      doc.text(criterion.name, margin, yPos);
+      doc.text(criterion.name, textX, yPos);
       yPos += lineSpacing * 0.8;
 
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      doc.setTextColor(criterion.isMet ? 0 : 200);
+      // doc.setTextColor(criterion.isMet ? 34 : 200); // Green or Red for status text
       const statusText = criterion.isMet ? "Met" : "Not Met";
-      const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, maxLineWidth - indent);
+      const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, textMaxWidth - indent);
+      
       await checkPageBreak(detailLines.length * (lineSpacing * 0.7));
-      doc.text(detailLines, margin + indent, yPos);
-      doc.setTextColor(0);
+      doc.text(detailLines, textX + indent, yPos);
+      // doc.setTextColor(0); // Reset to black
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     }
     addPageNumbers(doc, footerHeight, margin);
     return doc;
   };
+
 
   const handleDownloadComplianceReport = async (report: StaffComplianceReport) => {
     const pdfDoc = await generateComplianceReportPdf(report);
@@ -559,3 +586,4 @@ export default function ReportingPage() {
     </div>
   );
 }
+
