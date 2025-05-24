@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2, Mail, Download } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -27,7 +27,7 @@ import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
 import { useStaff } from "@/hooks/useStaffData";
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns";
@@ -35,6 +35,7 @@ import { RANKS } from "../staff/staff-schema";
 import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog"; // Import the new dialog
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
@@ -66,6 +67,9 @@ const processComplianceReports = (
 ): StaffComplianceReport[] => {
 
   return staffList.map((staff) => {
+    if (!staff.serviceNumber) {
+      console.warn(`Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check may be incomplete.`);
+    }
     // Match logs to staff member using serviceNumber, if available and matches
     const memberLogs = trainingLogs.filter(log => 
         log.serviceNumber && staff.serviceNumber && log.serviceNumber === staff.serviceNumber
@@ -92,10 +96,9 @@ const processComplianceReports = (
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-             // Valid IF today is strictly BEFORE the expiry date.
-            if (isBefore(today, expiryDate)) {
+            if (isBefore(today, expiryDate)) { 
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
+              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
@@ -156,16 +159,20 @@ export default function ReportingPage() {
     queryFn: fetchTrainingLogs,
   });
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [complianceReports, setComplianceReports] = React.useState<StaffComplianceReport[]>([]);
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
+  const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
+  const [selectedStaffForLinking, setSelectedStaffForLinking] = React.useState<StaffComplianceReport | null>(null);
+
 
   React.useEffect(() => {
     if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      setComplianceReports([]); // Clear reports if no data or loading finished with no data
+      setComplianceReports([]); 
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
 
@@ -349,6 +356,11 @@ export default function ReportingPage() {
     });
   };
 
+  const handleOpenLinkDialog = (report: StaffComplianceReport) => {
+    setSelectedStaffForLinking(report);
+    setIsLinkDialogOpen(true);
+  };
+
 
   const isLoadingAny = isLoadingStaff || isLoadingLogs;
   const errorAny = errorStaff || errorLogs;
@@ -411,14 +423,12 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
-                         {/* Trigger Row */}
-                        <TableRow
-                            onClick={() => toggleCollapsible(report.staffMemberId)}
-                            className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
+                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
                             data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
+                            onClick={() => toggleCollapsible(report.staffMemberId)}
                           >
                           <TableCell>
-                            <Button variant="ghost" size="sm" className="w-9 p-0" aria-expanded={openCollapsible === report.staffMemberId}>
+                            <Button variant="ghost" size="sm" className="w-9 p-0">
                               {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                               <span className="sr-only">Toggle details for {report.staffMemberName}</span>
                             </Button>
@@ -434,9 +444,12 @@ export default function ReportingPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right space-x-1">
+                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs">
+                                <LinkIcon className="h-4 w-4" />
+                            </Button>
                             <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
                                 <Download className="h-4 w-4" />
-                              </Button>
+                            </Button>
                             {!report.isCompliant && report.email && (
                               <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
                                 <Mail className="h-4 w-4" />
@@ -444,7 +457,6 @@ export default function ReportingPage() {
                             )}
                           </TableCell>
                         </TableRow>
-                        {/* Content Row (Collapsible) */}
                         {openCollapsible === report.staffMemberId && (
                             <TableRow className="bg-muted/50 dark:bg-muted/30">
                             <TableCell colSpan={5}>
@@ -501,7 +513,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is inclusive of completion date and exclusive of expiry date - expires *on* the date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -519,11 +531,25 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Matching staff members between Training Logs and Staff Management relies on Rank, Name, and Squadron matching. This is updated to primarily use Service Number where available.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Staff member matching relies on Service Number primarily.
           </p>
         </CardContent>
       </Card>
+
+      {selectedStaffForLinking && isLinkDialogOpen && (
+        <LinkTrainingLogsDialog
+          open={isLinkDialogOpen}
+          onOpenChange={setIsLinkDialogOpen}
+          staffMemberReport={selectedStaffForLinking}
+          onLogsLinked={() => {
+            queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+            queryClient.invalidateQueries({ queryKey: ['complianceReports'] }); // Assuming 'complianceReports' is a distinct query key or use the main one
+            toast({ title: "Logs Linked", description: "Compliance data will refresh automatically."});
+            // Optionally refetch staffList if its derived data might change how compliance is calculated
+            // queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
+          }}
+        />
+      )}
     </div>
   );
-
 }
