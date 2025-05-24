@@ -33,51 +33,56 @@ interface LinkTrainingLogsDialogProps {
   onLogsLinked: () => void;
 }
 
-async function fetchUnlinkedTrainingLogs(staffName: string, rank: string, currentServiceNumber?: string): Promise<TrainingLog[]> {
+async function fetchUnlinkedTrainingLogs(staffNameFormattedForQuery: string, rank: string, currentServiceNumber?: string): Promise<TrainingLog[]> {
   const logsCollectionRef = collection(db, "trainingLogs");
   
-  // Query for logs that match name and rank but either have no service number
-  // OR have a service number that does NOT match the current staff member's service number (if provided)
-  // This is a bit tricky with Firestore's OR limitations. We'll fetch two sets and combine.
+  // Query for logs that match the formatted "LastName, FirstName" and rank
+  // and either have no service number OR a different service number.
 
-  const q1Conditions = [
-    where("staffName", "==", staffName),
-    where("rank", "==", rank),
-    where("serviceNumber", "==", null) // Logs with no service number
-  ];
-  const q1 = query(logsCollectionRef, ...q1Conditions);
+  const queries = [];
+
+  // Query 1: Logs with NO service number, matching formatted name and rank
+  queries.push(
+    getDocs(query(
+      logsCollectionRef,
+      where("staffName", "==", staffNameFormattedForQuery),
+      where("rank", "==", rank),
+      where("serviceNumber", "==", null)
+    ))
+  );
   
-  const q2Conditions = [
-    where("staffName", "==", staffName),
-    where("rank", "==", rank),
-    // where("serviceNumber", "!=", currentServiceNumber) // This is problematic.
-    // Firestore doesn't support != queries directly in a way that's efficient here.
-    // We'll fetch all logs matching name/rank and filter client-side for serviceNumber mismatch.
-  ];
-   const q2 = query(logsCollectionRef, ...q2Conditions.filter(c => c !== undefined));
+  // Query 2: Logs WITH a service number, matching formatted name and rank,
+  // but service number is NOT EQUAL to currentServiceNumber.
+  // Firestore doesn't support direct "not-equal" on one field while equality on others in a single query efficiently for this case.
+  // So, we fetch all matching name/rank and then filter.
+   queries.push(
+    getDocs(query(
+      logsCollectionRef,
+      where("staffName", "==", staffNameFormattedForQuery),
+      where("rank", "==", rank)
+      // We will filter serviceNumber client-side for this part
+    ))
+  );
 
 
-  const [querySnapshot1, querySnapshot2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-
+  const querySnapshots = await Promise.all(queries);
   const logsMap = new Map<string, TrainingLog>();
 
-  querySnapshot1.docs.forEach(doc => {
-    if (!logsMap.has(doc.id)) {
-      logsMap.set(doc.id, { id: doc.id, ...convertLogTimestamps(doc.data()) } as TrainingLog);
-    }
-  });
-  
-  querySnapshot2.docs.forEach(doc => {
-    const logData = { id: doc.id, ...convertLogTimestamps(doc.data()) } as TrainingLog;
-    // Add if not already present AND ( (has no service number) OR (has a service number that is different from current staff's) )
-    if (!logsMap.has(doc.id) && (!logData.serviceNumber || (currentServiceNumber && logData.serviceNumber !== currentServiceNumber))) {
-        logsMap.set(doc.id, logData);
-    } else if (logsMap.has(doc.id) && logData.serviceNumber && currentServiceNumber && logData.serviceNumber !== currentServiceNumber) {
-        // If it was added from q1 (serviceNumber == null), but q2 reveals it has a *different* service number, keep it.
-        // This case is less likely if q1 specifically fetches serviceNumber == null.
-    } else if (logsMap.has(doc.id) && !logData.serviceNumber) {
-        // Already added by q1, keep it.
-    }
+  querySnapshots.forEach((snapshot, index) => {
+    snapshot.docs.forEach(doc => {
+      if (!logsMap.has(doc.id)) {
+        const logData = { id: doc.id, ...convertLogTimestamps(doc.data()) } as TrainingLog;
+        if (index === 0) { // From query 1 (serviceNumber is null)
+            logsMap.set(doc.id, logData);
+        } else if (index === 1) { // From query 2 (all name/rank matches)
+            // Add if it has a serviceNumber AND that serviceNumber is different from currentStaff's SN
+            // OR if it has NO serviceNumber (might have been missed by query 1 if SN field just wasn't present at all vs being explicitly null)
+            if ((logData.serviceNumber && currentServiceNumber && logData.serviceNumber !== currentServiceNumber) || !logData.serviceNumber) {
+                 logsMap.set(doc.id, logData);
+            }
+        }
+      }
+    });
   });
   
   return Array.from(logsMap.values());
@@ -94,9 +99,20 @@ export function LinkTrainingLogsDialog({
   const queryClient = useQueryClient();
   const [selectedLogIds, setSelectedLogIds] = React.useState<Set<string>>(new Set());
 
+  // Transform staffMemberReport.staffMemberName ("FirstName LastName") to "LastName, FirstName"
+  const nameParts = staffMemberReport.staffMemberName.split(" ");
+  const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0] || ""; // Handle single names as last names
+  const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : "";
+  const formattedStaffNameForQuery = `${lastName}${firstName ? ', ' + firstName : ''}`.trim();
+
+
   const { data: potentialLogs = [], isLoading, error, refetch } = useQuery<TrainingLog[], Error>({
-    queryKey: [UNLINKED_TRAINING_LOGS_QUERY_KEY, staffMemberReport.staffMemberId],
-    queryFn: () => fetchUnlinkedTrainingLogs(staffMemberReport.staffMemberName, staffMemberReport.staffMemberRank, staffMemberReport.staffMemberId.split('_').pop()), // Assuming staffMemberId contains serviceNumber
+    queryKey: [UNLINKED_TRAINING_LOGS_QUERY_KEY, staffMemberReport.staffMemberId, formattedStaffNameForQuery], // Add formatted name to query key
+    queryFn: () => fetchUnlinkedTrainingLogs(
+        formattedStaffNameForQuery, 
+        staffMemberReport.staffMemberRank, 
+        staffMemberReport.staffMemberId.split('_').pop() // Assuming staffMemberId contains serviceNumber
+    ),
     enabled: open, // Only fetch when the dialog is open
   });
 
@@ -109,9 +125,8 @@ export function LinkTrainingLogsDialog({
 
   const linkMutation = useMutation<void, Error, string[]>({
     mutationFn: async (logIdsToLink) => {
-      if (!staffMemberReport.staffMemberId) throw new Error("Staff member service number is missing.");
-      const staffServiceNumber = staffMemberReport.staffMemberId.split('_').pop(); // Extract service number
-      if (!staffServiceNumber) throw new Error("Could not extract service number from staff ID.");
+      const staffServiceNumber = staffMemberReport.staffMemberId.split('_').pop(); 
+      if (!staffServiceNumber) throw new Error("Could not extract service number from staff ID for linking.");
 
       const batch = writeBatch(db);
       logIdsToLink.forEach(logId => {
@@ -122,8 +137,9 @@ export function LinkTrainingLogsDialog({
     },
     onSuccess: () => {
       toast({ title: "Success", description: "Selected training logs linked successfully." });
-      onLogsLinked(); // Callback to refresh parent data
-      onOpenChange(false); // Close dialog
+      queryClient.invalidateQueries({ queryKey: [UNLINKED_TRAINING_LOGS_QUERY_KEY, staffMemberReport.staffMemberId, formattedStaffNameForQuery] });
+      onLogsLinked(); 
+      onOpenChange(false); 
     },
     onError: (err) => {
       toast({ variant: "destructive", title: "Error", description: `Failed to link logs: ${err.message}` });
@@ -156,7 +172,7 @@ export function LinkTrainingLogsDialog({
         <DialogHeader>
           <DialogTitle>Link Training Logs for {staffMemberReport.staffMemberRank} {staffMemberReport.staffMemberName}</DialogTitle>
           <DialogDescription>
-            Select training logs below that belong to this staff member. Linking will associate them via their service number.
+            Select training logs below that belong to this staff member. This searches for logs matching name "{formattedStaffNameForQuery}" and rank "{staffMemberReport.staffMemberRank}" that are not currently linked via Service Number.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] border rounded-md p-2">
@@ -173,7 +189,7 @@ export function LinkTrainingLogsDialog({
             </div>
           )}
           {!isLoading && !error && potentialLogs.length === 0 && (
-            <p className="py-8 text-center text-muted-foreground">No unlinked training logs found matching this staff member's name and rank.</p>
+            <p className="py-8 text-center text-muted-foreground">No unlinked training logs found matching this staff member's name ("{formattedStaffNameForQuery}") and rank ("{staffMemberReport.staffMemberRank}").</p>
           )}
           {!isLoading && !error && potentialLogs.length > 0 && (
             <Table>
