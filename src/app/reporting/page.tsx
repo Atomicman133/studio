@@ -31,22 +31,24 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns";
-import { RANKS } from "../staff/staff-schema";
+import { RANKS, STAFF_QUERY_KEY } from "../staff/staff-schema";
 import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
-import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog"; // Import the new dialog
+import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
 
 // --- Fetch Training Logs (copied from training page for this component's scope) ---
-const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting';
+export const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; // Exporting for use in dialog
 const convertLogTimestamps = (data: any): TrainingLog => {
   return {
     ...data,
     completionDate: data.completionDate instanceof Timestamp ? data.completionDate.toDate() : data.completionDate,
+    // Ensure serviceNumber is included if present
+    serviceNumber: data.serviceNumber || undefined,
   };
 };
 async function fetchTrainingLogs(): Promise<TrainingLog[]> {
@@ -68,10 +70,10 @@ const processComplianceReports = (
 
   return staffList.map((staff) => {
     if (!staff.serviceNumber) {
-      console.warn(`Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check may be incomplete.`);
+      console.warn(`Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete as it relies on serviceNumber matching for logs.`);
     }
-    // Match logs to staff member using serviceNumber, if available and matches
-    const memberLogs = trainingLogs.filter(log => 
+    // Match logs to staff member using serviceNumber
+    const memberLogs = trainingLogs.filter(log =>
         log.serviceNumber && staff.serviceNumber && log.serviceNumber === staff.serviceNumber
     );
 
@@ -96,13 +98,14 @@ const processComplianceReports = (
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            if (isBefore(today, expiryDate)) { 
+             // Check if "today" is strictly BEFORE the expiryDate (exclusive of expiry day)
+            if (isBefore(today, expiryDate)) {
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
+              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
-          } else { 
+          } else {
             isMet = true;
             details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
           }
@@ -127,6 +130,7 @@ const processComplianceReports = (
       isCompliant,
       criteriaChecks,
       email: staff.email,
+      staffServiceNumberActual: staff.serviceNumber, // Store the actual service number
     };
   })
   .sort((a,b) => {
@@ -172,7 +176,7 @@ export default function ReportingPage() {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      setComplianceReports([]); 
+      setComplianceReports([]);
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
 
@@ -192,7 +196,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return 0; 
+     return 0;
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -204,20 +208,21 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft > 0) { 
+    if (daysLeft !== null && daysLeft > 0) {
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         } else if (daysLeft <= 90) {
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
-    } else if (daysLeft === 0) {
-        return <Badge variant="destructive" className="ml-2 text-xs">Expired/Today</Badge>;
+    } else if (daysLeft === 0 && criterion.isMet === false) { // Only show expired if it's actually not met due to expiry
+        return <Badge variant="destructive" className="ml-2 text-xs">Expired</Badge>;
     }
     return null;
   };
 
   const generateComplianceReportPdf = async (report: StaffComplianceReport): Promise<jsPDF> => {
     const doc = new jsPDF();
+    resetLetterheadCache(); // Ensure fresh images if they were changed
 
     let yPos = 15;
     const lineSpacing = 7;
@@ -239,7 +244,7 @@ export default function ReportingPage() {
 
     const checkPageBreak = async (neededHeight: number) => {
       if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
-        addPageNumbers(doc, footerHeight, margin); 
+        addPageNumbers(doc, footerHeight, margin);
         doc.addPage();
         await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
         yPos = margin + headerHeight + 5;
@@ -283,7 +288,7 @@ export default function ReportingPage() {
       doc.setTextColor(0);
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     }
-    addPageNumbers(doc, footerHeight, margin); 
+    addPageNumbers(doc, footerHeight, margin);
     return doc;
   };
 
@@ -422,67 +427,70 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
-                    <React.Fragment key={report.staffMemberId}>
-                         <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
-                            data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
-                            onClick={() => toggleCollapsible(report.staffMemberId)}
-                          >
-                          <TableCell>
-                            <Button variant="ghost" size="sm" className="w-9 p-0">
-                              {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                              <span className="sr-only">Toggle details for {report.staffMemberName}</span>
+                     <React.Fragment key={report.staffMemberId}>
+                       {/* Trigger Row */}
+                      <TableRow
+                        className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
+                        onClick={() => toggleCollapsible(report.staffMemberId)}
+                        data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
+                      >
+                        <TableCell>
+                          <Button variant="ghost" size="sm" className="w-9 p-0">
+                            {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            <span className="sr-only">Toggle details for {report.staffMemberName}</span>
+                          </Button>
+                        </TableCell>
+                        <TableCell>{report.squadron}</TableCell>
+                        <TableCell className="font-medium">
+                          {report.staffMemberRank} {report.staffMemberName}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={report.isCompliant ? "default" : "destructive"}>
+                            {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
+                            {report.isCompliant ? "Compliant" : "Not Compliant"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right space-x-1">
+                          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs">
+                              <LinkIcon className="h-4 w-4" />
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
+                              <Download className="h-4 w-4" />
+                          </Button>
+                          {!report.isCompliant && report.email && (
+                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
+                              <Mail className="h-4 w-4" />
                             </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      {/* Content Row (conditionally rendered) */}
+                      {openCollapsible === report.staffMemberId && (
+                          <TableRow className="bg-muted/50 dark:bg-muted/30">
+                          <TableCell colSpan={5}>
+                              <div className="p-4">
+                              <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                              <ul className="space-y-2">
+                                  {report.criteriaChecks.map(criterion => (
+                                  <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                      <div className="flex items-center">
+                                      {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                      <div>
+                                          <span>{criterion.name}:</span>
+                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                          {criterion.isMet ? "Met" : "Not Met"}
+                                          </span>
+                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                      </div>
+                                      </div>
+                                      {getExpiryWarningBadge(criterion)}
+                                  </li>
+                                  ))}
+                              </ul>
+                              </div>
                           </TableCell>
-                          <TableCell>{report.squadron}</TableCell>
-                          <TableCell className="font-medium">
-                            {report.staffMemberRank} {report.staffMemberName}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                              {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                              {report.isCompliant ? "Compliant" : "Not Compliant"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right space-x-1">
-                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs">
-                                <LinkIcon className="h-4 w-4" />
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
-                                <Download className="h-4 w-4" />
-                            </Button>
-                            {!report.isCompliant && report.email && (
-                              <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
-                                <Mail className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                        {openCollapsible === report.staffMemberId && (
-                            <TableRow className="bg-muted/50 dark:bg-muted/30">
-                            <TableCell colSpan={5}>
-                                <div className="p-4">
-                                <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                                <ul className="space-y-2">
-                                    {report.criteriaChecks.map(criterion => (
-                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                        <div className="flex items-center">
-                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                        <div>
-                                            <span>{criterion.name}:</span>
-                                            <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                            {criterion.isMet ? "Met" : "Not Met"}
-                                            </span>
-                                            <p className="text-xs text-muted-foreground">{criterion.details}</p>
-                                        </div>
-                                        </div>
-                                        {getExpiryWarningBadge(criterion)}
-                                    </li>
-                                    ))}
-                                </ul>
-                                </div>
-                            </TableCell>
-                            </TableRow>
-                        )}
+                          </TableRow>
+                      )}
                     </React.Fragment>
                   ))}
                 </TableBody>
@@ -543,10 +551,8 @@ export default function ReportingPage() {
           staffMemberReport={selectedStaffForLinking}
           onLogsLinked={() => {
             queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-            queryClient.invalidateQueries({ queryKey: ['complianceReports'] }); // Assuming 'complianceReports' is a distinct query key or use the main one
-            toast({ title: "Logs Linked", description: "Compliance data will refresh automatically."});
-            // Optionally refetch staffList if its derived data might change how compliance is calculated
-            // queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
+            queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); // Also invalidate staff if linking might change how staff are seen
+            toast({ title: "Logs Linked", description: "Compliance data is refreshing."});
           }}
         />
       )}

@@ -11,13 +11,14 @@ export interface ComplianceCriterionCheck {
 }
 
 export interface StaffComplianceReport {
-  staffMemberId: string; 
-  staffMemberName: string; 
+  staffMemberId: string;
+  staffMemberName: string;
   staffMemberRank: string;
   isCompliant: boolean;
   criteriaChecks: ComplianceCriterionCheck[];
-  squadron: string; 
-  email?: string | null; // Add email to facilitate emailing
+  squadron: string;
+  email?: string | null;
+  staffServiceNumberActual?: string; // Explicit field for the staff member's actual service number
 }
 
 // Helper function for flexible keyword matching (case-insensitive)
@@ -28,8 +29,6 @@ const matchesKeywords = (text: string | undefined | null, keywords: string[]): b
 };
 
 // Configuration for compliance criteria
-// The 'identifier' function checks if a given TrainingLog matches the criterion.
-// 'yearsToExpire' is used for items that have an expiry based on completionDate.
 export const COMPLIANCE_CRITERIA_CONFIG = [
   {
     key: 'firstAid',
@@ -41,28 +40,28 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
   {
     key: 'wwcc',
     name: 'Working With Children Check',
-    yearsToExpire: 3, 
+    yearsToExpire: 3,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['working with children', 'wwcc', 'Working With Children - WA - Certified']) || matchesKeywords(log.qualificationAchieved, ['working with children', 'wwcc', 'Working With Children - WA - Certified'])
   },
   {
     key: 'codeOfConduct',
     name: 'Code of Conduct & Behavioural Policy Acceptance',
-    yearsToExpire: undefined,
+    yearsToExpire: undefined, // No expiry, just checks for existence
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['code of conduct', 'behavioural policy acceptance', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'behavioural policy acceptance', 'coc'])
   },
   {
     key: 'psychAssessment',
     name: 'Psychological Assessment',
-    yearsToExpire: undefined, 
+    yearsToExpire: undefined, // No expiry
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['psychological assessment', 'psych assessment', 'psychological test - completed']) || matchesKeywords(log.qualificationAchieved, ['psychological assessment', 'psych assessment', 'psychological test - completed'])
   },
   {
     key: 'policeClearance',
     name: 'National Police Clearance',
-    yearsToExpire: 5, 
+    yearsToExpire: 5,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['national police clearance', 'police check', 'npc']) || matchesKeywords(log.qualificationAchieved, ['national police clearance', 'police check', 'npc'])
   },
@@ -72,16 +71,16 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
     yearsToExpire: 1,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, [
-        'defence youth safety', 
-        'dysat', 
-        'youth mental health - awareness - completed', 
-        'defence youth protection awareness course - completed online', 
+        'defence youth safety',
+        'dysat',
+        'youth mental health - awareness - completed',
+        'defence youth protection awareness course - completed online',
         'defence youth safety level 3 - leader - completed online'
       ]) || matchesKeywords(log.qualificationAchieved, [
-        'defence youth safety', 
+        'defence youth safety',
         'dysat',
-        'youth mental health - awareness - completed', 
-        'defence youth protection awareness course - completed online', 
+        'youth mental health - awareness - completed',
+        'defence youth protection awareness course - completed online',
         'defence youth safety level 3 - leader - completed online'
       ])
   },
