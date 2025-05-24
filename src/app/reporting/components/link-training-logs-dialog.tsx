@@ -17,7 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, where, documentId, writeBatch, doc } from "firebase/firestore";
+import { collection, getDocs, query, where, writeBatch, doc } from "firebase/firestore";
 import type { TrainingLog } from "@/app/training/training-schema";
 import { convertLogTimestamps } from "@/app/training/page";
 import type { StaffComplianceReport } from "../reporting-schema";
@@ -33,59 +33,53 @@ interface LinkTrainingLogsDialogProps {
   onLogsLinked: () => void;
 }
 
-async function fetchUnlinkedTrainingLogs(staffNameFormattedForQuery: string, rank: string, currentServiceNumber?: string): Promise<TrainingLog[]> {
+// Fetches unlinked logs based on name (case-insensitive for last name prefix in query, then precise client-side)
+// and ensures they are not already linked to the current staff member's service number.
+async function fetchUnlinkedTrainingLogs(
+  staffNameFormattedForQuery: string, // Expected format: "LASTNAME, FirstName" or "LASTNAME"
+  currentServiceNumber?: string
+): Promise<TrainingLog[]> {
   const logsCollectionRef = collection(db, "trainingLogs");
-  
-  // Query for logs that match the formatted "LastName, FirstName" and rank
-  // and either have no service number OR a different service number.
 
-  const queries = [];
+  const nameParts = staffNameFormattedForQuery.split(",").map(p => p.trim());
+  const lastNameQuery = nameParts[0].toUpperCase(); // Use uppercase for prefix query, assuming last names in DB might be uppercase
+  const firstNameQuery = nameParts.length > 1 ? nameParts[1].toUpperCase() : "";
 
-  // Query 1: Logs with NO service number, matching formatted name and rank
-  queries.push(
-    getDocs(query(
-      logsCollectionRef,
-      where("staffName", "==", staffNameFormattedForQuery),
-      where("rank", "==", rank),
-      where("serviceNumber", "==", null)
-    ))
-  );
-  
-  // Query 2: Logs WITH a service number, matching formatted name and rank,
-  // but service number is NOT EQUAL to currentServiceNumber.
-  // Firestore doesn't support direct "not-equal" on one field while equality on others in a single query efficiently for this case.
-  // So, we fetch all matching name/rank and then filter.
-   queries.push(
-    getDocs(query(
-      logsCollectionRef,
-      where("staffName", "==", staffNameFormattedForQuery),
-      where("rank", "==", rank)
-      // We will filter serviceNumber client-side for this part
-    ))
+  // Broad Firestore query: staffName starts with lastNameQuery (case-sensitive, so lastNameQuery should match DB casing)
+  const q = query(
+    logsCollectionRef,
+    where("staffName", ">=", lastNameQuery),
+    where("staffName", "<=", lastNameQuery + "\uf8ff") // Standard prefix query technique
   );
 
+  const querySnapshot = await getDocs(q);
+  const potentialLogs: TrainingLog[] = [];
 
-  const querySnapshots = await Promise.all(queries);
-  const logsMap = new Map<string, TrainingLog>();
+  querySnapshot.docs.forEach(docSnap => {
+    const logData = { id: docSnap.id, ...convertLogTimestamps(docSnap.data()) } as TrainingLog;
 
-  querySnapshots.forEach((snapshot, index) => {
-    snapshot.docs.forEach(doc => {
-      if (!logsMap.has(doc.id)) {
-        const logData = { id: doc.id, ...convertLogTimestamps(doc.data()) } as TrainingLog;
-        if (index === 0) { // From query 1 (serviceNumber is null)
-            logsMap.set(doc.id, logData);
-        } else if (index === 1) { // From query 2 (all name/rank matches)
-            // Add if it has a serviceNumber AND that serviceNumber is different from currentStaff's SN
-            // OR if it has NO serviceNumber (might have been missed by query 1 if SN field just wasn't present at all vs being explicitly null)
-            if ((logData.serviceNumber && currentServiceNumber && logData.serviceNumber !== currentServiceNumber) || !logData.serviceNumber) {
-                 logsMap.set(doc.id, logData);
-            }
-        }
-      }
-    });
+    // Condition 1: Service number check
+    // Skip if the log is already linked to the CURRENT staff member
+    if (logData.serviceNumber && currentServiceNumber && logData.serviceNumber === currentServiceNumber) {
+      return;
+    }
+    // If log has a service number but it's DIFFERENT from current staff's, it's a candidate (could be mislinked)
+    // If log has NO service number, it's a prime candidate
+
+    // Condition 2: Precise, case-insensitive name match on client-side
+    const logNameField = logData.staffName || "";
+    const logNameParts = logNameField.split(",").map(p => p.trim());
+    const logLastName = logNameParts[0].toUpperCase();
+    const logFirstName = logNameParts.length > 1 ? logNameParts[1].toUpperCase() : "";
+
+    // Match if last names are the same (case-insensitive)
+    // AND (either no first name was part of the query OR first names also match case-insensitively)
+    if (logLastName === lastNameQuery && (firstNameQuery === "" || logFirstName === firstNameQuery)) {
+      potentialLogs.push(logData);
+    }
   });
-  
-  return Array.from(logsMap.values());
+
+  return potentialLogs;
 }
 
 
@@ -99,33 +93,31 @@ export function LinkTrainingLogsDialog({
   const queryClient = useQueryClient();
   const [selectedLogIds, setSelectedLogIds] = React.useState<Set<string>>(new Set());
 
-  // Transform staffMemberReport.staffMemberName ("FirstName LastName") to "LastName, FirstName"
   const nameParts = staffMemberReport.staffMemberName.split(" ");
-  const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0] || ""; // Handle single names as last names
+  const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0] || "";
   const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : "";
-  const formattedStaffNameForQuery = `${lastName}${firstName ? ', ' + firstName : ''}`.trim();
+  const formattedStaffNameForQuery = `${lastName.toUpperCase()}${firstName ? ', ' + firstName : ''}`.trim();
+  const staffServiceNumber = staffMemberReport.staffMemberId.split('_').pop();
 
 
   const { data: potentialLogs = [], isLoading, error, refetch } = useQuery<TrainingLog[], Error>({
-    queryKey: [UNLINKED_TRAINING_LOGS_QUERY_KEY, staffMemberReport.staffMemberId, formattedStaffNameForQuery], // Add formatted name to query key
+    queryKey: [UNLINKED_TRAINING_LOGS_QUERY_KEY, staffMemberReport.staffMemberId, formattedStaffNameForQuery],
     queryFn: () => fetchUnlinkedTrainingLogs(
-        formattedStaffNameForQuery, 
-        staffMemberReport.staffMemberRank, 
-        staffMemberReport.staffMemberId.split('_').pop() // Assuming staffMemberId contains serviceNumber
+        formattedStaffNameForQuery,
+        staffServiceNumber
     ),
-    enabled: open, // Only fetch when the dialog is open
+    enabled: open,
   });
 
   React.useEffect(() => {
     if (open) {
-      refetch(); // Refetch when dialog opens
-      setSelectedLogIds(new Set()); // Reset selections
+      refetch();
+      setSelectedLogIds(new Set());
     }
   }, [open, refetch]);
 
   const linkMutation = useMutation<void, Error, string[]>({
     mutationFn: async (logIdsToLink) => {
-      const staffServiceNumber = staffMemberReport.staffMemberId.split('_').pop(); 
       if (!staffServiceNumber) throw new Error("Could not extract service number from staff ID for linking.");
 
       const batch = writeBatch(db);
@@ -138,8 +130,10 @@ export function LinkTrainingLogsDialog({
     onSuccess: () => {
       toast({ title: "Success", description: "Selected training logs linked successfully." });
       queryClient.invalidateQueries({ queryKey: [UNLINKED_TRAINING_LOGS_QUERY_KEY, staffMemberReport.staffMemberId, formattedStaffNameForQuery] });
-      onLogsLinked(); 
-      onOpenChange(false); 
+      queryClient.invalidateQueries({ queryKey: ["trainingLogsReporting"] }); // Invalidate broader training log cache
+      queryClient.invalidateQueries({ queryKey: ["staffComplianceReports"] }); // Invalidate compliance reports
+      onLogsLinked();
+      onOpenChange(false);
     },
     onError: (err) => {
       toast({ variant: "destructive", title: "Error", description: `Failed to link logs: ${err.message}` });
@@ -172,7 +166,7 @@ export function LinkTrainingLogsDialog({
         <DialogHeader>
           <DialogTitle>Link Training Logs for {staffMemberReport.staffMemberRank} {staffMemberReport.staffMemberName}</DialogTitle>
           <DialogDescription>
-            Select training logs below that belong to this staff member. This searches for logs matching name "{formattedStaffNameForQuery}" and rank "{staffMemberReport.staffMemberRank}" that are not currently linked via Service Number.
+            Select training logs below that belong to this staff member. This searches for logs matching name "{formattedStaffNameForQuery}" that are not currently linked via Service Number.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] border rounded-md p-2">
@@ -189,7 +183,7 @@ export function LinkTrainingLogsDialog({
             </div>
           )}
           {!isLoading && !error && potentialLogs.length === 0 && (
-            <p className="py-8 text-center text-muted-foreground">No unlinked training logs found matching this staff member's name ("{formattedStaffNameForQuery}") and rank ("{staffMemberReport.staffMemberRank}").</p>
+            <p className="py-8 text-center text-muted-foreground">No unlinked training logs found matching staff member's name ("{formattedStaffNameForQuery}").</p>
           )}
           {!isLoading && !error && potentialLogs.length > 0 && (
             <Table>
@@ -197,6 +191,7 @@ export function LinkTrainingLogsDialog({
                 <TableRow>
                   <TableHead className="w-[50px]">Link</TableHead>
                   <TableHead>Course Name</TableHead>
+                  <TableHead>Stored Name</TableHead>
                   <TableHead>Completion Date</TableHead>
                   <TableHead>Current SN</TableHead>
                 </TableRow>
@@ -212,6 +207,7 @@ export function LinkTrainingLogsDialog({
                       />
                     </TableCell>
                     <TableCell>{log.courseName}</TableCell>
+                    <TableCell>{log.staffName}</TableCell> {/* Display stored name for verification */}
                     <TableCell>{format(log.completionDate, "dd/MM/yyyy")}</TableCell>
                     <TableCell>{log.serviceNumber || "None"}</TableCell>
                   </TableRow>
