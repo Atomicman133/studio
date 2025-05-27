@@ -24,3 +24,33 @@ export const meetingFormSchema = meetingSchema.extend({
 });
 
 export type MeetingFormData = z.infer<typeof meetingFormSchema>;
+
+// Schema for basic scheduled meeting details (for Firestore and dashboard)
+export const scheduledMeetingSchema = z.object({
+  id: z.string().uuid().optional(),
+  title: z.string().min(1, "Meeting title is required"),
+  dateTime: z.date({ required_error: "Meeting date and time are required" }),
+  location: z.string().optional(),
+  objective: z.string().optional(),
+});
+export type ScheduledMeeting = z.infer<typeof scheduledMeetingSchema>;
+
+// Schema for individual agenda items (for form and PDF)
+export const agendaItemSchema = z.object({
+  id: z.string().uuid().optional(), // For React Hook Form field array key
+  description: z.string().min(1, "Agenda item description is required."),
+  presenter: z.string().optional(),
+  timeAllocation: z.string().optional().describe("e.g., 15 mins, 1 hour"),
+});
+export type AgendaItem = z.infer<typeof agendaItemSchema>;
+
+// Schema for the full agenda creation form
+export const agendaFormSchema = z.object({
+  meetingTitle: z.string().min(1, "Meeting title is required"),
+  meetingDate: z.date({ required_error: "Meeting date is required" }),
+  meetingTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Invalid time format (HH:MM)"),
+  meetingLocation: z.string().optional(),
+  meetingObjective: z.string().optional(),
+  agendaItems: z.array(agendaItemSchema).optional(),
+});
+export type AgendaFormData = z.infer<typeof agendaFormSchema>;

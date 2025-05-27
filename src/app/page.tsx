@@ -1,16 +1,17 @@
+
 "use client";
 
 import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2 } from "lucide-react";
-import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate } from "date-fns";
+import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2, CalendarClock } from "lucide-react";
+import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate, parseISO } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
 import type { TrainingLog } from "./training/training-schema";
 import { COMPLIANCE_CRITERIA_CONFIG, type StaffComplianceReport, type ComplianceCriterionCheck } from "./reporting/reporting-schema";
-// import type { Meeting } from "./meetings/meeting-schema"; // Not used in dashboard calculations
+import type { ScheduledMeeting } from "./meetings/meeting-schema"; // For scheduled meetings
 import type { SafetyAudit } from "./audits/audit-schema";
 import type { SquadronVisit, VisitActionItem } from "./squadron-visits/squadron-visit-schema";
 
@@ -19,7 +20,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { useStaff } from "@/hooks/useStaffData";
 import { useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, Timestamp, where } from 'firebase/firestore';
 import { useAuth } from "@/contexts/auth-context";
 import { useRouter } from "next/navigation";
 
@@ -32,6 +33,7 @@ async function fetchTrainingLogs(): Promise<TrainingLog[]> {
     id: doc.id,
     ...doc.data(),
     completionDate: (doc.data().completionDate as Timestamp).toDate(),
+    serviceNumber: doc.data().serviceNumber || undefined,
   })) as TrainingLog[];
 }
 
@@ -75,32 +77,39 @@ async function fetchVisits(): Promise<SquadronVisit[]> {
   }) as SquadronVisit[];
 }
 
-const getStaffIdentifier = (staffMember: StaffMember): string => {
-  if (!staffMember.serviceNumber) {
-    console.warn(`Staff member ${staffMember.firstName} ${staffMember.lastName} is missing a service number.`);
-    return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_MISSING_SN`;
-  }
-  return `${staffMember.lastName}, ${staffMember.firstName}_${staffMember.rank}_${staffMember.serviceNumber}`;
-};
-
-const getTrainingLogStaffIdentifier = (log: TrainingLog, staffList: StaffMember[]): string => {
-  const matchedStaff = staffList.find(sm =>
-    sm.rank === log.rank &&
-    `${sm.lastName}, ${sm.firstName}` === log.staffName &&
-    sm.squadron === log.squadron
+// --- Fetch Scheduled Meetings (Upcoming) ---
+async function fetchDashboardScheduledMeetings(): Promise<ScheduledMeeting[]> {
+  const scheduledMeetingsCollectionRef = collection(db, 'scheduledMeetings');
+  // Fetch meetings where dateTime is in the future, order by soonest first, limit to e.g., 5
+  const q = query(
+    scheduledMeetingsCollectionRef, 
+    where('dateTime', '>=', Timestamp.now()), 
+    orderBy('dateTime', 'asc'),
+    // limit(5) // Optional: limit the number of meetings shown on dashboard
   );
-  if (matchedStaff) return getStaffIdentifier(matchedStaff);
-  console.warn(`Could not find exact staff match for training log: ${log.staffName}, ${log.rank}. Using log details as fallback identifier.`);
-  return `${log.staffName}_${log.rank}_${log.squadron || 'UNKNOWN_SQN'}_FALLBACK_ID`;
-};
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      dateTime: (data.dateTime as Timestamp).toDate(),
+    }
+  }) as ScheduledMeeting[];
+}
+
 
 const processComplianceReportsForDashboard = (
   staffList: StaffMember[],
   trainingLogs: TrainingLog[]
 ): StaffComplianceReport[] => {
   return staffList.map((staff) => {
-    const staffId = getStaffIdentifier(staff);
-    const memberLogs = trainingLogs.filter(log => getTrainingLogStaffIdentifier(log, staffList) === staffId);
+    if (!staff.serviceNumber) {
+      console.warn(`Dashboard: Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete.`);
+    }
+    const memberLogs = trainingLogs.filter(log =>
+        log.serviceNumber && staff.serviceNumber && log.serviceNumber === staff.serviceNumber
+    );
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
       const relevantLogs = memberLogs
@@ -122,11 +131,15 @@ const processComplianceReportsForDashboard = (
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+            // Check if 'today' is strictly BEFORE 'expiryDate'.
+            // If completion is 1st Jan 2020, and it's valid for 3 years, it expires ON 1st Jan 2023.
+            // So it's valid up to and including 31st Dec 2022.
+            // isBefore(today, expiryDate) means valid IF today is 31st Dec 2022 for a 1st Jan 2023 expiry.
             if (isBefore(today, expiryDate)) { 
               isMet = true;
-              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
+              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
             } else {
-              details = `Out of Date (Completed: ${format(completionDate, "dd/MM/yyyy")})`;
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
           } else {
             isMet = true;
@@ -139,12 +152,14 @@ const processComplianceReportsForDashboard = (
 
     const isCompliant = criteriaChecks.every(c => c.isMet);
     return {
-      staffMemberId: staff.id || staffId,
+      staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
       isCompliant,
       criteriaChecks,
+      email: staff.email,
+      staffServiceNumberActual: staff.serviceNumber,
     };
   });
 };
@@ -199,6 +214,12 @@ export default function DashboardPage() {
     enabled: commonEnabledCondition, 
   });
 
+  const { data: scheduledMeetings = [], isLoading: isLoadingScheduledMeetings, error: errorScheduledMeetings } = useQuery<ScheduledMeeting[], Error>({
+    queryKey: ['dashboardScheduledMeetings'], // Unique key for dashboard fetch
+    queryFn: fetchDashboardScheduledMeetings,
+    enabled: commonEnabledCondition,
+  });
+
   const [complianceData, setComplianceData] = React.useState<{ compliant: number; nonCompliant: number } | null>(null);
   const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
   const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
@@ -213,11 +234,11 @@ export default function DashboardPage() {
     if (staffList && staffList.length > 0 && trainingLogs && trainingLogs.length > 0) {
       return processComplianceReportsForDashboard(staffList, trainingLogs);
     }
-    return null;
+    return []; // Return empty array if data is not ready
   }, [staffList, trainingLogs]);
 
   React.useEffect(() => {
-    if (processedReports) {
+    if (processedReports.length > 0) {
       const compliantCount = processedReports.filter(r => r.isCompliant).length;
       const nonCompliantCount = processedReports.length - compliantCount;
       setComplianceData(prevData => {
@@ -226,10 +247,13 @@ export default function DashboardPage() {
         }
         return { compliant: compliantCount, nonCompliant: nonCompliantCount };
       });
+    } else if (staffList.length > 0) { // If staff exists but no reports (e.g. no logs), show 0%
+        setComplianceData({ compliant: 0, nonCompliant: staffList.length});
     } else {
       setComplianceData(null); 
     }
-  }, [processedReports]);
+  }, [processedReports, staffList]);
+
 
   const calculatedExpiringAccomplishments = React.useMemo(() => {
     if (!staffList || !trainingLogs) return [];
@@ -243,11 +267,11 @@ export default function DashboardPage() {
           if (!isValidDate(completionDate)) return;
           const expiryDate = addYears(completionDate, criterion.yearsToExpire);
           if (isAfter(expiryDate, today) && isBefore(expiryDate, thirtyDaysFromNow)) {
-            const staffMember = staffList.find(s => s.rank === log.rank && `${s.lastName}, ${s.firstName}` === log.staffName && s.squadron === log.squadron);
+            const staffMember = staffList.find(s => s.serviceNumber === log.serviceNumber);
             expiring.push({
               staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
-              staffRank: log.rank,
-              squadron: log.squadron,
+              staffRank: staffMember ? staffMember.rank : log.rank,
+              squadron: staffMember ? staffMember.squadron || "N/A" : log.squadron,
               courseName: `${criterion.name} (${log.courseName})`,
               expiryDate: expiryDate,
               daysLeft: differenceInDays(expiryDate, today)
@@ -256,7 +280,7 @@ export default function DashboardPage() {
         }
       });
     });
-    return expiring.sort((a,b) => a.daysLeft - b.daysLeft);
+    return expiring.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5); // Show top 5
   }, [staffList, trainingLogs]);
 
   React.useEffect(() => {
@@ -312,7 +336,7 @@ export default function DashboardPage() {
         }
       });
     });
-    return actions.sort((a,b) => a.daysLeft - b.daysLeft);
+    return actions.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5); // Show top 5
   }, [audits, visits]);
 
   React.useEffect(() => {
@@ -326,12 +350,11 @@ export default function DashboardPage() {
     ? [
         { name: 'Compliant', value: complianceData.compliant, fill: "hsl(var(--chart-1))" },
         { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: "hsl(var(--destructive))" },
-      ]
+      ].filter(item => item.value > 0) // Filter out zero values for cleaner pie chart
     : [];
 
-  const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits;
-  const hasAnyError = errorStaff || errorLogs || errorAudits || errorVisits;
-  // Corrected logic for isUserEmailInvalidForRules
+  const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits || isLoadingScheduledMeetings;
+  const hasAnyError = errorStaff || errorLogs || errorAudits || errorVisits || errorScheduledMeetings;
   const isUserEmailInvalidForRules = user && !!user.email && !user.email.endsWith('@airforcecadets.gov.au');
 
 
@@ -353,7 +376,7 @@ export default function DashboardPage() {
     );
   }
   
-  if (user && isUserEmailInvalidForRules) { // Simplified this condition
+  if (user && isUserEmailInvalidForRules) {
     return (
       <Card className="border-destructive">
         <CardHeader>
@@ -393,6 +416,7 @@ export default function DashboardPage() {
                   {errorLogs && <p className="text-xs mt-2">Training Log Error: {errorLogs.message}</p>}
                   {errorAudits && <p className="text-xs mt-2">Audit Error: {errorAudits.message}</p>}
                   {errorVisits && <p className="text-xs mt-2">Visit Error: {errorVisits.message}</p>}
+                  {errorScheduledMeetings && <p className="text-xs mt-2">Scheduled Meetings Error: {errorScheduledMeetings.message}</p>}
               </CardContent>
           </Card>
       );
@@ -450,7 +474,7 @@ export default function DashboardPage() {
                 </ChartContainer>
               </>
             ) : (
-              <p className="text-muted-foreground">No compliance data available or staff list is empty.</p>
+              <p className="text-muted-foreground pt-4">No compliance data available or staff list is empty.</p>
             )}
           </CardContent>
         </Card>
@@ -495,43 +519,77 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="shadow-lg">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-lg font-medium">Upcoming Action Items (Next 14 Days)</CardTitle>
-          <ListTodo className="h-5 w-5 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          {upcomingActionItems.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="hidden md:table-cell">Responsible</TableHead>
-                  <TableHead className="hidden sm:table-cell">Source</TableHead>
-                  <TableHead className="text-right">Due In</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {upcomingActionItems.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium">{item.description}</TableCell>
-                    <TableCell className="hidden md:table-cell">{item.responsible}</TableCell>
-                    <TableCell className="hidden sm:table-cell text-xs">{item.source}</TableCell>
-                    <TableCell className="text-right">
-                       <Badge variant={item.daysLeft <= 3 ? "destructive" : item.daysLeft <= 7 ? "secondary" : "outline"}>
-                        {item.daysLeft} day(s)
-                      </Badge>
-                    </TableCell>
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card className="shadow-lg">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-lg font-medium">Upcoming Action Items (Next 14 Days)</CardTitle>
+            <ListTodo className="h-5 w-5 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {upcomingActionItems.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="hidden md:table-cell">Responsible</TableHead>
+                    <TableHead className="hidden sm:table-cell">Source</TableHead>
+                    <TableHead className="text-right">Due In</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-muted-foreground pt-4">No action items due soon.</p>
-          )}
-        </CardContent>
-      </Card>
-
+                </TableHeader>
+                <TableBody>
+                  {upcomingActionItems.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">{item.description}</TableCell>
+                      <TableCell className="hidden md:table-cell">{item.responsible}</TableCell>
+                      <TableCell className="hidden sm:table-cell text-xs">{item.source}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={item.daysLeft <= 3 ? "destructive" : item.daysLeft <= 7 ? "secondary" : "outline"}>
+                          {item.daysLeft} day(s)
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-muted-foreground pt-4">No action items due soon.</p>
+            )}
+          </CardContent>
+        </Card>
+        
+        <Card className="shadow-lg">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-lg font-medium">Upcoming Scheduled Meetings</CardTitle>
+            <CalendarClock className="h-5 w-5 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {isLoadingScheduledMeetings && <p className="text-muted-foreground pt-4">Loading meetings...</p>}
+            {errorScheduledMeetings && <p className="text-destructive pt-4">Error loading meetings.</p>}
+            {!isLoadingScheduledMeetings && !errorScheduledMeetings && scheduledMeetings.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Date & Time</TableHead>
+                    <TableHead className="hidden sm:table-cell">Location</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {scheduledMeetings.slice(0,5).map((meeting) => ( // Display top 5 upcoming
+                    <TableRow key={meeting.id}>
+                      <TableCell className="font-medium">{meeting.title}</TableCell>
+                      <TableCell>{format(meeting.dateTime, "PP p")}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{meeting.location || "N/A"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              !isLoadingScheduledMeetings && !errorScheduledMeetings && <p className="text-muted-foreground pt-4">No upcoming meetings scheduled.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
