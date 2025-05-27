@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -30,7 +29,7 @@ import { useStaff } from "@/hooks/useStaffData";
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
-import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears } from "date-fns";
+import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears, startOfDay } from "date-fns";
 import { RANKS, STAFF_QUERY_KEY } from "../staff/staff-schema";
 import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
@@ -53,45 +52,86 @@ async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   })) as TrainingLog[];
 }
 
+// Helper to parse log.staffName ("LastName, FirstName" or "FirstName LastName")
+// and compare with staffMember.firstName and staffMember.lastName
+const areNamesAndRankMatching = (
+  logStaffName: string | undefined | null,
+  logRank: typeof RANKS[number] | undefined | null,
+  staffMember: StaffMember
+): boolean => {
+  if (!logStaffName || !logRank || !staffMember.rank) {
+    return false;
+  }
+  if (logRank !== staffMember.rank) {
+    // console.log(`[NameRankMatchDebug] Rank mismatch: LogRank="${logRank}" vs StaffRank="${staffMember.rank}" for ${staffMember.firstName} ${staffMember.lastName}`);
+    return false;
+  }
+
+  const normalizedStaffFirstName = staffMember.firstName.toUpperCase().trim();
+  const normalizedStaffLastName = staffMember.lastName.toUpperCase().trim();
+  const normalizedLogStaffName = logStaffName.toUpperCase().trim().replace(/\s+/g, " ");
+
+  // Try "LastName, FirstName" format from log
+  if (normalizedLogStaffName.includes(",")) {
+    const parts = normalizedLogStaffName.split(",").map(p => p.trim());
+    if (parts.length >= 2) {
+      const logParsedLastName = parts[0];
+      const logParsedFirstName = parts[1];
+      if (logParsedLastName === normalizedStaffLastName && logParsedFirstName === normalizedStaffFirstName) {
+        // console.log(`[NameRankMatchDebug] Matched (L, F): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffLastName}, ${normalizedStaffFirstName}"`);
+        return true;
+      }
+    }
+  }
+
+  // Try "FirstName LastName" format from log
+  const spaceParts = normalizedLogStaffName.split(" ");
+  if (spaceParts.length >= 2) {
+    const logParsedLastName = spaceParts[spaceParts.length - 1];
+    const logParsedFirstName = spaceParts.slice(0, -1).join(" ");
+    if (logParsedLastName === normalizedStaffLastName && logParsedFirstName === normalizedStaffFirstName) {
+      // console.log(`[NameRankMatchDebug] Matched (F L): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}"`);
+      return true;
+    }
+  }
+  
+  // console.log(`[NameRankMatchDebug] No match for LogName="${normalizedLogStaffName}", LogRank="${logRank}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}", StaffRank="${staffMember.rank}"`);
+  return false;
+};
+
 
 const processComplianceReports = (
   staffList: StaffMember[],
   trainingLogs: TrainingLog[]
 ): StaffComplianceReport[] => {
   console.log(`[ComplianceDebug] processComplianceReports called. Staff: ${staffList.length}, Logs: ${trainingLogs.length}`);
-  if (trainingLogs.length > 0) {
-    console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 3).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName})));
+  if (trainingLogs.length > 0 && staffList.length > 0) {
+    // console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 1).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName, rank: l.rank })));
+    // console.log("[ComplianceDebug] Sample staff list item:", staffList[0] ? {name: `${staffList[0].firstName} ${staffList[0].lastName}`, rank: staffList[0].rank, sn: staffList[0].serviceNumber} : "N/A");
   }
 
 
   return staffList.map((staff) => {
-    const staffServiceNumber = staff.serviceNumber; // Use the direct service number from staff
-    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumber})`);
-
-    if (!staffServiceNumber) {
-      console.warn(`[ComplianceDebug] Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete.`);
-    }
+    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, SN: ${staff.serviceNumber})`);
     
-    const memberLogs = trainingLogs.filter(log =>
-        log.serviceNumber && staffServiceNumber && log.serviceNumber === staffServiceNumber
-    );
-    console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumber}.`);
+    const memberLogs = trainingLogs.filter(log => areNamesAndRankMatching(log.staffName, log.rank, staff));
+    
+    console.log(`[ComplianceDebug] Found ${memberLogs.length} logs by Name/Rank for ${staff.firstName} ${staff.lastName}.`);
     if (memberLogs.length > 0) {
-        console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,3).map(l => ({course: l.courseName, date: l.completionDate})));
+        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName} (Name/Rank match):`, memberLogs.slice(0,3).map(l => ({course: l.courseName, date: l.completionDate, logStaffName: l.staffName, logRank: l.rank })));
     }
 
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
+      // console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
       const relevantLogs = memberLogs
         .filter(log => {
             const isRelevant = criterion.identifier(log);
-            // console.log(`[ComplianceDebug]     Log "${log.courseName}" (SN: ${log.serviceNumber}) relevance for "${criterion.name}": ${isRelevant}`);
             return isRelevant;
         })
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
       
-      console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
+      // console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
 
 
       let isMet = false;
@@ -100,25 +140,22 @@ const processComplianceReports = (
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
-        console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
-        const completionDate = new Date(selectedLog.completionDate);
+        // console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
+        const completionDate = startOfDay(new Date(selectedLog.completionDate));
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
-          console.log(`[ComplianceDebug]         Invalid completion date for log: ${selectedLog.courseName}`);
+          // console.log(`[ComplianceDebug]         Invalid completion date for log: ${selectedLog.courseName}`);
         } else {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          const today = startOfDay(new Date());
 
           if (criterion.yearsToExpire) {
-            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            // A qualification is valid IF today IS BEFORE the expiry date.
-            // Example: Completed 1st Jan 2020, 3 years expiry. Expires ON 1st Jan 2023.
-            // Valid up to and including 31st Dec 2022.
-            // If today is 31st Dec 2022, isBefore(today, expiryDate) is true.
+            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
+            // A qualification is valid IF today IS STRICTLY BEFORE the expiry date.
+            // It expires ON the expiryDate.
             if (isBefore(today, expiryDate)) {
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${format(expiryDate, 'dd/MM/yy')}.`;
+              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${format(subYears(expiryDate,0), 'dd/MM/yy')}.`; // Displaying expiry as the last valid day
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${format(expiryDate, 'dd/MM/yy')}.`;
             }
@@ -128,9 +165,9 @@ const processComplianceReports = (
           }
         }
       } else {
-        console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
+        // console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
       }
-      console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
+      // console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
       return {
         key: criterion.key,
         name: criterion.name,
@@ -141,7 +178,7 @@ const processComplianceReports = (
     });
 
     const isCompliant = criteriaChecks.every(c => c.isMet);
-    console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${isCompliant}`);
+    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${isCompliant}`);
 
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
@@ -193,12 +230,11 @@ export default function ReportingPage() {
 
 
   React.useEffect(() => {
-    console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs.length);
+    console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
     if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      // Handles cases where staffList might be empty or trainingLogs might be undefined/empty
       console.log("[ComplianceDebug] Staff or logs not ready, or empty. Setting empty reports.");
       setComplianceReports([]);
     }
@@ -211,20 +247,20 @@ export default function ReportingPage() {
 
   const getDaysToExpiry = (completionDate: Date, yearsToExpire: number): number | null => {
     if (!isValidDate(completionDate)) return null;
-    const expiryDate = addYears(completionDate, yearsToExpire);
+    const normalizedCompletionDate = startOfDay(completionDate);
+    const expiryDate = startOfDay(addYears(normalizedCompletionDate, yearsToExpire));
     if (!isValidDate(expiryDate)) return null;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = startOfDay(new Date());
 
-     if (isBefore(today, expiryDate)) {
+     if (isBefore(today, expiryDate)) { // Valid if today is before the expiry date
         return differenceInDays(expiryDate, today);
      }
      return 0; // Indicates expired or on expiry date
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
-    if (!criterion.isMet || !criterion.relevantLog) return null;
+    if (!criterion.isMet || !criterion.relevantLog?.completionDate) return null; // Check relevantLog.completionDate
 
     const config = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === criterion.key);
 
@@ -232,14 +268,13 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft > 0) { // Only show if not expired AND isMet is true
+    if (daysLeft !== null && daysLeft > 0 && daysLeft <= 90) { // Only show if not expired AND isMet is true, and within 90 days
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-        } else if (daysLeft <= 90) {
+        } else { // daysLeft <= 90
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
     }
-    // Removed the "Expired" badge from here as the main status detail already covers it
     return null;
   };
 
@@ -269,7 +304,7 @@ export default function ReportingPage() {
 
     const checkPageBreak = async (neededHeight: number) => {
       if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
-        addPageNumbers(doc, footerHeight, margin);
+        addPageNumbers(doc, footerHeight, margin); // Add page numbers before adding new page
         doc.addPage();
         await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
         yPos = margin + headerHeight + 5;
@@ -304,15 +339,17 @@ export default function ReportingPage() {
       doc.setLineWidth(0.5);
 
       if (criterion.isMet) {
-        doc.setDrawColor(0, 128, 0); 
+        doc.setDrawColor(0, 128, 0); // Green
+        // Draw a tick: \/
         doc.line(iconX, iconY + iconSize * 0.6, iconX + iconSize * 0.4, iconY + iconSize);
         doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY);
       } else {
-        doc.setDrawColor(255, 0, 0); 
+        doc.setDrawColor(255, 0, 0); // Red
+        // Draw a cross: X
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
         doc.line(iconX + iconSize, iconY, iconX, iconY + iconSize);
       }
-      doc.setDrawColor(0); 
+      doc.setDrawColor(0); // Reset draw color to black
 
       const textX = iconX + iconSize + iconTextSpacing;
       const textMaxWidth = maxLineWidth - (iconSize + iconTextSpacing);
@@ -331,7 +368,7 @@ export default function ReportingPage() {
       doc.text(detailLines, textX + indent, yPos);
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     }
-    addPageNumbers(doc, footerHeight, margin);
+    addPageNumbers(doc, footerHeight, margin); // Add page numbers to the last page too
     return doc;
   };
 
@@ -357,57 +394,61 @@ export default function ReportingPage() {
       return;
     }
 
+    try {
+      const pdfDoc = await generateComplianceReportPdf(report);
+      const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
+      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
 
-    const pdfDoc = await generateComplianceReportPdf(report);
-    const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
-    const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
+      const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
+        .map(c => `  - ${c.name}: ${c.details}`)
+        .join("\n");
 
-    const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
-      .map(c => `  - ${c.name}: ${c.details}`)
-      .join("\n");
+      const emailTo = report.email;
+      const subject = `Action Required: Compliance Update for ${report.staffMemberRank} ${report.staffMemberName}`;
+      const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
-    const emailTo = report.email;
-    const subject = `Action Required: Compliance Update for ${report.staffMemberRank} ${report.staffMemberName}`;
-    const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+      const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
+      let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`;
+      emlContent += `To: ${emailTo}\r\n`;
+      emlContent += `Subject: ${subject}\r\n`;
+      emlContent += `MIME-Version: 1.0\r\n`;
+      emlContent += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
+      emlContent += `--${boundary}\r\n`;
+      emlContent += `Content-Type: text/plain; charset="UTF-8"\r\n`;
+      emlContent += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
+      emlContent += `${body}\r\n\r\n`;
+      emlContent += `--${boundary}\r\n`;
+      emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`; // Matched to pdfFileName
+      emlContent += `Content-Transfer-Encoding: base64\r\n`;
+      emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`; // Matched to pdfFileName
+      emlContent += `${pdfBase64}\r\n\r\n`;
+      emlContent += `--${boundary}--`;
 
-    const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
-    let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`;
-    emlContent += `To: ${emailTo}\r\n`;
-    emlContent += `Subject: ${subject}\r\n`;
-    emlContent += `MIME-Version: 1.0\r\n`;
-    emlContent += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
-    emlContent += `--${boundary}\r\n`;
-    emlContent += `Content-Type: text/plain; charset="UTF-8"\r\n`;
-    emlContent += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
-    emlContent += `${body}\r\n\r\n`;
-    emlContent += `--${boundary}\r\n`;
-    emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`;
-    emlContent += `Content-Transfer-Encoding: base64\r\n`;
-    emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`;
-    emlContent += `${pdfBase64}\r\n\r\n`;
-    emlContent += `--${boundary}--`;
+      const emlFileName = `Compliance_Email_for_${report.staffMemberName.replace(/\s+/g, '_')}.eml`;
+      const dataUri = `data:message/rfc822;charset=utf-8,${encodeURIComponent(emlContent)}`;
 
-    const emlFileName = `Compliance_Email_for_${report.staffMemberName.replace(/\s+/g, '_')}.eml`;
-    const dataUri = `data:message/rfc822;charset=utf-8,${encodeURIComponent(emlContent)}`;
+      const link = document.createElement('a');
+      link.href = dataUri;
+      link.download = emlFileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-    const link = document.createElement('a');
-    link.href = dataUri;
-    link.download = emlFileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    toast({
-      title: "Email File Generated",
-      description: (
-        <>
-          An .eml file &quot;{emlFileName}&quot; has been downloaded.
-          <br />
-          Please open it with your email client to send the pre-composed email with the PDF report attached.
-        </>
-      ),
-      duration: 10000,
-    });
+      toast({
+        title: "Email File Generated",
+        description: (
+          <>
+            An .eml file &quot;{emlFileName}&quot; has been downloaded.
+            <br />
+            Please open it with your email client to send the pre-composed email with the PDF report attached.
+          </>
+        ),
+        duration: 10000,
+      });
+    } catch (error) {
+      console.error("Error generating or downloading email file:", error);
+      toast({ variant: "destructive", title: "Email Generation Error", description: "Could not prepare the email file."});
+    }
   };
 
   const handleOpenLinkDialog = (report: StaffComplianceReport) => {
@@ -433,7 +474,7 @@ export default function ReportingPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0"> {/* Removed default padding */}
           {isLoadingAny && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -463,7 +504,7 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md"> {/* Ensure ScrollArea wraps the Table */}
+            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md">
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                   <TableRow>
@@ -498,7 +539,7 @@ export default function ReportingPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs">
+                           <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs">
                               <LinkIcon className="h-4 w-4" />
                           </Button>
                           <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
@@ -585,7 +626,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Staff member matching relies on Service Number primarily.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Staff member matching relies on matching `staffName` and `rank` fields.
           </p>
         </CardContent>
       </Card>
@@ -598,9 +639,6 @@ export default function ReportingPage() {
           onLogsLinked={() => {
             queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
             queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
-            // Also invalidate any query key specifically used by processComplianceReports if it's different
-            // For example, if complianceReports itself was a query:
-            // queryClient.invalidateQueries({ queryKey: ['complianceReports'] });
             toast({ title: "Logs Linked", description: "Compliance data is refreshing."});
           }}
         />
@@ -608,3 +646,4 @@ export default function ReportingPage() {
     </div>
   );
 }
+
