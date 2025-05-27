@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info, Paperclip, Loader2, AlertTriangle, BookOpenCheck } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, FileText, CalendarPlus, Users as UsersIconLucide, ListTodo, Download, Edit3, Info, Paperclip, Loader2, AlertTriangle, BookOpenCheck, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -156,9 +156,9 @@ export default function MeetingsPage() {
     queryFn: fetchMeetings,
     staleTime: 1000 * 60 * 5,
   });
-  const addMeetingMutation = useMutation<string, Error, Omit<Meeting, 'id'>>({ mutationFn: addMeeting, /* ... */ });
-  const updateMeetingMutation = useMutation<void, Error, Meeting>({ mutationFn: updateMeeting, /* ... */ });
-  const deleteMeetingMutation = useMutation<void, Error, string>({ mutationFn: deleteMeeting, /* ... */ });
+  const addMeetingMutation = useMutation<string, Error, Omit<Meeting, 'id'>>({ mutationFn: addMeeting });
+  const updateMeetingMutation = useMutation<void, Error, Meeting>({ mutationFn: updateMeeting });
+  const deleteMeetingMutation = useMutation<void, Error, string>({ mutationFn: deleteMeeting });
 
   // Queries for scheduled meetings
   const { data: scheduledMeetingsList = [], isLoading: isLoadingScheduledMeetings, error: errorScheduledMeetings } = useQuery<ScheduledMeeting[], Error>({
@@ -188,14 +188,154 @@ export default function MeetingsPage() {
   const [isAgendaFormOpen, setIsAgendaFormOpen] = React.useState(false);
 
 
-  const handleAddOrUpdateMeeting = async (formData: MeetingFormData) => { /* ... existing logic ... */ };
-  const handleEdit = (meeting: Meeting) => { /* ... existing logic ... */ };
-  const handleViewDetails = (meeting: Meeting) => { /* ... existing logic ... */ };
-  const handleDeleteConfirm = () => { /* ... existing logic ... */ };
-  const openFormForNew = () => { /* ... existing logic ... */ };
-  const closeForm = () => { /* ... existing logic ... */ };
-  const closeViewDialog = () => { /* ... existing logic ... */ };
-  const handleExportMinutesAsPdf = async (meeting: Meeting) => { /* ... existing logic ... */ };
+  const handleAddOrUpdateMeeting = async (formData: MeetingFormData) => {
+      let meetingData: Partial<Meeting> = {
+        title: formData.title,
+        date: formData.date,
+        attendees: formData.attendees,
+        agendaNotes: formData.agendaNotes,
+        discussionPoints: formData.discussionPoints,
+        decisionsMade: formData.decisionsMade,
+        actionItemsText: formData.actionItemsText,
+      };
+
+      // Handle file upload
+      if (formData.agendaDocumentFile) {
+        try {
+          const { name, dataUrl } = await convertFileToDataUrl(formData.agendaDocumentFile);
+          meetingData.agendaDocumentFileName = name;
+          meetingData.agendaDocumentDataUrl = dataUrl;
+        } catch (error) {
+          console.error("Error converting file:", error);
+          toast({ variant: "destructive", title: "File Error", description: "Could not process agenda document."});
+          return;
+        }
+      } else if (formData.agendaDocumentFileName === undefined && editingMeeting) {
+        // This means the user explicitly removed an existing file
+        meetingData.agendaDocumentFileName = undefined;
+        meetingData.agendaDocumentDataUrl = undefined;
+      }
+
+
+      if (editingMeeting && editingMeeting.id) {
+        updateMeetingMutation.mutate({ ...editingMeeting, ...meetingData } as Meeting);
+      } else {
+        addMeetingMutation.mutate(meetingData as Omit<Meeting, 'id'>);
+      }
+  };
+  const handleEdit = (meeting: Meeting) => {
+    setEditingMeeting(meeting);
+    setViewingMeeting(null);
+    setIsFormOpen(true);
+  };
+  const handleViewDetails = (meeting: Meeting) => {
+    setViewingMeeting(meeting);
+    setEditingMeeting(null);
+    setIsFormOpen(false);
+  };
+  const handleDeleteConfirm = () => {
+    if (meetingToDelete && meetingToDelete.id) {
+      deleteMeetingMutation.mutate(meetingToDelete.id);
+    }
+  };
+  const openFormForNew = () => {
+    setEditingMeeting(null);
+    setViewingMeeting(null);
+    setIsFormOpen(true);
+  };
+  const closeForm = () => {
+    setEditingMeeting(null);
+    setIsFormOpen(false);
+  };
+  const closeViewDialog = () => {
+    setViewingMeeting(null);
+  };
+  const handleExportMinutesAsPdf = async (meeting: Meeting) => {
+    const doc = new jsPDF();
+    resetLetterheadCache();
+    const meetingDate = format(meeting.date, "yyyy-MM-dd");
+    const filename = `meeting_minutes_${meeting.title.replace(/\s+/g, '_')}_${meetingDate}.pdf`;
+    
+    const margin = 15;
+    let yPos = margin;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxLineWidth = pageWidth - margin * 2;
+    let headerHeight = 0;
+    let footerHeight = 0;
+
+    const setPageLayout = async () => {
+      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerHeight = heights.headerHeight;
+      footerHeight = heights.footerHeight;
+      yPos = margin + headerHeight + 5;
+    };
+    await setPageLayout();
+
+    const checkPageBreak = async (neededHeight: number) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+            addPageNumbers(doc, footerHeight, margin);
+            doc.addPage();
+            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+            yPos = margin + headerHeight + 5;
+        }
+    };
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing + 18);
+    doc.text(`Meeting Minutes: ${meeting.title}`, margin, yPos);
+    yPos += lineSpacing;
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    await checkPageBreak(lineSpacing);
+    doc.text(`Date: ${format(meeting.date, "PPP")}`, margin, yPos);
+    yPos += sectionSpacing * 1.5;
+
+    const addTextSection = async (title: string, text?: string | null, isBold = false, customIndent = indent, titleFontSize = 12, textFontSize = 10) => {
+      if (!text || text.trim() === "") return;
+      doc.setFontSize(titleFontSize);
+      doc.setFont(undefined, 'bold');
+      await checkPageBreak(lineSpacing * 2 + titleFontSize + textFontSize);
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing;
+
+      doc.setFontSize(textFontSize);
+      doc.setFont(undefined, isBold ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(text, maxLineWidth - customIndent);
+      await checkPageBreak(lines.length * (lineSpacing * 0.8));
+      doc.text(lines, margin + customIndent, yPos);
+      yPos += lines.length * (lineSpacing * 0.8) + (lineSpacing * 0.3);
+    };
+
+    await addTextSection("Attendees:", meeting.attendees, false, 0);
+    yPos += sectionSpacing * 0.5;
+
+    if (meeting.agendaDocumentFileName) {
+      await addTextSection("Agenda Document:", meeting.agendaDocumentFileName + " (Attached or referenced)", false, 0);
+      yPos += sectionSpacing * 0.5;
+    }
+    if (meeting.agendaNotes) {
+      await addTextSection("Agenda Notes:", meeting.agendaNotes, false, 0, 14);
+      yPos += sectionSpacing * 0.5;
+    }
+    if (meeting.discussionPoints) {
+      await addTextSection("Discussion Points:", meeting.discussionPoints, false, 0, 14);
+      yPos += sectionSpacing * 0.5;
+    }
+    if (meeting.decisionsMade) {
+      await addTextSection("Decisions Made:", meeting.decisionsMade, false, 0, 14);
+      yPos += sectionSpacing * 0.5;
+    }
+    if (meeting.actionItemsText) {
+      await addTextSection("Action Items:", meeting.actionItemsText, false, 0, 14);
+    }
+
+    addPageNumbers(doc, footerHeight, margin);
+    doc.save(filename);
+  };
 
   // --- Re-add mutation handlers for logged meetings to avoid undefined errors ---
   addMeetingMutation.onSuccess = () => {
@@ -203,7 +343,7 @@ export default function MeetingsPage() {
     setIsFormOpen(false);
     toast({ title: "Success", description: "Meeting record added." });
   };
-  addMeetingMutation.onError = (err) => {
+  addMeetingMutation.onError = (err: Error) => { // Explicitly type err
     toast({ variant: "destructive", title: "Error", description: `Failed to add meeting: ${err.message}` });
   };
   updateMeetingMutation.onSuccess = (_, variables) => {
@@ -215,7 +355,7 @@ export default function MeetingsPage() {
     setEditingMeeting(null);
     toast({ title: "Success", description: "Meeting record updated." });
   };
-  updateMeetingMutation.onError = (err) => {
+  updateMeetingMutation.onError = (err: Error) => { // Explicitly type err
     toast({ variant: "destructive", title: "Error", description: `Failed to update meeting: ${err.message}` });
   };
   deleteMeetingMutation.onSuccess = (_, meetingId) => {
@@ -226,7 +366,7 @@ export default function MeetingsPage() {
     setMeetingToDelete(null);
     toast({ title: "Success", description: "Meeting record deleted." });
   };
-  deleteMeetingMutation.onError = (err) => {
+  deleteMeetingMutation.onError = (err: Error) => { // Explicitly type err
     toast({ variant: "destructive", title: "Error", description: `Failed to delete meeting: ${err.message}` });
     setMeetingToDelete(null);
   };
@@ -687,3 +827,4 @@ export default function MeetingsPage() {
     </div>
   );
 }
+
