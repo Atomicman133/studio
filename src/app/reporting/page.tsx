@@ -1,7 +1,8 @@
+
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -60,10 +61,11 @@ const areNamesAndRankMatching = (
   staffMember: StaffMember
 ): boolean => {
   if (!logStaffName || !logRank || !staffMember.rank) {
+    // console.log(`[ComplianceDebug-NameRankMatch] Early exit: LogName="${logStaffName}", LogRank="${logRank}", StaffRank="${staffMember.rank}"`);
     return false;
   }
   if (logRank !== staffMember.rank) {
-    // console.log(`[NameRankMatchDebug] Rank mismatch: LogRank="${logRank}" vs StaffRank="${staffMember.rank}" for ${staffMember.firstName} ${staffMember.lastName}`);
+    // console.log(`[ComplianceDebug-NameRankMatch] Rank mismatch: LogRank="${logRank}" vs StaffRank="${staffMember.rank}" for ${staffMember.firstName} ${staffMember.lastName}`);
     return false;
   }
 
@@ -74,28 +76,27 @@ const areNamesAndRankMatching = (
   // Try "LastName, FirstName" format from log
   if (normalizedLogStaffName.includes(",")) {
     const parts = normalizedLogStaffName.split(",").map(p => p.trim());
-    if (parts.length >= 2) {
+    if (parts.length >= 1) { // Allow for "LASTNAME,"
       const logParsedLastName = parts[0];
-      const logParsedFirstName = parts[1];
-      if (logParsedLastName === normalizedStaffLastName && logParsedFirstName === normalizedStaffFirstName) {
-        // console.log(`[NameRankMatchDebug] Matched (L, F): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffLastName}, ${normalizedStaffFirstName}"`);
+      const logParsedFirstName = parts.length > 1 ? parts[1] : "";
+      if (logParsedLastName === normalizedStaffLastName && (logParsedFirstName === normalizedStaffFirstName || logParsedFirstName === "" || normalizedStaffFirstName === "")) {
+        // console.log(`[ComplianceDebug-NameRankMatch] Matched (L, F): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffLastName}, ${normalizedStaffFirstName}"`);
         return true;
       }
     }
   }
 
-  // Try "FirstName LastName" format from log
+  // Try "FirstName LastName" format from log (or just "LastName")
   const spaceParts = normalizedLogStaffName.split(" ");
-  if (spaceParts.length >= 2) {
+  if (spaceParts.length > 0) {
     const logParsedLastName = spaceParts[spaceParts.length - 1];
     const logParsedFirstName = spaceParts.slice(0, -1).join(" ");
-    if (logParsedLastName === normalizedStaffLastName && logParsedFirstName === normalizedStaffFirstName) {
-      // console.log(`[NameRankMatchDebug] Matched (F L): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}"`);
+     if (logParsedLastName === normalizedStaffLastName && (logParsedFirstName === normalizedStaffFirstName || logParsedFirstName === "" || normalizedStaffFirstName === "")) {
+      // console.log(`[ComplianceDebug-NameRankMatch] Matched (F L): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}"`);
       return true;
     }
   }
-  
-  // console.log(`[NameRankMatchDebug] No match for LogName="${normalizedLogStaffName}", LogRank="${logRank}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}", StaffRank="${staffMember.rank}"`);
+  // console.log(`[ComplianceDebug-NameRankMatch] No match for LogName="${normalizedLogStaffName}", LogRank="${logRank}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}", StaffRank="${staffMember.rank}"`);
   return false;
 };
 
@@ -112,13 +113,29 @@ const processComplianceReports = (
 
 
   return staffList.map((staff) => {
-    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, SN: ${staff.serviceNumber})`);
+    if (!staff.serviceNumber) {
+        console.warn(`[ComplianceDebug] Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be less reliable.`);
+    }
+    // Primary matching via Service Number if available on both staff and log
+    // Fallback to Name/Rank matching is now handled inside areNamesAndRankMatching if SN is missing
+    const memberLogs = trainingLogs.filter(log => {
+        if (staff.serviceNumber && log.serviceNumber) {
+            return staff.serviceNumber === log.serviceNumber;
+        }
+        // Fallback to name/rank if either staff or log is missing SN
+        // This fallback is intended to catch logs that haven't been linked via "Find & Link Logs" yet.
+        // console.log(`[ComplianceDebug] SN mismatch or missing for staff ${staff.firstName} ${staff.lastName} (SN: ${staff.serviceNumber}) and log (SN: ${log.serviceNumber}). Falling back to name/rank match for log: ${log.staffName} / ${log.rank}`);
+        return areNamesAndRankMatching(log.staffName, log.rank, staff);
+    });
     
-    const memberLogs = trainingLogs.filter(log => areNamesAndRankMatching(log.staffName, log.rank, staff));
-    
-    console.log(`[ComplianceDebug] Found ${memberLogs.length} logs by Name/Rank for ${staff.firstName} ${staff.lastName}.`);
-    if (memberLogs.length > 0) {
-        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName} (Name/Rank match):`, memberLogs.slice(0,3).map(l => ({course: l.courseName, date: l.completionDate, logStaffName: l.staffName, logRank: l.rank })));
+    if(staff.serviceNumber){
+      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for staff: ${staff.firstName} ${staff.lastName} (SN: ${staff.serviceNumber}) (Primary match on SN or fallback to Name/Rank).`);
+    } else {
+      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for staff: ${staff.firstName} ${staff.lastName} (NO SN - Matched on Name/Rank).`);
+    }
+
+    if (memberLogs.length > 0 && staff.serviceNumber) {
+        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName} (SN: ${staff.serviceNumber}):`, memberLogs.slice(0,3).map(l => ({course: l.courseName, date: l.completionDate, logStaffName: l.staffName, logRank: l.rank, logSN: l.serviceNumber })));
     }
 
 
@@ -127,6 +144,7 @@ const processComplianceReports = (
       const relevantLogs = memberLogs
         .filter(log => {
             const isRelevant = criterion.identifier(log);
+            // if (isRelevant) console.log(`[ComplianceDebug]     Log "${log.courseName}" (Date: ${log.completionDate}) IS relevant for criterion "${criterion.name}"`);
             return isRelevant;
         })
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
@@ -151,15 +169,13 @@ const processComplianceReports = (
 
           if (criterion.yearsToExpire) {
             const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            // A qualification is valid IF today IS STRICTLY BEFORE the expiry date.
-            // It expires ON the expiryDate.
-            if (isBefore(today, expiryDate)) {
+            if (isBefore(today, expiryDate)) { 
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${format(subYears(expiryDate,0), 'dd/MM/yy')}.`; // Displaying expiry as the last valid day
+              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${format(subYears(expiryDate,0), 'dd/MM/yy')}.`;
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${format(expiryDate, 'dd/MM/yy')}.`;
             }
-          } else { // No expiry, just check for existence
+          } else { 
             isMet = true;
             details = `Completed: ${format(completionDate, 'dd/MM/yy')}`;
           }
@@ -177,18 +193,31 @@ const processComplianceReports = (
       };
     });
 
-    const isCompliant = criteriaChecks.every(c => c.isMet);
-    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${isCompliant}`);
+    const metCount = criteriaChecks.filter(c => c.isMet).length;
+    const isFullyCompliant = metCount === COMPLIANCE_CRITERIA_CONFIG.length;
+    let complianceStatusText: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
+    let complianceStatusVariant: StaffComplianceReport["complianceStatusVariant"] = "destructive";
+
+    if (isFullyCompliant) {
+      complianceStatusText = "Compliant";
+      complianceStatusVariant = "default";
+    } else if (metCount >= 3) {
+      complianceStatusText = "Partially Compliant";
+      complianceStatusVariant = "secondary";
+    }
+    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
 
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
-      isCompliant,
+      isCompliant: isFullyCompliant,
       criteriaChecks,
       email: staff.email,
-      staffServiceNumberActual: staff.serviceNumber, 
+      staffServiceNumberActual: staff.serviceNumber,
+      complianceStatusText,
+      complianceStatusVariant,
     };
   })
   .sort((a,b) => {
@@ -260,7 +289,7 @@ export default function ReportingPage() {
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
-    if (!criterion.isMet || !criterion.relevantLog?.completionDate) return null; // Check relevantLog.completionDate
+    if (!criterion.isMet || !criterion.relevantLog?.completionDate) return null;
 
     const config = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === criterion.key);
 
@@ -268,10 +297,10 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft > 0 && daysLeft <= 90) { // Only show if not expired AND isMet is true, and within 90 days
+    if (daysLeft !== null && daysLeft > 0 && daysLeft <= 90) {
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
-        } else { // daysLeft <= 90
+        } else { 
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
     }
@@ -304,7 +333,7 @@ export default function ReportingPage() {
 
     const checkPageBreak = async (neededHeight: number) => {
       if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
-        addPageNumbers(doc, footerHeight, margin); // Add page numbers before adding new page
+        addPageNumbers(doc, footerHeight, margin); 
         doc.addPage();
         await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
         yPos = margin + headerHeight + 5;
@@ -322,7 +351,7 @@ export default function ReportingPage() {
     doc.text(`Squadron: ${report.squadron}`, margin, yPos);
     yPos += lineSpacing;
     await checkPageBreak(lineSpacing);
-    doc.text(`Overall Status: ${report.isCompliant ? "Compliant" : "Not Compliant"}`, margin, yPos);
+    doc.text(`Overall Status: ${report.complianceStatusText}`, margin, yPos);
     yPos += sectionSpacing * 1.5;
 
     doc.setFontSize(14);
@@ -340,16 +369,14 @@ export default function ReportingPage() {
 
       if (criterion.isMet) {
         doc.setDrawColor(0, 128, 0); // Green
-        // Draw a tick: \/
         doc.line(iconX, iconY + iconSize * 0.6, iconX + iconSize * 0.4, iconY + iconSize);
         doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY);
       } else {
         doc.setDrawColor(255, 0, 0); // Red
-        // Draw a cross: X
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
         doc.line(iconX + iconSize, iconY, iconX, iconY + iconSize);
       }
-      doc.setDrawColor(0); // Reset draw color to black
+      doc.setDrawColor(0); 
 
       const textX = iconX + iconSize + iconTextSpacing;
       const textMaxWidth = maxLineWidth - (iconSize + iconTextSpacing);
@@ -368,7 +395,7 @@ export default function ReportingPage() {
       doc.text(detailLines, textX + indent, yPos);
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     }
-    addPageNumbers(doc, footerHeight, margin); // Add page numbers to the last page too
+    addPageNumbers(doc, footerHeight, margin); 
     return doc;
   };
 
@@ -385,7 +412,7 @@ export default function ReportingPage() {
 
 
   const handleEmailComplianceReport = async (report: StaffComplianceReport) => {
-    if (report.isCompliant) {
+    if (report.complianceStatusText === "Compliant") {
       toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email sent.` });
       return;
     }
@@ -418,9 +445,9 @@ export default function ReportingPage() {
       emlContent += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
       emlContent += `${body}\r\n\r\n`;
       emlContent += `--${boundary}\r\n`;
-      emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`; // Matched to pdfFileName
+      emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`; 
       emlContent += `Content-Transfer-Encoding: base64\r\n`;
-      emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`; // Matched to pdfFileName
+      emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`; 
       emlContent += `${pdfBase64}\r\n\r\n`;
       emlContent += `--${boundary}--`;
 
@@ -474,7 +501,7 @@ export default function ReportingPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0"> {/* Removed default padding */}
+        <CardContent className="p-0">
           {isLoadingAny && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Loader2 className="h-16 w-16 text-primary animate-spin mb-4" />
@@ -519,9 +546,9 @@ export default function ReportingPage() {
                   {complianceReports.map((report) => (
                      <React.Fragment key={report.staffMemberId}>
                         <TableRow
-                        className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
-                        onClick={() => toggleCollapsible(report.staffMemberId)}
-                      >
+                            className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
+                            onClick={() => toggleCollapsible(report.staffMemberId)}
+                        >
                         <TableCell>
                           <Button variant="ghost" size="sm" className="w-9 p-0">
                             {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -533,9 +560,11 @@ export default function ReportingPage() {
                           {report.staffMemberRank} {report.staffMemberName}
                         </TableCell>
                         <TableCell>
-                          <Badge variant={report.isCompliant ? "default" : "destructive"}>
-                            {report.isCompliant ? <ShieldCheck className="inline h-4 w-4 mr-1" /> : <ShieldOff className="inline h-4 w-4 mr-1" />}
-                            {report.isCompliant ? "Compliant" : "Not Compliant"}
+                          <Badge variant={report.complianceStatusVariant}>
+                            {report.complianceStatusText === "Compliant" && <ShieldCheck className="inline h-4 w-4 mr-1" />}
+                            {report.complianceStatusText === "Partially Compliant" && <ShieldAlert className="inline h-4 w-4 mr-1" />}
+                            {report.complianceStatusText === "Not Compliant" && <ShieldOff className="inline h-4 w-4 mr-1" />}
+                            {report.complianceStatusText}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right space-x-1">
@@ -545,7 +574,7 @@ export default function ReportingPage() {
                           <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
                               <Download className="h-4 w-4" />
                           </Button>
-                          {!report.isCompliant && report.email && (
+                          {report.complianceStatusText !== "Compliant" && report.email && (
                             <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
                               <Mail className="h-4 w-4" />
                             </Button>
@@ -626,7 +655,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Staff member matching relies on matching `staffName` and `rank` fields.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Primary matching for compliance is based on Service Number; if unavailable, it falls back to Name and Rank.
           </p>
         </CardContent>
       </Card>
@@ -646,4 +675,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-
