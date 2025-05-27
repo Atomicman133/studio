@@ -1,6 +1,6 @@
 
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+// Removed: import { Inter } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
@@ -8,10 +8,11 @@ import AppLayout from '@/components/app-layout';
 import QueryProvider from '@/components/query-provider';
 import { AuthProvider } from '@/contexts/auth-context'; // Import AuthProvider
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-});
+// Removed:
+// const inter = Inter({
+//   subsets: ['latin'],
+//   variable: '--font-inter',
+// });
 
 export const metadata: Metadata = {
   title: 'Squadron Manager',
@@ -25,7 +26,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased`}>
+      {/* Removed inter.variable from className */}
+      <body className="font-sans antialiased">
         <QueryProvider>
           <AuthProvider> {/* Wrap with AuthProvider */}
             <ThemeProvider
