@@ -43,16 +43,6 @@ const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
 
-// --- Fetch Training Logs (copied from training page for this component's scope) ---
-// export const TRAINING_LOGS_QUERY_KEY = 'trainingLogsReporting'; // Exporting for use in dialog
-// const convertLogTimestamps = (data: any): TrainingLog => {
-//   return {
-//     ...data,
-//     completionDate: data.completionDate instanceof Timestamp ? data.completionDate.toDate() : data.completionDate,
-//     // Ensure serviceNumber is included if present
-//     serviceNumber: data.serviceNumber || undefined,
-//   };
-// };
 async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   const collectionRef = collection(db, 'trainingLogs');
   const q = query(collectionRef, orderBy('completionDate', 'desc'));
@@ -62,27 +52,47 @@ async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
     ...convertLogTimestamps(doc.data()),
   })) as TrainingLog[];
 }
-// --- End Fetch Training Logs ---
 
 
 const processComplianceReports = (
   staffList: StaffMember[],
   trainingLogs: TrainingLog[]
 ): StaffComplianceReport[] => {
+  console.log(`[ComplianceDebug] processComplianceReports called. Staff: ${staffList.length}, Logs: ${trainingLogs.length}`);
+  if (trainingLogs.length > 0) {
+    console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 3).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName})));
+  }
+
 
   return staffList.map((staff) => {
-    if (!staff.serviceNumber) {
-      console.warn(`Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete as it relies on serviceNumber matching for logs.`);
+    const staffServiceNumber = staff.serviceNumber; // Use the direct service number from staff
+    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumber})`);
+
+    if (!staffServiceNumber) {
+      console.warn(`[ComplianceDebug] Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete.`);
     }
-    // Match logs to staff member using serviceNumber
+    
     const memberLogs = trainingLogs.filter(log =>
-        log.serviceNumber && staff.serviceNumber && log.serviceNumber === staff.serviceNumber
+        log.serviceNumber && staffServiceNumber && log.serviceNumber === staffServiceNumber
     );
+    console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumber}.`);
+    if (memberLogs.length > 0) {
+        console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,3).map(l => ({course: l.courseName, date: l.completionDate})));
+    }
+
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
+      console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
       const relevantLogs = memberLogs
-        .filter(log => criterion.identifier(log))
+        .filter(log => {
+            const isRelevant = criterion.identifier(log);
+            // console.log(`[ComplianceDebug]     Log "${log.courseName}" (SN: ${log.serviceNumber}) relevance for "${criterion.name}": ${isRelevant}`);
+            return isRelevant;
+        })
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
+      
+      console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
+
 
       let isMet = false;
       let details = "Missing";
@@ -90,28 +100,37 @@ const processComplianceReports = (
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
+        console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
         const completionDate = new Date(selectedLog.completionDate);
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
+          console.log(`[ComplianceDebug]         Invalid completion date for log: ${selectedLog.courseName}`);
         } else {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
           if (criterion.yearsToExpire) {
             const expiryDate = addYears(completionDate, criterion.yearsToExpire);
+            // A qualification is valid IF today IS BEFORE the expiry date.
+            // Example: Completed 1st Jan 2020, 3 years expiry. Expires ON 1st Jan 2023.
+            // Valid up to and including 31st Dec 2022.
+            // If today is 31st Dec 2022, isBefore(today, expiryDate) is true.
             if (isBefore(today, expiryDate)) {
               isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}. Valid until ${format(subYears(expiryDate,0), 'dd/MM/yyyy')}.`;
+              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${format(expiryDate, 'dd/MM/yy')}.`;
             } else {
-              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${format(expiryDate, 'dd/MM/yy')}.`;
             }
           } else { // No expiry, just check for existence
             isMet = true;
-            details = `Completed: ${format(completionDate, 'dd/MM/yyyy')}`;
+            details = `Completed: ${format(completionDate, 'dd/MM/yy')}`;
           }
         }
+      } else {
+        console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
       }
+      console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
       return {
         key: criterion.key,
         name: criterion.name,
@@ -122,6 +141,7 @@ const processComplianceReports = (
     });
 
     const isCompliant = criteriaChecks.every(c => c.isMet);
+    console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${isCompliant}`);
 
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
@@ -131,7 +151,7 @@ const processComplianceReports = (
       isCompliant,
       criteriaChecks,
       email: staff.email,
-      staffServiceNumberActual: staff.serviceNumber, // Store the actual service number
+      staffServiceNumberActual: staff.serviceNumber, 
     };
   })
   .sort((a,b) => {
@@ -173,10 +193,13 @@ export default function ReportingPage() {
 
 
   React.useEffect(() => {
+    console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs.length);
     if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
+      // Handles cases where staffList might be empty or trainingLogs might be undefined/empty
+      console.log("[ComplianceDebug] Staff or logs not ready, or empty. Setting empty reports.");
       setComplianceReports([]);
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
@@ -197,7 +220,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return 0;
+     return 0; // Indicates expired or on expiry date
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -209,15 +232,14 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft > 0) {
+    if (daysLeft !== null && daysLeft > 0) { // Only show if not expired AND isMet is true
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         } else if (daysLeft <= 90) {
             return <Badge variant="secondary" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         }
-    } else if (daysLeft === 0 && criterion.isMet === false) { // Only show expired if it's actually not met due to expiry
-        return <Badge variant="destructive" className="ml-2 text-xs">Expired</Badge>;
     }
+    // Removed the "Expired" badge from here as the main status detail already covers it
     return null;
   };
 
@@ -229,7 +251,7 @@ export default function ReportingPage() {
     const lineSpacing = 7;
     const sectionSpacing = 10;
     const indent = 5;
-    const iconSize = 3; // Small size for drawn icons
+    const iconSize = 3; 
     const iconTextSpacing = 2;
     const margin = 15;
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -275,25 +297,22 @@ export default function ReportingPage() {
     yPos += lineSpacing * 1.2;
 
     for (const criterion of report.criteriaChecks) {
-      await checkPageBreak(lineSpacing * 3); // Estimate space for icon + text
+      await checkPageBreak(lineSpacing * 3); 
 
-      // Draw Icon
       const iconX = margin;
-      const iconY = yPos - (iconSize / 2); // Center icon vertically with the first line of text
+      const iconY = yPos - (iconSize / 2); 
       doc.setLineWidth(0.5);
 
       if (criterion.isMet) {
-        doc.setDrawColor(0, 128, 0); // Green
-        // Draw tick: line1 (down-left), line2 (up-right)
+        doc.setDrawColor(0, 128, 0); 
         doc.line(iconX, iconY + iconSize * 0.6, iconX + iconSize * 0.4, iconY + iconSize);
         doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY);
       } else {
-        doc.setDrawColor(255, 0, 0); // Red
-        // Draw cross: line1 (top-left to bottom-right), line2 (top-right to bottom-left)
+        doc.setDrawColor(255, 0, 0); 
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
         doc.line(iconX + iconSize, iconY, iconX, iconY + iconSize);
       }
-      doc.setDrawColor(0); // Reset to black for text
+      doc.setDrawColor(0); 
 
       const textX = iconX + iconSize + iconTextSpacing;
       const textMaxWidth = maxLineWidth - (iconSize + iconTextSpacing);
@@ -305,13 +324,11 @@ export default function ReportingPage() {
 
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      // doc.setTextColor(criterion.isMet ? 34 : 200); // Green or Red for status text
       const statusText = criterion.isMet ? "Met" : "Not Met";
       const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, textMaxWidth - indent);
       
       await checkPageBreak(detailLines.length * (lineSpacing * 0.7));
       doc.text(detailLines, textX + indent, yPos);
-      // doc.setTextColor(0); // Reset to black
       yPos += detailLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     }
     addPageNumbers(doc, footerHeight, margin);
@@ -335,6 +352,11 @@ export default function ReportingPage() {
       toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email sent.` });
       return;
     }
+    if (!report.email) {
+      toast({ variant: "destructive", title: "Email Error", description: `No email address found for ${report.staffMemberName}.` });
+      return;
+    }
+
 
     const pdfDoc = await generateComplianceReportPdf(report);
     const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
@@ -344,8 +366,8 @@ export default function ReportingPage() {
       .map(c => `  - ${c.name}: ${c.details}`)
       .join("\n");
 
-    const emailTo = report.email || '';
-    const subject = `Action Required: Compliance Update for ${report.staffMemberName}`;
+    const emailTo = report.email;
+    const subject = `Action Required: Compliance Update for ${report.staffMemberRank} ${report.staffMemberName}`;
     const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
     const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
@@ -441,7 +463,7 @@ export default function ReportingPage() {
             </div>
           )}
           {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
-            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md">
+            <ScrollArea className="h-[calc(100vh-300px)] border rounded-md"> {/* Ensure ScrollArea wraps the Table */}
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                   <TableRow>
@@ -455,11 +477,9 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                      <React.Fragment key={report.staffMemberId}>
-                       {/* Trigger Row */}
-                      <TableRow
+                        <TableRow
                         className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
                         onClick={() => toggleCollapsible(report.staffMemberId)}
-                        data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
                       >
                         <TableCell>
                           <Button variant="ghost" size="sm" className="w-9 p-0">
@@ -491,7 +511,6 @@ export default function ReportingPage() {
                           )}
                         </TableCell>
                       </TableRow>
-                      {/* Content Row (conditionally rendered) */}
                       {openCollapsible === report.staffMemberId && (
                           <TableRow className="bg-muted/50 dark:bg-muted/30">
                           <TableCell colSpan={5}>
@@ -578,7 +597,10 @@ export default function ReportingPage() {
           staffMemberReport={selectedStaffForLinking}
           onLogsLinked={() => {
             queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-            queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); // Also invalidate staff if linking might change how staff are seen
+            queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
+            // Also invalidate any query key specifically used by processComplianceReports if it's different
+            // For example, if complianceReports itself was a query:
+            // queryClient.invalidateQueries({ queryKey: ['complianceReports'] });
             toast({ title: "Logs Linked", description: "Compliance data is refreshing."});
           }}
         />
@@ -586,4 +608,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-
