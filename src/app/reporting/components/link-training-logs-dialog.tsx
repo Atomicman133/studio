@@ -17,56 +17,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, where, writeBatch, doc } from "firebase/firestore";
+import { collection, getDocs, query, where, writeBatch, doc, Timestamp } from "firebase/firestore";
 import type { TrainingLog } from "@/app/training/training-schema";
-import { convertLogTimestamps, TRAINING_LOGS_QUERY_KEY } from "@/app/training/page"; 
+import { convertLogTimestamps, TRAINING_LOGS_QUERY_KEY } from "@/app/training/page";
 import type { StaffComplianceReport } from "../reporting-schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { STAFF_QUERY_KEY } from "@/app/staff/staff-schema";
 
 const UNLINKED_TRAINING_LOGS_QUERY_KEY_PREFIX = "unlinkedTrainingLogsForStaff";
-
-// Helper function to parse various name formats from log.staffName
-// and compare against target names (case-insensitive).
-const parseNameAndMatch = (
-  logStaffNameField: string | undefined | null,
-  targetLastNameUpper: string,
-  targetFirstNameUpper: string
-): boolean => {
-  if (!logStaffNameField) return false;
-
-  const logNameTrimmed = logStaffNameField.trim();
-  if (!logNameTrimmed) return false;
-
-  // Attempt 1: "LastName, FirstName" format
-  if (logNameTrimmed.includes(",")) {
-    const parts = logNameTrimmed.split(",").map(p => p.trim());
-    if (parts.length === 2) {
-      const logLastName = parts[0].toUpperCase();
-      const logFirstName = parts[1].toUpperCase();
-      if (logLastName === targetLastNameUpper && (targetFirstNameUpper === "" || logFirstName === targetFirstNameUpper)) {
-        return true;
-      }
-    }
-  }
-
-  // Attempt 2: "FirstName LastName" format (or just "Name" if one word)
-  const spaceParts = logNameTrimmed.split(/\s+/).map(p => p.trim()); // Split by any whitespace
-  if (spaceParts.length > 0) {
-    const logLastName = spaceParts[spaceParts.length - 1].toUpperCase();
-    const logFirstName = spaceParts.slice(0, -1).join(" ").toUpperCase();
-    
-    if (logLastName === targetLastNameUpper && (targetFirstNameUpper === "" || logFirstName === targetFirstNameUpper)) {
-      return true;
-    }
-    // Handle case where targetFirstName might be empty and log has only one name part which matches targetLastName
-    if (targetFirstNameUpper === "" && spaceParts.length === 1 && logLastName === targetLastNameUpper) {
-        return true;
-    }
-  }
-  return false;
-};
 
 
 async function fetchUnlinkedTrainingLogs(
@@ -75,37 +34,82 @@ async function fetchUnlinkedTrainingLogs(
 ): Promise<TrainingLog[]> {
   const logsCollectionRef = collection(db, "trainingLogs");
 
-  // Prepare target names for comparison
+  // Prepare target names for precise client-side comparison
   const targetNameParts = staffNameForQuery.split(",").map(p => p.trim());
   const targetLastNameUpper = targetNameParts[0].toUpperCase();
   const targetFirstNameUpper = targetNameParts.length > 1 ? targetNameParts[1].toUpperCase() : "";
 
-  // Broad Firestore query: staffName starts with lastNameForFirestoreQuery (uppercase)
-  // This should catch "CORRY, ..." if lastNameForFirestoreQuery is "CORRY"
-  // Also helps if stored as "Corry, ..." due to Firestore's range behavior with \uf8ff
+  // Firestore query: Broadly fetch logs starting with the target's last name (uppercase)
+  const lastNameForFirestoreQuery = targetLastNameUpper;
   const q = query(
     logsCollectionRef,
-    where("staffName", ">=", targetLastNameUpper), // Use targetLastNameUpper directly for prefix
-    where("staffName", "<=", targetLastNameUpper + "\uf8ff")
+    where("staffName", ">=", lastNameForFirestoreQuery),
+    where("staffName", "<=", lastNameForFirestoreQuery + "\uf8ff")
   );
 
   const querySnapshot = await getDocs(q);
   const potentialLogs: TrainingLog[] = [];
 
+  const parseNameAndMatch = (
+    logStaffNameField: string | undefined | null,
+    targetLNUpper: string,
+    targetFNUpper: string
+  ): boolean => {
+    if (!logStaffNameField) return false;
+    const normalizedLogName = logStaffNameField.toUpperCase().trim().replace(/\s+/g, " ");
+    
+    console.log(`[Linker-Debug] Matching: LogName="${normalizedLogName}" vs TargetLN="${targetLNUpper}", TargetFN="${targetFNUpper}"`);
+
+    // Scenario 1: Log name is "LastName, FirstName" (e.g., "CORRY, GREGORY")
+    if (normalizedLogName.includes(",")) {
+      const parts = normalizedLogName.split(",").map(p => p.trim());
+      if (parts.length >= 1) { // Must have at least a last name part
+        const logLN = parts[0];
+        const logFN = parts.length > 1 ? parts[1] : "";
+
+        if (logLN === targetLNUpper) {
+          if (targetFNUpper === "" || logFN === "" || logFN === targetFNUpper || (logFN && targetFNUpper && (logFN.startsWith(targetFNUpper) || targetFNUpper.startsWith(logFN)))) {
+            console.log(`[Linker-Debug] Matched Scenario 1 (L, F): LogName="${normalizedLogName}" matched TargetLN="${targetLNUpper}", TargetFN="${targetFNUpper}"`);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Scenario 2: Log name is "FirstName LastName" (e.g., "GREGORY CORRY") or just "LastName"
+    const spaceParts = normalizedLogName.split(" ");
+    if (spaceParts.length > 0) {
+      const logLN = spaceParts[spaceParts.length - 1]; // Last word is assumed LN
+      const logFN = spaceParts.slice(0, -1).join(" "); // Everything else is FN
+
+      if (logLN === targetLNUpper) {
+        if (targetFNUpper === "" || logFN === "" || logFN === targetFNUpper || (logFN && targetFNUpper && (logFN.startsWith(targetFNUpper) || targetFNUpper.startsWith(logFN)))) {
+          console.log(`[Linker-Debug] Matched Scenario 2 (F L): LogName="${normalizedLogName}" matched TargetLN="${targetLNUpper}", TargetFN="${targetFNUpper}"`);
+          return true;
+        }
+      }
+    }
+    
+    console.log(`[Linker-Debug] No match for LogName="${normalizedLogName}" against TargetLN="${targetLNUpper}", TargetFN="${targetFNUpper}"`);
+    return false;
+  };
+
   querySnapshot.docs.forEach(docSnap => {
     const logData = { id: docSnap.id, ...convertLogTimestamps(docSnap.data()) } as TrainingLog;
+    console.log(`[Linker-Debug] Firestore fetched log for linking consideration: "${logData.staffName}", SN: ${logData.serviceNumber}, ID: ${logData.id}`);
 
-    // Primary Skip: If this log is ALREADY linked to the CURRENT staff member, ignore it.
+    // Skip if already linked to the CURRENT staff member
     if (logData.serviceNumber && currentStaffServiceNumber && logData.serviceNumber === currentStaffServiceNumber) {
+      console.log(`[Linker-Debug] Skipping log ID ${logData.id} - already linked to current staff SN ${currentStaffServiceNumber}`);
       return;
     }
 
-    // Client-side precise, case-insensitive name match using the new helper
     if (parseNameAndMatch(logData.staffName, targetLastNameUpper, targetFirstNameUpper)) {
       potentialLogs.push(logData);
     }
   });
 
+  console.log(`[Linker-Debug] Found ${potentialLogs.length} potential logs for ${staffNameForQuery}`);
   return potentialLogs;
 }
 
@@ -137,19 +141,18 @@ export function LinkTrainingLogsDialog({
 
 
   const { data: potentialLogs = [], isLoading, error, refetch } = useQuery<TrainingLog[], Error>({
-    // Ensure queryKey is unique per staff member to avoid stale data across dialog openings
     queryKey: [`${UNLINKED_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMemberReport.staffMemberId}`, formattedStaffNameForQuery],
     queryFn: () => fetchUnlinkedTrainingLogs(
-        formattedStaffNameForQuery, // This is "LastName, FirstName"
+        formattedStaffNameForQuery,
         staffServiceNumberForLinking
     ),
-    enabled: open && !!staffServiceNumberForLinking, // Only run query if dialog is open and service number exists
+    enabled: open && !!staffServiceNumberForLinking,
   });
 
   React.useEffect(() => {
     if (open) {
-      refetch(); // Refetch when dialog opens
-      setSelectedLogIds(new Set()); // Clear previous selections
+      refetch();
+      setSelectedLogIds(new Set());
     }
   }, [open, refetch]);
 
@@ -167,9 +170,12 @@ export function LinkTrainingLogsDialog({
     onSuccess: () => {
       toast({ title: "Success", description: "Selected training logs linked successfully." });
       queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
-      onLogsLinked(); // Callback to parent
-      onOpenChange(false); // Close dialog
+      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); // Invalidate staff to re-fetch for compliance
+      queryClient.invalidateQueries({ queryKey: ['safetyAuditsDashboard'] }); // Example, adjust as needed
+      queryClient.invalidateQueries({ queryKey: ['squadronVisitsDashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardScheduledMeetings']});
+      onLogsLinked();
+      onOpenChange(false);
     },
     onError: (err) => {
       toast({ variant: "destructive", title: "Error", description: `Failed to link logs: ${err.message}` });
@@ -202,12 +208,12 @@ export function LinkTrainingLogsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Link Training Logs for {staffMemberReport.staffMemberRank} {staffMemberReport.staffMemberName}</DialogTitle>
           <DialogDescription>
-            Select training logs below that belong to this staff member (SN: {staffServiceNumberForLinking || "N/A"}).
-            The system searches for logs matching the name (e.g., "{formattedStaffNameForQuery}" or "{staffMemberReport.staffMemberName}") that are not currently linked to this service number. Matching is case-insensitive.
+            Select training logs below that may belong to this staff member (SN: {staffServiceNumberForLinking || "N/A"}).
+            The system searches for logs matching the name (e.g., &quot;{formattedStaffNameForQuery}&quot; or &quot;{staffMemberReport.staffMemberName}&quot;) in various formats (case-insensitive) that are not currently linked to this service number.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] border rounded-md p-2">
@@ -227,7 +233,7 @@ export function LinkTrainingLogsDialog({
              <p className="py-8 text-center text-destructive">Cannot search for logs: Staff member service number is missing.</p>
           )}
           {!isLoading && !error && staffServiceNumberForLinking && potentialLogs.length === 0 && (
-            <p className="py-8 text-center text-muted-foreground">No unlinked training logs found matching name "{staffMemberReport.staffMemberName}" or "{formattedStaffNameForQuery}".</p>
+            <p className="py-8 text-center text-muted-foreground">No unlinked training logs found potentially matching &quot;{staffMemberReport.staffMemberName}&quot; or &quot;{formattedStaffNameForQuery}&quot;.</p>
           )}
           {!isLoading && !error && staffServiceNumberForLinking && potentialLogs.length > 0 && (
             <Table>
@@ -252,7 +258,7 @@ export function LinkTrainingLogsDialog({
                     </TableCell>
                     <TableCell>{log.courseName}</TableCell>
                     <TableCell>{log.staffName}</TableCell>
-                    <TableCell>{format(log.completionDate, "dd/MM/yyyy")}</TableCell>
+                    <TableCell>{log.completionDate && format(new Date(log.completionDate), "dd/MM/yyyy")}</TableCell>
                     <TableCell>{log.serviceNumber || "None"}</TableCell>
                   </TableRow>
                 ))}
@@ -272,3 +278,4 @@ export function LinkTrainingLogsDialog({
   );
 }
 
+    
