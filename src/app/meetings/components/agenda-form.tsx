@@ -43,7 +43,7 @@ export function AgendaForm({ onSubmit, onCancel, isSubmitting }: AgendaFormProps
       meetingTime: "",
       meetingLocation: "",
       meetingObjective: "",
-      agendaItems: [{ description: "" }],
+      agendaItems: [{ description: "", presenter: "", timeAllocation: "" }], // Initialize optional fields
     },
   });
 
@@ -203,7 +203,7 @@ export function AgendaForm({ onSubmit, onCancel, isSubmitting }: AgendaFormProps
                 </div>
               </Card>
             ))}
-            <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => append({ description: "" })} disabled={isSubmitting}>
+            <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => append({ description: "", presenter: "", timeAllocation: "" })} disabled={isSubmitting}>
               <PlusCircle className="mr-2 h-4 w-4" /> Add Agenda Item
             </Button>
              {form.formState.errors.agendaItems && !Array.isArray(form.formState.errors.agendaItems) && (
