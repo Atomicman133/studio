@@ -17,8 +17,8 @@ import {
   FileSearch,
   ClipboardList, 
   UserCircle,
-  Sun, // Added Sun
-  Moon, // Added Moon
+  Sun,
+  Moon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation"; 
@@ -150,11 +150,11 @@ function UserNav() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled> 
+        <DropdownMenuItem onClick={() => router.push('/profile')}> 
           <UserCircle className="mr-2 h-4 w-4" />
           Profile
         </DropdownMenuItem>
-        <DropdownMenuItem disabled>
+        <DropdownMenuItem onClick={() => router.push('/settings')}>
           <Settings className="mr-2 h-4 w-4" />
           Settings
         </DropdownMenuItem>
@@ -298,9 +298,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (pathname === '/auth') {
       return <main>{children}</main>;
     }
+    // Basic skeleton loader to avoid layout shift before hydration
     return (
       <div className="flex min-h-screen w-full">
         <div className="hidden md:flex md:flex-col md:w-[16rem] border-r bg-background shadow-sm">
+          {/* Skeleton sidebar header */}
+          <div className="p-3 border-b h-16"></div>
+          {/* Skeleton sidebar content */}
+          <div className="p-2 flex-1"></div>
+           {/* Skeleton sidebar footer */}
+          <div className="p-3 border-t h-12"></div>
         </div>
         <div className="flex-1 flex flex-col min-w-0">
           <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 sm:px-6 shadow-sm">
@@ -323,4 +330,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
-
