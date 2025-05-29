@@ -53,89 +53,45 @@ async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   })) as TrainingLog[];
 }
 
-// Helper to parse log.staffName ("LastName, FirstName" or "FirstName LastName")
-// and compare with staffMember.firstName and staffMember.lastName
-const areNamesAndRankMatching = (
-  logStaffName: string | undefined | null,
-  logRank: typeof RANKS[number] | undefined | null,
-  staffMember: StaffMember
-): boolean => {
-  if (!logStaffName || !logRank || !staffMember.rank) {
-    // console.log(`[ComplianceDebug-NameRankMatch] Early exit: LogName="${logStaffName}", LogRank="${logRank}", StaffRank="${staffMember.rank}"`);
-    return false;
-  }
-  if (logRank !== staffMember.rank) {
-    // console.log(`[ComplianceDebug-NameRankMatch] Rank mismatch: LogRank="${logRank}" vs StaffRank="${staffMember.rank}" for ${staffMember.firstName} ${staffMember.lastName}`);
-    return false;
-  }
-
-  const normalizedStaffFirstName = staffMember.firstName.toUpperCase().trim();
-  const normalizedStaffLastName = staffMember.lastName.toUpperCase().trim();
-  const normalizedLogStaffName = logStaffName.toUpperCase().trim().replace(/\s+/g, " ");
-
-  // Try "LastName, FirstName" format from log
-  if (normalizedLogStaffName.includes(",")) {
-    const parts = normalizedLogStaffName.split(",").map(p => p.trim());
-    if (parts.length >= 1) { // Allow for "LASTNAME,"
-      const logParsedLastName = parts[0];
-      const logParsedFirstName = parts.length > 1 ? parts[1] : "";
-      if (logParsedLastName === normalizedStaffLastName && (logParsedFirstName === normalizedStaffFirstName || logParsedFirstName === "" || normalizedStaffFirstName === "")) {
-        // console.log(`[ComplianceDebug-NameRankMatch] Matched (L, F): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffLastName}, ${normalizedStaffFirstName}"`);
-        return true;
-      }
-    }
-  }
-
-  // Try "FirstName LastName" format from log (or just "LastName")
-  const spaceParts = normalizedLogStaffName.split(" ");
-  if (spaceParts.length > 0) {
-    const logParsedLastName = spaceParts[spaceParts.length - 1];
-    const logParsedFirstName = spaceParts.slice(0, -1).join(" ");
-     if (logParsedLastName === normalizedStaffLastName && (logParsedFirstName === normalizedStaffFirstName || logParsedFirstName === "" || normalizedStaffFirstName === "")) {
-      // console.log(`[ComplianceDebug-NameRankMatch] Matched (F L): Log="${normalizedLogStaffName}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}"`);
-      return true;
-    }
-  }
-  // console.log(`[ComplianceDebug-NameRankMatch] No match for LogName="${normalizedLogStaffName}", LogRank="${logRank}" vs Staff="${normalizedStaffFirstName} ${normalizedStaffLastName}", StaffRank="${staffMember.rank}"`);
-  return false;
-};
-
-
 const processComplianceReports = (
   staffList: StaffMember[],
   trainingLogs: TrainingLog[]
 ): StaffComplianceReport[] => {
-  console.log(`[ComplianceDebug] processComplianceReports called. Staff: ${staffList.length}, Logs: ${trainingLogs.length}`);
-  if (trainingLogs.length > 0 && staffList.length > 0) {
-    // console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 1).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName, rank: l.rank })));
-    // console.log("[ComplianceDebug] Sample staff list item:", staffList[0] ? {name: `${staffList[0].firstName} ${staffList[0].lastName}`, rank: staffList[0].rank, sn: staffList[0].serviceNumber} : "N/A");
+  console.log("[ComplianceDebug] processComplianceReports called. Staff:", staffList.length, ", Logs:", trainingLogs ? trainingLogs.length : 0);
+  if (trainingLogs && trainingLogs.length > 0 && staffList.length > 0) {
+     console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 1).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName, rank: l.rank })));
+     console.log("[ComplianceDebug] Sample staff list item:", staffList[0] ? {name: `${staffList[0].firstName} ${staffList[0].lastName}`, rank: staffList[0].rank, sn: staffList[0].serviceNumber} : "N/A");
   }
 
 
   return staffList.map((staff) => {
-    if (!staff.serviceNumber) {
-        console.warn(`[ComplianceDebug] Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be less reliable.`);
-    }
-    // Primary matching via Service Number if available on both staff and log
-    // Fallback to Name/Rank matching is now handled inside areNamesAndRankMatching if SN is missing
-    const memberLogs = trainingLogs.filter(log => {
-        if (staff.serviceNumber && log.serviceNumber) {
-            return staff.serviceNumber === log.serviceNumber;
-        }
-        // Fallback to name/rank if either staff or log is missing SN
-        // This fallback is intended to catch logs that haven't been linked via "Find & Link Logs" yet.
-        // console.log(`[ComplianceDebug] SN mismatch or missing for staff ${staff.firstName} ${staff.lastName} (SN: ${staff.serviceNumber}) and log (SN: ${log.serviceNumber}). Falling back to name/rank match for log: ${log.staffName} / ${log.rank}`);
-        return areNamesAndRankMatching(log.staffName, log.rank, staff);
-    });
-    
-    if(staff.serviceNumber){
-      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for staff: ${staff.firstName} ${staff.lastName} (SN: ${staff.serviceNumber}) (Primary match on SN or fallback to Name/Rank).`);
-    } else {
-      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for staff: ${staff.firstName} ${staff.lastName} (NO SN - Matched on Name/Rank).`);
-    }
+    // Ensure serviceNumberActual is populated from staff object
+    const staffServiceNumberActual = staff.serviceNumber;
 
-    if (memberLogs.length > 0 && staff.serviceNumber) {
-        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName} (SN: ${staff.serviceNumber}):`, memberLogs.slice(0,3).map(l => ({course: l.courseName, date: l.completionDate, logStaffName: l.staffName, logRank: l.rank, logSN: l.serviceNumber })));
+    if (!staffServiceNumberActual) {
+        console.warn(`[ComplianceDebug] Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete.`);
+    }
+    
+    const memberLogs = trainingLogs ? trainingLogs.filter(log => {
+        if (staffServiceNumberActual && log.serviceNumber) {
+            return staffServiceNumberActual === log.serviceNumber;
+        }
+        // Fallback if serviceNumber is not the primary link anymore, or if one is missing.
+        // This part needs to align with how you decide to link logs if SN isn't primary.
+        // For now, let's assume SN is primary. If not, this needs the name/rank matching.
+        // console.log(`[ComplianceDebug] SN mismatch or missing. Staff SN: ${staffServiceNumberActual}, Log SN: ${log.serviceNumber}. Checking name/rank.`);
+        // return areNamesAndRankMatching(log.staffName, log.rank, staff); // Assuming areNamesAndRankMatching is defined and works
+        return false; // Strict SN matching for now.
+    }) : [];
+    
+    // console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumberActual})`);
+    if (staffServiceNumberActual) {
+      // console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumberActual}.`);
+      if (memberLogs.length > 0) {
+        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber })));
+      }
+    } else {
+      // console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Found ${memberLogs.length} logs by other means (if any).`);
     }
 
 
@@ -144,13 +100,11 @@ const processComplianceReports = (
       const relevantLogs = memberLogs
         .filter(log => {
             const isRelevant = criterion.identifier(log);
-            // if (isRelevant) console.log(`[ComplianceDebug]     Log "${log.courseName}" (Date: ${log.completionDate}) IS relevant for criterion "${criterion.name}"`);
             return isRelevant;
         })
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
       
       // console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
-
 
       let isMet = false;
       let details = "Missing";
@@ -163,17 +117,20 @@ const processComplianceReports = (
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
-          // console.log(`[ComplianceDebug]         Invalid completion date for log: ${selectedLog.courseName}`);
         } else {
           const today = startOfDay(new Date());
 
           if (criterion.yearsToExpire) {
             const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            if (isBefore(today, expiryDate)) { 
-              isMet = true;
-              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${format(subYears(expiryDate,0), 'dd/MM/yy')}.`;
+            isMet = isBefore(today, expiryDate); // Valid if today is *before* the calculated expiry date
+            
+            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy'); // Show day before it expires
+            const expiredOnDate = format(expiryDate, 'dd/MM/yy');
+
+            if (isMet) {
+              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${validUntilDate}.`;
             } else {
-              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${format(expiryDate, 'dd/MM/yy')}.`;
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${expiredOnDate}.`;
             }
           } else { 
             isMet = true;
@@ -201,21 +158,21 @@ const processComplianceReports = (
     if (isFullyCompliant) {
       complianceStatusText = "Compliant";
       complianceStatusVariant = "default";
-    } else if (metCount >= 3) {
+    } else if (metCount >= 3) { // Partially compliant if 3 or more are met (but not all)
       complianceStatusText = "Partially Compliant";
       complianceStatusVariant = "secondary";
     }
     // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
 
     return {
-      staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
+      staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staffServiceNumberActual || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
       isCompliant: isFullyCompliant,
       criteriaChecks,
       email: staff.email,
-      staffServiceNumberActual: staff.serviceNumber,
+      staffServiceNumberActual: staffServiceNumberActual,
       complianceStatusText,
       complianceStatusVariant,
     };
@@ -237,7 +194,7 @@ const processComplianceReports = (
         return effectiveRankAIndex - effectiveRankBIndex;
     }
 
-    const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName);
+    const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName); // Assuming staffMemberName is "FirstName LastName"
     return lastNameCompare;
   });
 };
@@ -259,12 +216,12 @@ export default function ReportingPage() {
 
 
   React.useEffect(() => {
-    console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
+    // console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
     if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      console.log("[ComplianceDebug] Staff or logs not ready, or empty. Setting empty reports.");
+      // console.log("[ComplianceDebug] Staff or logs not ready, or empty. Setting empty reports.");
       setComplianceReports([]);
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
@@ -282,10 +239,10 @@ export default function ReportingPage() {
 
     const today = startOfDay(new Date());
 
-     if (isBefore(today, expiryDate)) { // Valid if today is before the expiry date
+     if (isBefore(today, expiryDate)) { 
         return differenceInDays(expiryDate, today);
      }
-     return 0; // Indicates expired or on expiry date
+     return 0; 
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -323,13 +280,11 @@ export default function ReportingPage() {
     let headerHeight = 0;
     let footerHeight = 0;
 
-    const setPageLayout = async () => {
-      const heights = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
-      headerHeight = heights.headerHeight;
-      footerHeight = heights.footerHeight;
-      yPos = margin + headerHeight + 5;
-    };
-    await setPageLayout();
+    const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+    headerHeight = hh;
+    footerHeight = fh;
+    yPos = margin + headerHeight + 5;
+
 
     const checkPageBreak = async (neededHeight: number) => {
       if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
@@ -351,6 +306,9 @@ export default function ReportingPage() {
     doc.text(`Squadron: ${report.squadron}`, margin, yPos);
     yPos += lineSpacing;
     await checkPageBreak(lineSpacing);
+    doc.text(`Service Number: ${report.staffServiceNumberActual || 'N/A'}`, margin, yPos);
+    yPos += lineSpacing;
+    await checkPageBreak(lineSpacing);
     doc.text(`Overall Status: ${report.complianceStatusText}`, margin, yPos);
     yPos += sectionSpacing * 1.5;
 
@@ -364,13 +322,13 @@ export default function ReportingPage() {
       await checkPageBreak(lineSpacing * 3); 
 
       const iconX = margin;
-      const iconY = yPos - (iconSize / 2); 
+      let iconY = yPos - (iconSize / 2) + (lineSpacing * 0.7 / 2); // Adjust Y for better alignment with first line of text
       doc.setLineWidth(0.5);
 
       if (criterion.isMet) {
         doc.setDrawColor(0, 128, 0); // Green
-        doc.line(iconX, iconY + iconSize * 0.6, iconX + iconSize * 0.4, iconY + iconSize);
-        doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY);
+        doc.line(iconX, iconY + iconSize * 0.3, iconX + iconSize * 0.4, iconY + iconSize * 0.7);
+        doc.line(iconX + iconSize * 0.4, iconY + iconSize * 0.7, iconX + iconSize, iconY - iconSize * 0.1);
       } else {
         doc.setDrawColor(255, 0, 0); // Red
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
@@ -389,7 +347,7 @@ export default function ReportingPage() {
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
       const statusText = criterion.isMet ? "Met" : "Not Met";
-      const detailLines = doc.splitTextToSize(`Status: ${statusText} (${criterion.details})`, textMaxWidth - indent);
+      const detailLines = doc.splitTextToSize(`${statusText}. ${criterion.details}`, textMaxWidth - indent);
       
       await checkPageBreak(detailLines.length * (lineSpacing * 0.7));
       doc.text(detailLines, textX + indent, yPos);
@@ -397,6 +355,138 @@ export default function ReportingPage() {
     }
     addPageNumbers(doc, footerHeight, margin); 
     return doc;
+  };
+
+  const handleExportFullComplianceSummaryPdf = async () => {
+    if (complianceReports.length === 0) {
+      toast({ title: "No Data", description: "No compliance data available to export." });
+      return;
+    }
+
+    const doc = new jsPDF();
+    resetLetterheadCache();
+    const currentDate = format(new Date(), "PPP");
+    const filename = `full_compliance_summary_${format(new Date(), "yyyy-MM-dd")}.pdf`;
+
+    const margin = 15;
+    let yPos = margin;
+    const lineSpacing = 6; // Reduced for more compact table
+    const sectionSpacing = 8;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let headerImgHeight = 0;
+    let footerImgHeight = 0;
+
+    // Column widths (approximate, adjust as needed)
+    const rankColWidth = 30;
+    const nameColWidth = 60;
+    const unitColWidth = 40; // For when printing unit name per line
+    // Remaining width for non-compliant items, will be text-wrapped
+
+    const setupNewPage = async () => {
+      const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      headerImgHeight = hh;
+      footerImgHeight = fh;
+      yPos = margin + headerImgHeight + 5; // Start content below header
+      addPageNumbers(doc, footerImgHeight, margin);
+    };
+
+    const checkPageBreak = async (neededHeight: number = lineSpacing) => {
+      if (yPos + neededHeight > pageHeight - margin - footerImgHeight - 10) { // -10 for buffer
+        doc.addPage();
+        await setupNewPage();
+        return true; // Indicates a page break occurred
+      }
+      return false;
+    };
+    
+    await setupNewPage();
+
+    // Report Title
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    await checkPageBreak(lineSpacing * 2);
+    doc.text("Full Staff Compliance Summary", pageWidth / 2, yPos, { align: "center" });
+    yPos += lineSpacing;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    await checkPageBreak();
+    doc.text(`Generated on: ${currentDate}`, pageWidth / 2, yPos, { align: "center" });
+    yPos += sectionSpacing * 1.5;
+
+    let currentSquadron = "";
+
+    for (const report of complianceReports) {
+      if (report.squadron !== currentSquadron) {
+        if (currentSquadron !== "") { // Add space before new squadron, unless it's the first one
+            yPos += sectionSpacing / 2;
+        }
+        if (await checkPageBreak(sectionSpacing + lineSpacing * 2)) {
+            // If page broke, re-add squadron header if it's not the very first item
+        }
+        currentSquadron = report.squadron;
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Squadron: ${currentSquadron}`, margin, yPos);
+        yPos += lineSpacing * 1.5;
+
+        // Column Headers
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'bold');
+        let headerX = margin;
+        doc.text("Rank", headerX, yPos);
+        headerX += rankColWidth;
+        doc.text("Name", headerX, yPos);
+        headerX += nameColWidth;
+        doc.text("Non-Compliant Items", headerX, yPos);
+        yPos += lineSpacing;
+        doc.setDrawColor(180);
+        doc.line(margin, yPos - (lineSpacing / 3), pageWidth - margin, yPos - (lineSpacing / 3));
+        doc.setFont(undefined, 'normal');
+      }
+
+      if (await checkPageBreak(lineSpacing * 2)) { // Check for staff member line
+         // If page broke, re-add squadron and column headers
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Squadron: ${currentSquadron} (Continued)`, margin, yPos);
+        yPos += lineSpacing * 1.5;
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'bold');
+        let headerX = margin;
+        doc.text("Rank", headerX, yPos);
+        headerX += rankColWidth;
+        doc.text("Name", headerX, yPos);
+        headerX += nameColWidth;
+        doc.text("Non-Compliant Items", headerX, yPos);
+        yPos += lineSpacing;
+        doc.setDrawColor(180);
+        doc.line(margin, yPos - (lineSpacing / 3), pageWidth - margin, yPos - (lineSpacing / 3));
+        doc.setFont(undefined, 'normal');
+      }
+
+      doc.setFontSize(8);
+      let currentX = margin;
+      doc.text(report.staffMemberRank, currentX, yPos, {maxWidth: rankColWidth - 2});
+      currentX += rankColWidth;
+      doc.text(`${report.staffMemberName}`, currentX, yPos, {maxWidth: nameColWidth - 2});
+      currentX += nameColWidth;
+      
+      const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet).map(c => c.name);
+      let itemsText = nonCompliantItems.length > 0 ? nonCompliantItems.join(", ") : "Fully Compliant";
+      
+      // Fit text with auto-split
+      const itemLines = doc.splitTextToSize(itemsText, pageWidth - currentX - margin);
+      doc.text(itemLines, currentX, yPos);
+      yPos += (itemLines.length * lineSpacing * 0.7) + (lineSpacing * 0.4); // Adjust for multi-line items text
+    }
+    
+    addPageNumbers(doc, footerImgHeight, margin); // Ensure page numbers are on the last page too
+    doc.save(filename);
+    toast({
+      title: "PDF Exported",
+      description: `${filename} has been downloaded.`,
+    });
   };
 
 
@@ -491,14 +581,20 @@ export default function ReportingPage() {
     <div className="space-y-6">
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex items-center gap-3">
-            <FileSearch className="h-8 w-8 text-primary hidden sm:block" />
-            <div>
-              <CardTitle className="text-2xl">Compliance Reporting</CardTitle>
-              <CardDescription>
-                Overview of staff compliance status based on training records and defined criteria.
-              </CardDescription>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-3">
+              <FileSearch className="h-8 w-8 text-primary hidden sm:block" />
+              <div>
+                <CardTitle className="text-2xl">Compliance Reporting</CardTitle>
+                <CardDescription>
+                  Overview of staff compliance status based on training records and defined criteria.
+                </CardDescription>
+              </div>
             </div>
+             <Button onClick={handleExportFullComplianceSummaryPdf} size="lg" variant="outline" className="w-full sm:w-auto">
+              <Download className="mr-2 h-5 w-5" />
+              Export Full Summary (PDF)
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -637,7 +733,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), valid until the day before expiry date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -675,3 +771,4 @@ export default function ReportingPage() {
     </div>
   );
 }
+
