@@ -30,7 +30,7 @@ import { useStaff } from "@/hooks/useStaffData";
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
-import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears, startOfDay } from "date-fns";
+import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears, startOfDay, addDays } from "date-fns";
 import { RANKS, STAFF_QUERY_KEY } from "../staff/staff-schema";
 import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
@@ -65,7 +65,6 @@ const processComplianceReports = (
 
 
   return staffList.map((staff) => {
-    // Ensure serviceNumberActual is populated from staff object
     const staffServiceNumberActual = staff.serviceNumber;
 
     if (!staffServiceNumberActual) {
@@ -73,30 +72,26 @@ const processComplianceReports = (
     }
     
     const memberLogs = trainingLogs ? trainingLogs.filter(log => {
-        if (staffServiceNumberActual && log.serviceNumber) {
-            return staffServiceNumberActual === log.serviceNumber;
+        if (log.serviceNumber && staffServiceNumberActual) {
+            return log.serviceNumber === staffServiceNumberActual;
         }
-        // Fallback if serviceNumber is not the primary link anymore, or if one is missing.
-        // This part needs to align with how you decide to link logs if SN isn't primary.
-        // For now, let's assume SN is primary. If not, this needs the name/rank matching.
-        // console.log(`[ComplianceDebug] SN mismatch or missing. Staff SN: ${staffServiceNumberActual}, Log SN: ${log.serviceNumber}. Checking name/rank.`);
-        // return areNamesAndRankMatching(log.staffName, log.rank, staff); // Assuming areNamesAndRankMatching is defined and works
-        return false; // Strict SN matching for now.
+        console.warn(`[ComplianceDebug] Log with ID ${log.id} for ${log.staffName} (Log SN: ${log.serviceNumber || 'None'}) or Staff ${staff.firstName} ${staff.lastName} (Staff SN: ${staffServiceNumberActual || 'None'}) missing service number for direct matching. This log will not be matched to this staff member for compliance.`);
+        return false;
     }) : [];
     
-    // console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumberActual})`);
+    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumberActual || 'None'})`);
     if (staffServiceNumberActual) {
-      // console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumberActual}.`);
+      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumberActual}.`);
       if (memberLogs.length > 0) {
-        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber })));
+        console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber })));
       }
     } else {
-      // console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Found ${memberLogs.length} logs by other means (if any).`);
+      console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Found ${memberLogs.length} logs by other means (if any).`);
     }
 
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      // console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
+      console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
       const relevantLogs = memberLogs
         .filter(log => {
             const isRelevant = criterion.identifier(log);
@@ -104,7 +99,7 @@ const processComplianceReports = (
         })
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
       
-      // console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
+      console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
 
       let isMet = false;
       let details = "Missing";
@@ -112,7 +107,7 @@ const processComplianceReports = (
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
-        // console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
+        console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
         const completionDate = startOfDay(new Date(selectedLog.completionDate));
 
         if (!isValidDate(completionDate)) {
@@ -138,9 +133,9 @@ const processComplianceReports = (
           }
         }
       } else {
-        // console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
+        console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
       }
-      // console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
+      console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
       return {
         key: criterion.key,
         name: criterion.name,
@@ -151,25 +146,24 @@ const processComplianceReports = (
     });
 
     const metCount = criteriaChecks.filter(c => c.isMet).length;
-    const isFullyCompliant = metCount === COMPLIANCE_CRITERIA_CONFIG.length;
     let complianceStatusText: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
     let complianceStatusVariant: StaffComplianceReport["complianceStatusVariant"] = "destructive";
 
-    if (isFullyCompliant) {
+    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
       complianceStatusText = "Compliant";
       complianceStatusVariant = "default";
-    } else if (metCount >= 3) { // Partially compliant if 3 or more are met (but not all)
+    } else if (metCount >= 3) { 
       complianceStatusText = "Partially Compliant";
       complianceStatusVariant = "secondary";
     }
-    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
+    console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
 
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staffServiceNumberActual || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
-      isCompliant: isFullyCompliant,
+      isCompliant: complianceStatusText === "Compliant", 
       criteriaChecks,
       email: staff.email,
       staffServiceNumberActual: staffServiceNumberActual,
@@ -194,7 +188,7 @@ const processComplianceReports = (
         return effectiveRankAIndex - effectiveRankBIndex;
     }
 
-    const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName); // Assuming staffMemberName is "FirstName LastName"
+    const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName); 
     return lastNameCompare;
   });
 };
@@ -216,12 +210,12 @@ export default function ReportingPage() {
 
 
   React.useEffect(() => {
-    // console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
+    console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
     if (!isLoadingStaff && !isLoadingLogs && staffList.length > 0 && trainingLogs) {
       const reports = processComplianceReports(staffList, trainingLogs);
       setComplianceReports(reports);
     } else if (!isLoadingStaff && !isLoadingLogs) {
-      // console.log("[ComplianceDebug] Staff or logs not ready, or empty. Setting empty reports.");
+      console.log("[ComplianceDebug] Staff or logs not ready, or empty. Setting empty reports.");
       setComplianceReports([]);
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
@@ -322,13 +316,13 @@ export default function ReportingPage() {
       await checkPageBreak(lineSpacing * 3); 
 
       const iconX = margin;
-      let iconY = yPos - (iconSize / 2) + (lineSpacing * 0.7 / 2); // Adjust Y for better alignment with first line of text
+      let iconY = yPos - (iconSize / 2) + (lineSpacing * 0.7 / 2); 
       doc.setLineWidth(0.5);
 
       if (criterion.isMet) {
         doc.setDrawColor(0, 128, 0); // Green
-        doc.line(iconX, iconY + iconSize * 0.3, iconX + iconSize * 0.4, iconY + iconSize * 0.7);
-        doc.line(iconX + iconSize * 0.4, iconY + iconSize * 0.7, iconX + iconSize, iconY - iconSize * 0.1);
+        doc.line(iconX, iconY + iconSize * 0.5, iconX + iconSize * 0.4, iconY + iconSize); 
+        doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY + iconSize * 0.1); 
       } else {
         doc.setDrawColor(255, 0, 0); // Red
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
@@ -370,39 +364,38 @@ export default function ReportingPage() {
 
     const margin = 15;
     let yPos = margin;
-    const lineSpacing = 6; // Reduced for more compact table
+    const lineSpacing = 6; 
     const sectionSpacing = 8;
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     let headerImgHeight = 0;
     let footerImgHeight = 0;
 
-    // Column widths (approximate, adjust as needed)
+    
     const rankColWidth = 30;
     const nameColWidth = 60;
-    const unitColWidth = 40; // For when printing unit name per line
-    // Remaining width for non-compliant items, will be text-wrapped
+    
 
     const setupNewPage = async () => {
       const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
       headerImgHeight = hh;
       footerImgHeight = fh;
-      yPos = margin + headerImgHeight + 5; // Start content below header
+      yPos = margin + headerImgHeight + 5; 
       addPageNumbers(doc, footerImgHeight, margin);
     };
 
     const checkPageBreak = async (neededHeight: number = lineSpacing) => {
-      if (yPos + neededHeight > pageHeight - margin - footerImgHeight - 10) { // -10 for buffer
+      if (yPos + neededHeight > pageHeight - margin - footerImgHeight - 10) { 
         doc.addPage();
         await setupNewPage();
-        return true; // Indicates a page break occurred
+        return true; 
       }
       return false;
     };
     
     await setupNewPage();
 
-    // Report Title
+    
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
     await checkPageBreak(lineSpacing * 2);
@@ -418,11 +411,11 @@ export default function ReportingPage() {
 
     for (const report of complianceReports) {
       if (report.squadron !== currentSquadron) {
-        if (currentSquadron !== "") { // Add space before new squadron, unless it's the first one
+        if (currentSquadron !== "") { 
             yPos += sectionSpacing / 2;
         }
         if (await checkPageBreak(sectionSpacing + lineSpacing * 2)) {
-            // If page broke, re-add squadron header if it's not the very first item
+            
         }
         currentSquadron = report.squadron;
         doc.setFontSize(12);
@@ -430,7 +423,7 @@ export default function ReportingPage() {
         doc.text(`Squadron: ${currentSquadron}`, margin, yPos);
         yPos += lineSpacing * 1.5;
 
-        // Column Headers
+        
         doc.setFontSize(9);
         doc.setFont(undefined, 'bold');
         let headerX = margin;
@@ -445,8 +438,7 @@ export default function ReportingPage() {
         doc.setFont(undefined, 'normal');
       }
 
-      if (await checkPageBreak(lineSpacing * 2)) { // Check for staff member line
-         // If page broke, re-add squadron and column headers
+      if (await checkPageBreak(lineSpacing * 2)) { 
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         doc.text(`Squadron: ${currentSquadron} (Continued)`, margin, yPos);
@@ -475,13 +467,13 @@ export default function ReportingPage() {
       const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet).map(c => c.name);
       let itemsText = nonCompliantItems.length > 0 ? nonCompliantItems.join(", ") : "Fully Compliant";
       
-      // Fit text with auto-split
+      
       const itemLines = doc.splitTextToSize(itemsText, pageWidth - currentX - margin);
       doc.text(itemLines, currentX, yPos);
-      yPos += (itemLines.length * lineSpacing * 0.7) + (lineSpacing * 0.4); // Adjust for multi-line items text
+      yPos += (itemLines.length * lineSpacing * 0.7) + (lineSpacing * 0.4); 
     }
     
-    addPageNumbers(doc, footerImgHeight, margin); // Ensure page numbers are on the last page too
+    addPageNumbers(doc, footerImgHeight, margin); 
     doc.save(filename);
     toast({
       title: "PDF Exported",
@@ -640,11 +632,11 @@ export default function ReportingPage() {
                 </TableHeader>
                 <TableBody>
                   {complianceReports.map((report) => (
-                     <React.Fragment key={report.staffMemberId}>
-                        <TableRow
-                            className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
-                            onClick={() => toggleCollapsible(report.staffMemberId)}
-                        >
+                    <React.Fragment key={report.staffMemberId}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
+                        onClick={() => toggleCollapsible(report.staffMemberId)}
+                      >
                         <TableCell>
                           <Button variant="ghost" size="sm" className="w-9 p-0">
                             {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -678,30 +670,30 @@ export default function ReportingPage() {
                         </TableCell>
                       </TableRow>
                       {openCollapsible === report.staffMemberId && (
-                          <TableRow className="bg-muted/50 dark:bg-muted/30">
+                        <TableRow className="bg-muted/50 dark:bg-muted/30">
                           <TableCell colSpan={5}>
-                              <div className="p-4">
+                            <div className="p-4">
                               <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                               <ul className="space-y-2">
-                                  {report.criteriaChecks.map(criterion => (
+                                {report.criteriaChecks.map(criterion => (
                                   <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                      <div className="flex items-center">
+                                    <div className="flex items-center">
                                       {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
                                       <div>
-                                          <span>{criterion.name}:</span>
-                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                        <span>{criterion.name}:</span>
+                                        <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
                                           {criterion.isMet ? "Met" : "Not Met"}
-                                          </span>
-                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                        </span>
+                                        <p className="text-xs text-muted-foreground">{criterion.details}</p>
                                       </div>
-                                      </div>
-                                      {getExpiryWarningBadge(criterion)}
+                                    </div>
+                                    {getExpiryWarningBadge(criterion)}
                                   </li>
-                                  ))}
+                                ))}
                               </ul>
-                              </div>
+                            </div>
                           </TableCell>
-                          </TableRow>
+                        </TableRow>
                       )}
                     </React.Fragment>
                   ))}
@@ -733,7 +725,7 @@ export default function ReportingPage() {
               <li key={criterion.key}>
                 <strong>{criterion.name}</strong>
                  {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), valid until the day before expiry date shown).`
+                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
                  <br />
@@ -751,7 +743,7 @@ export default function ReportingPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date. Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Primary matching for compliance is based on Service Number; if unavailable, it falls back to Name and Rank.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date (normalized to start of day). Items without specified expiry are considered 'met' if any relevant log exists. This system relies on accurate and consistently named training log entries. Primary matching for compliance is based on Service Number; if unavailable, it falls back to Name and Rank.
           </p>
         </CardContent>
       </Card>
@@ -771,4 +763,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-
