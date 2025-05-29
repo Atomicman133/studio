@@ -36,7 +36,7 @@ import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
-import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps } from "../training/page";
+import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps as convertTrainingLogTimestampsForPage } from "../training/page";
 
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
@@ -47,9 +47,9 @@ async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   const collectionRef = collection(db, 'trainingLogs');
   const q = query(collectionRef, orderBy('completionDate', 'desc'));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(docSnap => ({ // Renamed doc to docSnap to avoid conflict
+  return snapshot.docs.map(docSnap => ({ 
     id: docSnap.id,
-    ...convertLogTimestamps(docSnap.data()),
+    ...convertTrainingLogTimestampsForPage(docSnap.data()), // Use the renamed import
   })) as TrainingLog[];
 }
 
@@ -59,7 +59,7 @@ const processComplianceReports = (
 ): StaffComplianceReport[] => {
   console.log("[ComplianceDebug] processComplianceReports called. Staff:", staffList.length, ", Logs:", trainingLogs ? trainingLogs.length : 0);
   if (trainingLogs && trainingLogs.length > 0 && staffList.length > 0) {
-     console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 1).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName, rank: l.rank })));
+     console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 3).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName, rank: l.rank })));
      console.log("[ComplianceDebug] Sample staff list item:", staffList[0] ? {name: `${staffList[0].firstName} ${staffList[0].lastName}`, rank: staffList[0].rank, sn: staffList[0].serviceNumber} : "N/A");
   }
 
@@ -71,18 +71,12 @@ const processComplianceReports = (
     }
     
     const memberLogs = trainingLogs ? trainingLogs.filter(log => {
-        // Robust check for serviceNumber presence and match
         const staffSN = staff.serviceNumber?.trim();
         const logSN = log.serviceNumber?.trim();
         
         if (staffSN && logSN) {
             return logSN === staffSN;
         }
-        if (!staffSN && staff.id === 'DEBUG_SKIP_SN_CHECK') { // Temporary bypass for debugging if needed
-            console.warn(`[ComplianceDebug] DEBUG_SKIP_SN_CHECK for ${staff.firstName} ${staff.lastName}`);
-            return true; // Or some other logic if bypassing SN check
-        }
-        // If either staffSN or logSN is missing/empty, they don't match by service number.
         return false;
     }) : [];
     
@@ -119,14 +113,15 @@ const processComplianceReports = (
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
+           console.log(`[ComplianceDebug]       Invalid completion date for log ID ${selectedLog.id}: ${selectedLog.completionDate}`);
         } else {
           const today = startOfDay(new Date());
 
           if (criterion.yearsToExpire) {
             const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            isMet = isBefore(today, expiryDate); // Valid if today is *before* the calculated expiry date
+            isMet = isBefore(today, expiryDate); 
             
-            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy'); // Show day before it expires
+            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy'); 
             const expiredOnDate = format(expiryDate, 'dd/MM/yy');
 
             if (isMet) {
@@ -679,7 +674,7 @@ export default function ReportingPage() {
     } finally {
       setIsBulkLinking(false);
       queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
       // Re-fetch compliance reports is handled by useEffect on data change
     }
   };
@@ -758,7 +753,11 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
-                        <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10" onClick={() => toggleCollapsible(report.staffMemberId)}>
+                        <TableRow 
+                            className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10" 
+                            onClick={() => toggleCollapsible(report.staffMemberId)}
+                            data-state={openCollapsible === report.staffMemberId ? "open" : "closed"}
+                        >
                           <TableCell>
                               <Button variant="ghost" size="sm" className="w-9 p-0" aria-label="Toggle details">
                                 {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -855,7 +854,6 @@ export default function ReportingPage() {
                   criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' :
                   criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC", "Working With Children - WA - Certified"' :
                   criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
-                  criterion.key === 'psychAssessment' ? '"Psychological Assessment", "Psych Assessment", "Psychological Test - Completed"' :
                   criterion.key === 'policeClearance' ? '"National Police Clearance", "Police Check", "NPC"' :
                   criterion.key === 'youthSafety' ? '"Defence Youth Safety", "DYSAT", "Youth Mental Health - Awareness - Completed", "Defence Youth Protection Awareness Course - Completed Online", "Defence Youth Safety Level 3 - Leader - Completed Online"' : ''
                  }
@@ -885,4 +883,3 @@ export default function ReportingPage() {
     </div>
   );
 }
-

@@ -54,13 +54,6 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
        matchesKeywords(log.courseName, ['code of conduct', 'behavioural policy acceptance', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'behavioural policy acceptance', 'coc'])
   },
   {
-    key: 'psychAssessment',
-    name: 'Psychological Assessment',
-    yearsToExpire: undefined, // No expiry
-    identifier: (log: TrainingLog) =>
-       matchesKeywords(log.courseName, ['psychological assessment', 'psych assessment', 'psychological test - completed']) || matchesKeywords(log.qualificationAchieved, ['psychological assessment', 'psych assessment', 'psychological test - completed'])
-  },
-  {
     key: 'policeClearance',
     name: 'National Police Clearance',
     yearsToExpire: 5,
