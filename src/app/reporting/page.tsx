@@ -73,28 +73,32 @@ const processComplianceReports = (
     }
 
     const memberLogs = trainingLogs ? trainingLogs.filter(log => {
-      // Primary match on serviceNumber if both exist
-      if (staff.serviceNumber && log.serviceNumber) {
-        return staff.serviceNumber === log.serviceNumber;
+      // Primary match on serviceNumber if both exist and are not empty
+      if (staff.serviceNumber && staff.serviceNumber.trim() !== "" && log.serviceNumber && log.serviceNumber.trim() !== "") {
+        return staff.serviceNumber.trim() === log.serviceNumber.trim();
       }
-      // Fallback: if log has no SN, try to match by name and rank (case-insensitive)
-      if (!log.serviceNumber && log.staffName && log.rank) {
+      // Fallback: if log has no SN, or staff has no SN, try to match by name and rank (case-insensitive)
+      // This fallback should ideally be minimized by ensuring good data quality (SNs on logs)
+      if (log.staffName && log.rank) {
         const logNameUpper = log.staffName.toUpperCase().trim();
         const staffFullNameUpper = `${staff.firstName} ${staff.lastName}`.toUpperCase().trim();
         const staffLastNameFirstNameUpper = `${staff.lastName}, ${staff.firstName}`.toUpperCase().trim();
-
         const nameMatch = logNameUpper === staffFullNameUpper || logNameUpper === staffLastNameFirstNameUpper;
         const rankMatch = log.rank === staff.rank;
-        return nameMatch && rankMatch;
+        
+        if (nameMatch && rankMatch) {
+          // console.log(`[ComplianceDebug] Fallback match for ${staff.firstName} ${staff.lastName} with log ${log.id} by name/rank.`);
+          return true;
+        }
       }
       return false;
     }) : [];
 
     console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumberActual || 'None'})`);
     if (staffServiceNumberActual) {
-      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs potentially for SN: ${staffServiceNumberActual} (or by name/rank if log SN missing).`);
+      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumberActual}.`);
       if (memberLogs.length > 0) {
-        console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber, logName: l.staffName })));
+        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber, logName: l.staffName })));
       }
     } else {
       console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Name/Rank matching found ${memberLogs.length} logs.`);
@@ -102,7 +106,7 @@ const processComplianceReports = (
 
 
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
+      // console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
       const relevantLogs = memberLogs
         .filter(log => {
             const isRelevant = criterion.identifier(log);
@@ -110,7 +114,7 @@ const processComplianceReports = (
         })
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
-      console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
+      // console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
 
       let isMet = false;
       let details = "Missing";
@@ -118,26 +122,26 @@ const processComplianceReports = (
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
-        console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
+        // console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
         const completionDate = startOfDay(new Date(selectedLog.completionDate));
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
-           console.log(`[ComplianceDebug]       Invalid completion date for log ID ${selectedLog.id}: ${selectedLog.completionDate}`);
+           // console.log(`[ComplianceDebug]       Invalid completion date for log ID ${selectedLog.id}: ${selectedLog.completionDate}`);
         } else {
           const today = startOfDay(new Date());
 
           if (criterion.yearsToExpire) {
             const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            isMet = isBefore(today, expiryDate);
+            isMet = isBefore(today, expiryDate); // Valid if today is *before* the calculated expiry date
 
-            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy');
-            const expiredOnDate = format(expiryDate, 'dd/MM/yy');
+            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy'); // Last full day of validity
+            const expiredOnDateText = format(expiryDate, 'dd/MM/yy');
 
             if (isMet) {
               details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${validUntilDate}.`;
             } else {
-              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${expiredOnDate}.`;
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${expiredOnDateText}.`;
             }
           } else {
             isMet = true;
@@ -145,9 +149,9 @@ const processComplianceReports = (
           }
         }
       } else {
-        console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
+        // console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
       }
-      console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
+      // console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
       return {
         key: criterion.key,
         name: criterion.name,
@@ -164,11 +168,11 @@ const processComplianceReports = (
     if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
       complianceStatusText = "Compliant";
       complianceStatusVariant = "default";
-    } else if (metCount >= 3) {
+    } else if (metCount >= 3) { // Assuming 3 or more but not all is "Partially Compliant"
       complianceStatusText = "Partially Compliant";
       complianceStatusVariant = "secondary";
     }
-    console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
+    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
 
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staffServiceNumberActual || 'NO_SN'}`,
@@ -204,68 +208,6 @@ const processComplianceReports = (
     if (lastNameCompare !== 0) return lastNameCompare;
     return a.staffMemberName.split(' ')[0].localeCompare(b.staffMemberName.split(' ')[0]);
   });
-};
-
-
-const isConfidentMatchForAutoLink = (log: TrainingLog, staffMember: StaffMember): boolean => {
-  if (!log.staffName || !log.rank || !staffMember.firstName || !staffMember.lastName || !staffMember.rank) {
-      console.log(`[BulkLinkDebug-ConfidentMatch] Early exit: Missing essential data. LogName: ${log.staffName}, LogRank: ${log.rank}, StaffName: ${staffMember.firstName} ${staffMember.lastName}, StaffRank: ${staffMember.rank}`);
-      return false;
-  }
-
-  // Normalize rank
-  const logRankUpper = log.rank.toUpperCase();
-  const staffRankUpper = staffMember.rank.toUpperCase();
-
-  if (logRankUpper !== staffRankUpper) {
-      console.log(`[BulkLinkDebug-ConfidentMatch] Rank mismatch: LogRank="${logRankUpper}" vs StaffRank="${staffRankUpper}" for log "${log.staffName}" and staff "${staffMember.firstName} ${staffMember.lastName}"`);
-      return false;
-  }
-
-  // Normalize names (more robustly)
-  const normalize = (name: string) => name.toUpperCase().trim().replace(/\s+/g, " ");
-
-  const logNameNormalized = normalize(log.staffName);
-  const targetFirstNameNormalized = normalize(staffMember.firstName);
-  const targetLastNameNormalized = normalize(staffMember.lastName);
-
-  let parsedLogFirstName = "";
-  let parsedLogLastName = "";
-
-  if (logNameNormalized.includes(",")) {
-      const parts = logNameNormalized.split(",").map(p => p.trim());
-      parsedLogLastName = parts[0];
-      parsedLogFirstName = parts.length > 1 ? parts[1] : "";
-  } else {
-      const nameParts = logNameNormalized.split(" ");
-      if (nameParts.length > 0) {
-          parsedLogLastName = nameParts[nameParts.length - 1];
-          parsedLogFirstName = nameParts.slice(0, -1).join(" ");
-      }
-  }
-
-  // Ensure parsed parts are not empty for comparison, unless target is also effectively empty (e.g. no first name)
-  if (!parsedLogLastName) {
-    console.log(`[BulkLinkDebug-ConfidentMatch] Could not parse last name from log: "${log.staffName}"`);
-    return false;
-  }
-
-  const lastNameMatch = parsedLogLastName === targetLastNameNormalized;
-
-  // First name matching: exact, or one is an initial of the other, or one is empty (if the other is also considered "empty" or a very short initial)
-  const firstNameMatch =
-      (parsedLogFirstName === targetFirstNameNormalized) ||
-      (targetFirstNameNormalized.length > 1 && parsedLogFirstName.length === 1 && targetFirstNameNormalized.startsWith(parsedLogFirstName)) || // Log FN is initial of Target FN
-      (parsedLogFirstName.length > 1 && targetFirstNameNormalized.length === 1 && parsedLogFirstName.startsWith(targetFirstNameNormalized)) || // Target FN is initial of Log FN
-      (parsedLogFirstName === "" && targetFirstNameNormalized.length <= 1) || // Log FN is empty, target is initial or empty
-      (targetFirstNameNormalized === "" && parsedLogFirstName.length <= 1);   // Target FN is empty, log is initial or empty
-
-
-  if (!lastNameMatch || !firstNameMatch) {
-      console.log(`[BulkLinkDebug-ConfidentMatch] Name mismatch for log "${log.staffName}" (Parsed: FN="${parsedLogFirstName}", LN="${parsedLogLastName}") and staff "${staffMember.firstName} ${staffMember.lastName}" (Target: FN="${targetFirstNameNormalized}", LN="${targetLastNameNormalized}"). LastNameMatch: ${lastNameMatch}, FirstNameMatch: ${firstNameMatch}`);
-  }
-  
-  return lastNameMatch && firstNameMatch; // Rank already matched
 };
 
 
@@ -311,7 +253,7 @@ export default function ReportingPage() {
      if (isBefore(today, expiryDate)) {
         return differenceInDays(expiryDate, today);
      }
-     return 0;
+     return 0; // Means it's expired or on the expiry date
   };
 
   const getExpiryWarningBadge = (criterion: ComplianceCriterionCheck): React.ReactNode => {
@@ -323,7 +265,7 @@ export default function ReportingPage() {
 
     const daysLeft = getDaysToExpiry(new Date(criterion.relevantLog.completionDate), config.yearsToExpire);
 
-    if (daysLeft !== null && daysLeft > 0 && daysLeft <= 90) {
+    if (daysLeft !== null && daysLeft > 0 && daysLeft <= 90) { // Only show if not expired and within 90 days
         if (daysLeft <= 30) {
             return <Badge variant="destructive" className="ml-2 text-xs">Expires in {daysLeft}d</Badge>;
         } else {
@@ -391,19 +333,21 @@ export default function ReportingPage() {
       await checkPageBreak(lineSpacing * 3);
 
       const iconX = margin;
-      let iconY = yPos - (iconSize / 2) + (lineSpacing * 0.7 / 2);
+      let iconY = yPos - (iconSize / 2) + (lineSpacing * 0.7 / 2); // Center icon with the first line of text
       doc.setLineWidth(0.5);
 
       if (criterion.isMet) {
-        doc.setDrawColor(34, 139, 34);
-        doc.line(iconX, iconY + iconSize * 0.5, iconX + iconSize * 0.4, iconY + iconSize);
-        doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY + iconSize * 0.1);
+        doc.setDrawColor(34, 139, 34); // Green
+        // Draw Tick: \/
+        doc.line(iconX, iconY + iconSize * 0.6, iconX + iconSize * 0.4, iconY + iconSize);
+        doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY + iconSize * 0.2);
       } else {
-        doc.setDrawColor(220, 20, 60);
+        doc.setDrawColor(220, 20, 60); // Red
+        // Draw Cross: X
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
         doc.line(iconX + iconSize, iconY, iconX, iconY + iconSize);
       }
-      doc.setDrawColor(0);
+      doc.setDrawColor(0); // Reset draw color to black for text
 
       const textX = iconX + iconSize + iconTextSpacing;
       const textMaxWidth = maxLineWidth - (iconSize + iconTextSpacing);
@@ -432,34 +376,35 @@ export default function ReportingPage() {
       return;
     }
 
-    const doc = new jsPDF();
+    const doc = new jsPDF('p', 'pt', 'a4'); // Use points for better control
     resetLetterheadCache();
     const currentDate = format(new Date(), "PPP");
     const filename = `full_compliance_summary_${format(new Date(), "yyyy-MM-dd")}.pdf`;
 
-    const margin = 15;
-    let yPos = margin;
-    const lineSpacing = 6;
-    const sectionSpacing = 8;
+    const pageMargin = 40; // Points
+    let yPos = pageMargin;
+    const lineSpacing = 12; // Points
+    const sectionSpacing = 20; // Points
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     let headerImgHeight = 0;
     let footerImgHeight = 0;
 
-
-    const rankColWidth = 30;
-    const nameColWidth = 60;
+    const rankColWidth = 80;
+    const nameColWidth = 150;
+    const itemsColX = pageMargin + rankColWidth + nameColWidth + 10;
 
 
     const setupNewPage = async () => {
-      const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+      const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, pageMargin);
       headerImgHeight = hh;
       footerImgHeight = fh;
-      yPos = margin + headerImgHeight + 5;
+      yPos = pageMargin + headerImgHeight + 10; // Start below header
     };
 
     const checkPageBreak = async (neededHeight: number = lineSpacing) => {
-      if (yPos + neededHeight > pageHeight - margin - footerImgHeight - 10) {
+      if (yPos + neededHeight > pageHeight - pageMargin - footerImgHeight - 20) { // Added buffer for page numbers
+        addPageNumbers(doc, footerImgHeight, pageMargin);
         doc.addPage();
         await setupNewPage();
         return true;
@@ -469,8 +414,8 @@ export default function ReportingPage() {
 
     await setupNewPage();
 
-
-    doc.setFontSize(16);
+    // --- Report Title ---
+    doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
     await checkPageBreak(lineSpacing * 2);
     doc.text("Full Staff Compliance Summary", pageWidth / 2, yPos, { align: "center" });
@@ -481,73 +426,112 @@ export default function ReportingPage() {
     doc.text(`Generated on: ${currentDate}`, pageWidth / 2, yPos, { align: "center" });
     yPos += sectionSpacing * 1.5;
 
-    let currentSquadron = "";
+    // --- Overall Compliance Counts ---
+    const compliantCount = complianceReports.filter(r => r.complianceStatusText === "Compliant").length;
+    const partiallyCompliantCount = complianceReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+    const nonCompliantCount = complianceReports.filter(r => r.complianceStatusText === "Not Compliant").length;
 
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    await checkPageBreak(lineSpacing);
+    doc.text("Overall Compliance Status:", pageMargin, yPos);
+    yPos += lineSpacing * 1.5;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    await checkPageBreak(lineSpacing * 3);
+    doc.text(`Total Staff: ${complianceReports.length}`, pageMargin, yPos); yPos += lineSpacing;
+    doc.text(`Compliant: ${compliantCount}`, pageMargin, yPos); yPos += lineSpacing;
+    doc.text(`Partially Compliant: ${partiallyCompliantCount}`, pageMargin, yPos); yPos += lineSpacing;
+    doc.text(`Not Compliant: ${nonCompliantCount}`, pageMargin, yPos);
+    yPos += sectionSpacing;
+
+    // --- Non-Compliance by Category ---
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    await checkPageBreak(lineSpacing);
+    doc.text("Non-Compliance by Category:", pageMargin, yPos);
+    yPos += lineSpacing * 1.5;
+    doc.setFontSize(10);
+
+    for (const criterion of COMPLIANCE_CRITERIA_CONFIG) {
+        const nonCompliantForCriterion = complianceReports.filter(report =>
+            !report.criteriaChecks.find(c => c.key === criterion.key)?.isMet
+        ).length;
+        if (await checkPageBreak()) {
+            doc.setFontSize(14); doc.setFont(undefined, 'bold');
+            doc.text("Non-Compliance by Category (Continued):", pageMargin, yPos);
+            yPos += lineSpacing * 1.5; doc.setFontSize(10);
+        }
+        doc.text(`${criterion.name}: ${nonCompliantForCriterion} members non-compliant`, pageMargin, yPos);
+        yPos += lineSpacing;
+    }
+    yPos += sectionSpacing;
+
+
+    // --- Detailed Staff List ---
+    let currentSquadron = "";
     for (const report of complianceReports) {
       if (report.squadron !== currentSquadron) {
         if (currentSquadron !== "") {
             yPos += sectionSpacing / 2;
         }
-        if (await checkPageBreak(sectionSpacing + lineSpacing * 2)) {
-           // New page started
-        }
+        if (await checkPageBreak(sectionSpacing + lineSpacing * 2.5)) { /* Page break, headers will be redrawn */ }
+
         currentSquadron = report.squadron;
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
-        doc.text(`Squadron: ${currentSquadron}`, margin, yPos);
+        doc.text(`Squadron: ${currentSquadron}`, pageMargin, yPos);
         yPos += lineSpacing * 1.5;
 
-
+        // Table Headers for staff list
         doc.setFontSize(9);
         doc.setFont(undefined, 'bold');
-        let headerX = margin;
+        let headerX = pageMargin;
         doc.text("Rank", headerX, yPos);
         headerX += rankColWidth;
         doc.text("Name", headerX, yPos);
         headerX += nameColWidth;
         doc.text("Non-Compliant Items", headerX, yPos);
-        yPos += lineSpacing;
+        yPos += lineSpacing * 0.8;
         doc.setDrawColor(180);
-        doc.line(margin, yPos - (lineSpacing / 3), pageWidth - margin, yPos - (lineSpacing / 3));
+        doc.line(pageMargin, yPos - (lineSpacing / 3), pageWidth - pageMargin, yPos - (lineSpacing / 3));
         doc.setFont(undefined, 'normal');
       }
 
-      if (await checkPageBreak(lineSpacing * 2)) {
-        doc.setFontSize(12);
-        doc.setFont(undefined, 'bold');
-        doc.text(`Squadron: ${currentSquadron} (Continued)`, margin, yPos);
+      if (await checkPageBreak(lineSpacing * 2)) { // Check if new page needed for this staff member
+        // Redraw squadron and table headers if new page started
+        doc.setFontSize(12); doc.setFont(undefined, 'bold');
+        doc.text(`Squadron: ${currentSquadron} (Continued)`, pageMargin, yPos);
         yPos += lineSpacing * 1.5;
-        doc.setFontSize(9);
-        doc.setFont(undefined, 'bold');
-        let headerX = margin;
-        doc.text("Rank", headerX, yPos);
-        headerX += rankColWidth;
-        doc.text("Name", headerX, yPos);
-        headerX += nameColWidth;
+        doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        let headerX = pageMargin;
+        doc.text("Rank", headerX, yPos); headerX += rankColWidth;
+        doc.text("Name", headerX, yPos); headerX += nameColWidth;
         doc.text("Non-Compliant Items", headerX, yPos);
-        yPos += lineSpacing;
-        doc.setDrawColor(180);
-        doc.line(margin, yPos - (lineSpacing / 3), pageWidth - margin, yPos - (lineSpacing / 3));
+        yPos += lineSpacing * 0.8;
+        doc.setDrawColor(180); doc.line(pageMargin, yPos - (lineSpacing / 3), pageWidth - pageMargin, yPos - (lineSpacing / 3));
         doc.setFont(undefined, 'normal');
       }
 
       doc.setFontSize(8);
-      let currentX = margin;
-      doc.text(report.staffMemberRank, currentX, yPos, {maxWidth: rankColWidth - 2});
+      let currentX = pageMargin;
+      const rankLines = doc.splitTextToSize(report.staffMemberRank, rankColWidth - 2);
+      doc.text(rankLines, currentX, yPos);
       currentX += rankColWidth;
-      doc.text(`${report.staffMemberName}`, currentX, yPos, {maxWidth: nameColWidth - 2});
+
+      const nameLines = doc.splitTextToSize(`${report.staffMemberName}`, nameColWidth - 2);
+      doc.text(nameLines, currentX, yPos);
       currentX += nameColWidth;
 
       const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet).map(c => c.name);
       let itemsText = nonCompliantItems.length > 0 ? nonCompliantItems.join(", ") : "Fully Compliant";
 
-
-      const itemLines = doc.splitTextToSize(itemsText, pageWidth - currentX - margin);
+      const itemLines = doc.splitTextToSize(itemsText, pageWidth - currentX - pageMargin);
       doc.text(itemLines, currentX, yPos);
-      yPos += (itemLines.length * lineSpacing * 0.7) + (lineSpacing * 0.4);
+      yPos += (Math.max(nameLines.length, itemLines.length, rankLines.length) * lineSpacing * 0.7) + (lineSpacing * 0.4);
     }
 
-    addPageNumbers(doc, footerImgHeight, margin);
+    addPageNumbers(doc, footerImgHeight, pageMargin);
     doc.save(filename);
     toast({
       title: "PDF Exported",
@@ -645,7 +629,7 @@ export default function ReportingPage() {
 
     try {
       const allStaff = staffList;
-      const allTrainingLogs = await fetchLocalTrainingLogs();
+      const allTrainingLogs = await fetchLocalTrainingLogs(); // Ensures we have the latest logs
 
       if (!allStaff || allStaff.length === 0) {
         toast({ variant: "destructive", title: "No Staff Data", description: "Cannot perform bulk linking without staff data." });
@@ -658,8 +642,12 @@ export default function ReportingPage() {
         return;
       }
 
-      const unlinkedLogsPool = allTrainingLogs.filter(log => !log.serviceNumber || log.serviceNumber.trim() === "");
-      console.log(`[BulkLinkDebug] Found ${unlinkedLogsPool.length} logs without a service number.`);
+      // Filter for logs that genuinely lack a service number or have one that doesn't match any known staff
+      // This is an expensive operation if staffList is large, consider optimizing if needed.
+      const staffServiceNumbers = new Set(allStaff.map(s => s.serviceNumber).filter(Boolean));
+      const unlinkedLogsPool = allTrainingLogs.filter(log => !log.serviceNumber || !staffServiceNumbers.has(log.serviceNumber));
+      
+      console.log(`[BulkLinkDebug] Found ${unlinkedLogsPool.length} logs potentially needing linking (no SN or SN not in staff list).`);
 
       let linkedLogsCount = 0;
       const affectedStaffIds = new Set<string>();
@@ -671,26 +659,41 @@ export default function ReportingPage() {
           continue;
         }
 
+        // For each staff member, only consider logs from the pool that *don't* already have their SN
         const potentialMatchesForStaff = unlinkedLogsPool.filter(log =>
+          log.serviceNumber !== staffMember.serviceNumber && // ensure we are not re-linking an already correctly linked one
           isConfidentMatchForAutoLink(log, staffMember)
         );
-
-        console.log(`[BulkLinkDebug] For ${staffMember.firstName} ${staffMember.lastName} (SN: ${staffMember.serviceNumber}), found ${potentialMatchesForStaff.length} potential unlinked logs.`);
+        
+        console.log(`[BulkLinkDebug] For ${staffMember.firstName} ${staffMember.lastName} (SN: ${staffMember.serviceNumber}), found ${potentialMatchesForStaff.length} potential unlinked logs by name/rank.`);
 
         if (potentialMatchesForStaff.length === 1) {
           const matchedLog = potentialMatchesForStaff[0];
+          // Check if this log was already assigned to another staff member in this batch, to avoid conflicts
+          // This check is simplistic; a more robust solution might be needed for complex scenarios.
+          if (unlinkedLogsPool.find(l => l.id === matchedLog.id)?.serviceNumber && 
+              unlinkedLogsPool.find(l => l.id === matchedLog.id)?.serviceNumber !== staffMember.serviceNumber) {
+            console.warn(`[BulkLinkDebug] Log ID ${matchedLog.id} was already tentatively linked to another staff member in this batch. Skipping for ${staffMember.serviceNumber}.`);
+            continue;
+          }
+
           const logRef = doc(db, "trainingLogs", matchedLog.id!);
           const updates = {
             serviceNumber: staffMember.serviceNumber,
-            staffName: `${staffMember.lastName}, ${staffMember.firstName}`,
-            rank: staffMember.rank,
+            staffName: `${staffMember.lastName}, ${staffMember.firstName}`, // Normalize name
+            rank: staffMember.rank, // Normalize rank
           };
           batch.update(logRef, updates);
           linkedLogsCount++;
           affectedStaffIds.add(staffMember.id);
+          // Mark this log as "taken" in our pool to avoid re-matching if names are very similar across staff
+          const poolLogIndex = unlinkedLogsPool.findIndex(l => l.id === matchedLog.id);
+          if (poolLogIndex > -1) {
+            unlinkedLogsPool[poolLogIndex].serviceNumber = staffMember.serviceNumber; // Tentatively mark as linked
+          }
           console.log(`[BulkLinkDebug] Queued update for log ID ${matchedLog.id} to link with SN ${staffMember.serviceNumber}.`);
         } else if (potentialMatchesForStaff.length > 1) {
-          console.log(`[BulkLinkDebug] Ambiguous match for ${staffMember.firstName} ${staffMember.lastName} (SN: ${staffMember.serviceNumber}) - ${potentialMatchesForStaff.length} logs found. Skipping auto-link.`);
+          console.log(`[BulkLinkDebug] Ambiguous match for ${staffMember.firstName} ${staffMember.lastName} (SN: ${staffMember.serviceNumber}) - ${potentialMatchesForStaff.length} logs found by name/rank. Skipping auto-link for this staff.`);
         }
       }
 
@@ -700,6 +703,14 @@ export default function ReportingPage() {
           title: "Bulk Auto-Link Successful",
           description: `${linkedLogsCount} log(s) linked for ${affectedStaffIds.size} staff member(s). Compliance data will refresh.`
         });
+        // Invalidate queries to refresh data
+        queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
+        // Also invalidate any queries related to compliance reports or dashboard data
+        queryClient.invalidateQueries({ queryKey: ['staffComplianceReports'] }); // If this key is used
+        queryClient.invalidateQueries({ queryKey: ['complianceReports'] }); // Generic key if used
+        queryClient.invalidateQueries({ queryKey: ['trainingLogsDashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboardComplianceData'] }); // If you have a specific key for this
       } else {
         toast({ title: "Bulk Auto-Link", description: "No unambiguous matches found to automatically link." });
       }
@@ -709,8 +720,6 @@ export default function ReportingPage() {
       toast({ variant: "destructive", title: "Bulk Link Error", description: `An error occurred: ${err.message}` });
     } finally {
       setIsBulkLinking(false);
-      queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
     }
   };
 
@@ -912,6 +921,12 @@ export default function ReportingPage() {
           onLogsLinked={() => {
             queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
             queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+             // Invalidate other queries that might be affected or lead to compliance report re-calculation
+            queryClient.invalidateQueries({ queryKey: ['staffComplianceReports'] });
+            queryClient.invalidateQueries({ queryKey: ['complianceReports'] });
+            queryClient.invalidateQueries({ queryKey: ['trainingLogsDashboard'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboardComplianceData'] });
+
             toast({ title: "Logs Linked", description: "Compliance data will refresh."});
           }}
         />
@@ -919,3 +934,6 @@ export default function ReportingPage() {
     </div>
   );
 }
+
+
+    
