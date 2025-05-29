@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -27,10 +27,10 @@ import { COMPLIANCE_CRITERIA_CONFIG } from "./reporting-schema";
 import type { TrainingLog } from "../training/training-schema";
 import type { StaffMember } from "../staff/staff-schema";
 import { useStaff } from "@/hooks/useStaffData";
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
-import { addYears, isBefore, isAfter, format, differenceInDays, isValid as isValidDate, isEqual, subYears, startOfDay, addDays } from "date-fns";
+import { collection, getDocs, query, orderBy, Timestamp, writeBatch, doc } from 'firebase/firestore';
+import { addYears, isBefore, format, differenceInDays, isValid as isValidDate, isEqual, startOfDay, addDays } from "date-fns";
 import { RANKS, STAFF_QUERY_KEY } from "../staff/staff-schema";
 import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
@@ -47,9 +47,9 @@ async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   const collectionRef = collection(db, 'trainingLogs');
   const q = query(collectionRef, orderBy('completionDate', 'desc'));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({
-    id: doc.id,
-    ...convertLogTimestamps(doc.data()),
+  return snapshot.docs.map(docSnap => ({ // Renamed doc to docSnap to avoid conflict
+    id: docSnap.id,
+    ...convertLogTimestamps(docSnap.data()),
   })) as TrainingLog[];
 }
 
@@ -63,7 +63,6 @@ const processComplianceReports = (
      console.log("[ComplianceDebug] Sample staff list item:", staffList[0] ? {name: `${staffList[0].firstName} ${staffList[0].lastName}`, rank: staffList[0].rank, sn: staffList[0].serviceNumber} : "N/A");
   }
 
-
   return staffList.map((staff) => {
     const staffServiceNumberActual = staff.serviceNumber;
 
@@ -72,10 +71,18 @@ const processComplianceReports = (
     }
     
     const memberLogs = trainingLogs ? trainingLogs.filter(log => {
-        if (log.serviceNumber && staffServiceNumberActual) {
-            return log.serviceNumber === staffServiceNumberActual;
+        // Robust check for serviceNumber presence and match
+        const staffSN = staff.serviceNumber?.trim();
+        const logSN = log.serviceNumber?.trim();
+        
+        if (staffSN && logSN) {
+            return logSN === staffSN;
         }
-        console.warn(`[ComplianceDebug] Log with ID ${log.id} for ${log.staffName} (Log SN: ${log.serviceNumber || 'None'}) or Staff ${staff.firstName} ${staff.lastName} (Staff SN: ${staffServiceNumberActual || 'None'}) missing service number for direct matching. This log will not be matched to this staff member for compliance.`);
+        if (!staffSN && staff.id === 'DEBUG_SKIP_SN_CHECK') { // Temporary bypass for debugging if needed
+            console.warn(`[ComplianceDebug] DEBUG_SKIP_SN_CHECK for ${staff.firstName} ${staff.lastName}`);
+            return true; // Or some other logic if bypassing SN check
+        }
+        // If either staffSN or logSN is missing/empty, they don't match by service number.
         return false;
     }) : [];
     
@@ -86,7 +93,7 @@ const processComplianceReports = (
         console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber })));
       }
     } else {
-      console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Found ${memberLogs.length} logs by other means (if any).`);
+      console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Name/Rank matching might be needed or use Linker. Found ${memberLogs.length} logs (should be 0 if only SN matching).`);
     }
 
 
@@ -188,15 +195,51 @@ const processComplianceReports = (
         return effectiveRankAIndex - effectiveRankBIndex;
     }
 
-    const lastNameCompare = a.staffMemberName.localeCompare(b.staffMemberName); 
-    return lastNameCompare;
+    const lastNameCompare = a.staffMemberName.split(' ').pop()!.localeCompare(b.staffMemberName.split(' ').pop()!);
+    if (lastNameCompare !== 0) return lastNameCompare;
+    return a.staffMemberName.split(' ')[0].localeCompare(b.staffMemberName.split(' ')[0]);
   });
+};
+
+// Helper function for robust name and rank matching, used by bulk auto-link
+const isConfidentMatchForAutoLink = (log: TrainingLog, staffMember: StaffMember): boolean => {
+  if (!log.staffName || !log.rank) return false;
+
+  // Normalize and parse log name
+  const logNameNormalized = log.staffName.toUpperCase().trim().replace(/\s+/g, " ");
+  let logParsedLastName = "";
+  let logParsedFirstName = "";
+
+  if (logNameNormalized.includes(",")) {
+    const parts = logNameNormalized.split(",").map(p => p.trim());
+    logParsedLastName = parts[0];
+    logParsedFirstName = parts.length > 1 ? parts[1] : "";
+  } else {
+    const spaceParts = logNameNormalized.split(" ");
+    if (spaceParts.length > 0) {
+      logParsedLastName = spaceParts[spaceParts.length - 1];
+      logParsedFirstName = spaceParts.slice(0, -1).join(" ");
+    } else {
+      return false; // Cannot parse log name
+    }
+  }
+
+  // Normalize staff member name
+  const targetLastNameUpper = staffMember.lastName.toUpperCase().trim();
+  const targetFirstNameUpper = staffMember.firstName.toUpperCase().trim();
+
+  const rankMatch = log.rank === staffMember.rank;
+  const lastNameMatch = logParsedLastName === targetLastNameUpper;
+  // For first name, allow exact match or if one is an initial/part of the other
+  const firstNameMatch = (targetFirstNameUpper === "" || logParsedFirstName === "" || logParsedFirstName === targetFirstNameUpper || targetFirstNameUpper.startsWith(logParsedFirstName) || logParsedFirstName.startsWith(targetFirstNameUpper));
+  
+  return rankMatch && lastNameMatch && firstNameMatch;
 };
 
 
 export default function ReportingPage() {
   const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
-  const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
+  const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs, refetch: refetchTrainingLogs } = useQuery<TrainingLog[], Error>({
     queryKey: [TRAINING_LOGS_QUERY_KEY],
     queryFn: fetchLocalTrainingLogs,
   });
@@ -207,7 +250,7 @@ export default function ReportingPage() {
   const [openCollapsible, setOpenCollapsible] = React.useState<string | null>(null);
   const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
   const [selectedStaffForLinking, setSelectedStaffForLinking] = React.useState<StaffComplianceReport | null>(null);
-
+  const [isBulkLinking, setIsBulkLinking] = React.useState(false);
 
   React.useEffect(() => {
     console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
@@ -320,11 +363,11 @@ export default function ReportingPage() {
       doc.setLineWidth(0.5);
 
       if (criterion.isMet) {
-        doc.setDrawColor(0, 128, 0); // Green
+        doc.setDrawColor(34, 139, 34); // Forest Green for tick
         doc.line(iconX, iconY + iconSize * 0.5, iconX + iconSize * 0.4, iconY + iconSize); 
         doc.line(iconX + iconSize * 0.4, iconY + iconSize, iconX + iconSize, iconY + iconSize * 0.1); 
       } else {
-        doc.setDrawColor(255, 0, 0); // Red
+        doc.setDrawColor(220, 20, 60); // Crimson Red for cross
         doc.line(iconX, iconY, iconX + iconSize, iconY + iconSize);
         doc.line(iconX + iconSize, iconY, iconX, iconY + iconSize);
       }
@@ -381,13 +424,13 @@ export default function ReportingPage() {
       headerImgHeight = hh;
       footerImgHeight = fh;
       yPos = margin + headerImgHeight + 5; 
-      addPageNumbers(doc, footerImgHeight, margin);
+      // Page numbers will be added at the very end for all pages
     };
 
     const checkPageBreak = async (neededHeight: number = lineSpacing) => {
       if (yPos + neededHeight > pageHeight - margin - footerImgHeight - 10) { 
         doc.addPage();
-        await setupNewPage();
+        await setupNewPage(); // This will add letterhead and reset yPos for new page
         return true; 
       }
       return false;
@@ -415,7 +458,7 @@ export default function ReportingPage() {
             yPos += sectionSpacing / 2;
         }
         if (await checkPageBreak(sectionSpacing + lineSpacing * 2)) {
-            
+           // New page started, header already added by setupNewPage
         }
         currentSquadron = report.squadron;
         doc.setFontSize(12);
@@ -565,6 +608,82 @@ export default function ReportingPage() {
     setIsLinkDialogOpen(true);
   };
 
+  const handleBulkAutoLink = async () => {
+    setIsBulkLinking(true);
+    toast({ title: "Bulk Linking Started", description: "Attempting to auto-link unassociated training logs..." });
+
+    try {
+      const allStaff = staffList; // Use already fetched staff list
+      const allTrainingLogs = await fetchLocalTrainingLogs(); // Fetch all logs
+
+      if (!allStaff || allStaff.length === 0) {
+        toast({ variant: "destructive", title: "No Staff Data", description: "Cannot perform bulk linking without staff data." });
+        setIsBulkLinking(false);
+        return;
+      }
+      if (!allTrainingLogs || allTrainingLogs.length === 0) {
+        toast({ title: "No Training Logs", description: "No training logs found to process for bulk linking." });
+        setIsBulkLinking(false);
+        return;
+      }
+
+      const unlinkedLogsPool = allTrainingLogs.filter(log => !log.serviceNumber || log.serviceNumber.trim() === "");
+      console.log(`[BulkLinkDebug] Found ${unlinkedLogsPool.length} logs without a service number.`);
+
+      let linkedLogsCount = 0;
+      const affectedStaffIds = new Set<string>();
+      const batch = writeBatch(db);
+
+      for (const staffMember of allStaff) {
+        if (!staffMember.serviceNumber || !staffMember.id) {
+          console.log(`[BulkLinkDebug] Skipping staff ${staffMember.firstName} ${staffMember.lastName} due to missing service number or ID.`);
+          continue;
+        }
+
+        const potentialMatchesForStaff = unlinkedLogsPool.filter(log => 
+          isConfidentMatchForAutoLink(log, staffMember)
+        );
+        
+        console.log(`[BulkLinkDebug] For ${staffMember.firstName} ${staffMember.lastName} (SN: ${staffMember.serviceNumber}), found ${potentialMatchesForStaff.length} potential unlinked logs.`);
+
+        if (potentialMatchesForStaff.length === 1) {
+          const matchedLog = potentialMatchesForStaff[0];
+          const logRef = doc(db, "trainingLogs", matchedLog.id!);
+          const updates = {
+            serviceNumber: staffMember.serviceNumber,
+            staffName: `${staffMember.lastName}, ${staffMember.firstName}`, // Normalize name
+            rank: staffMember.rank, // Normalize rank
+          };
+          batch.update(logRef, updates);
+          linkedLogsCount++;
+          affectedStaffIds.add(staffMember.id);
+          console.log(`[BulkLinkDebug] Queued update for log ID ${matchedLog.id} to link with SN ${staffMember.serviceNumber}.`);
+        } else if (potentialMatchesForStaff.length > 1) {
+          console.log(`[BulkLinkDebug] Ambiguous match for ${staffMember.firstName} ${staffMember.lastName} (SN: ${staffMember.serviceNumber}) - ${potentialMatchesForStaff.length} logs found. Skipping auto-link.`);
+        }
+      }
+
+      if (linkedLogsCount > 0) {
+        await batch.commit();
+        toast({ 
+          title: "Bulk Auto-Link Successful", 
+          description: `${linkedLogsCount} log(s) linked for ${affectedStaffIds.size} staff member(s). Compliance data will refresh.`
+        });
+      } else {
+        toast({ title: "Bulk Auto-Link", description: "No unambiguous matches found to automatically link." });
+      }
+
+    } catch (err: any) {
+      console.error("Bulk auto-link error:", err);
+      toast({ variant: "destructive", title: "Bulk Link Error", description: `An error occurred: ${err.message}` });
+    } finally {
+      setIsBulkLinking(false);
+      queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+      // Re-fetch compliance reports is handled by useEffect on data change
+    }
+  };
+
 
   const isLoadingAny = isLoadingStaff || isLoadingLogs;
   const errorAny = errorStaff || errorLogs;
@@ -583,10 +702,16 @@ export default function ReportingPage() {
                 </CardDescription>
               </div>
             </div>
-             <Button onClick={handleExportFullComplianceSummaryPdf} size="lg" variant="outline" className="w-full sm:w-auto">
-              <Download className="mr-2 h-5 w-5" />
-              Export Full Summary (PDF)
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                 <Button onClick={handleBulkAutoLink} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isBulkLinking || isLoadingAny}>
+                    {isBulkLinking ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" />}
+                    Bulk Auto-Link Logs
+                </Button>
+                <Button onClick={handleExportFullComplianceSummaryPdf} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isBulkLinking || isLoadingAny}>
+                  <Download className="mr-2 h-5 w-5" />
+                  Export Full Summary (PDF)
+                </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -633,68 +758,64 @@ export default function ReportingPage() {
                 <TableBody>
                   {complianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
-                      <TableRow
-                        className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10"
-                        onClick={() => toggleCollapsible(report.staffMemberId)}
-                      >
-                        <TableCell>
-                          <Button variant="ghost" size="sm" className="w-9 p-0">
-                            {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                            <span className="sr-only">Toggle details for {report.staffMemberName}</span>
-                          </Button>
-                        </TableCell>
-                        <TableCell>{report.squadron}</TableCell>
-                        <TableCell className="font-medium">
-                          {report.staffMemberRank} {report.staffMemberName}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={report.complianceStatusVariant}>
-                            {report.complianceStatusText === "Compliant" && <ShieldCheck className="inline h-4 w-4 mr-1" />}
-                            {report.complianceStatusText === "Partially Compliant" && <ShieldAlert className="inline h-4 w-4 mr-1" />}
-                            {report.complianceStatusText === "Not Compliant" && <ShieldOff className="inline h-4 w-4 mr-1" />}
-                            {report.complianceStatusText}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right space-x-1">
-                           <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs">
-                              <LinkIcon className="h-4 w-4" />
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report">
-                              <Download className="h-4 w-4" />
-                          </Button>
-                          {report.complianceStatusText !== "Compliant" && report.email && (
-                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report">
-                              <Mail className="h-4 w-4" />
+                        <TableRow className="cursor-pointer hover:bg-muted/50 data-[state=open]:bg-muted/10" onClick={() => toggleCollapsible(report.staffMemberId)}>
+                          <TableCell>
+                              <Button variant="ghost" size="sm" className="w-9 p-0" aria-label="Toggle details">
+                                {openCollapsible === report.staffMemberId ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </Button>
+                          </TableCell>
+                          <TableCell>{report.squadron}</TableCell>
+                          <TableCell className="font-medium">
+                            {report.staffMemberRank} {report.staffMemberName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={report.complianceStatusVariant}>
+                              {report.complianceStatusText === "Compliant" && <ShieldCheck className="inline h-4 w-4 mr-1" />}
+                              {report.complianceStatusText === "Partially Compliant" && <ShieldAlert className="inline h-4 w-4 mr-1" />}
+                              {report.complianceStatusText === "Not Compliant" && <ShieldOff className="inline h-4 w-4 mr-1" />}
+                              {report.complianceStatusText}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right space-x-1">
+                             <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleOpenLinkDialog(report);}} title="Find & Link Unassociated Logs" disabled={isBulkLinking}>
+                                <LinkIcon className="h-4 w-4" />
                             </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                      {openCollapsible === report.staffMemberId && (
-                        <TableRow className="bg-muted/50 dark:bg-muted/30">
-                          <TableCell colSpan={5}>
-                            <div className="p-4">
-                              <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
-                              <ul className="space-y-2">
-                                {report.criteriaChecks.map(criterion => (
-                                  <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                    <div className="flex items-center">
-                                      {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                      <div>
-                                        <span>{criterion.name}:</span>
-                                        <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                          {criterion.isMet ? "Met" : "Not Met"}
-                                        </span>
-                                        <p className="text-xs text-muted-foreground">{criterion.details}</p>
-                                      </div>
-                                    </div>
-                                    {getExpiryWarningBadge(criterion)}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
+                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report" disabled={isBulkLinking}>
+                                <Download className="h-4 w-4" />
+                            </Button>
+                            {report.complianceStatusText !== "Compliant" && report.email && (
+                              <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report" disabled={isBulkLinking}>
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
-                      )}
+                        {openCollapsible === report.staffMemberId && (
+                          <TableRow className="bg-muted/50 dark:bg-muted/30">
+                            <TableCell colSpan={5}>
+                              <div className="p-4">
+                                <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
+                                <ul className="space-y-2">
+                                  {report.criteriaChecks.map(criterion => (
+                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                      <div className="flex items-center">
+                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                        <div>
+                                          <span>{criterion.name}:</span>
+                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                            {criterion.isMet ? "Met" : "Not Met"}
+                                          </span>
+                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                        </div>
+                                      </div>
+                                      {getExpiryWarningBadge(criterion)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
                     </React.Fragment>
                   ))}
                 </TableBody>
@@ -756,10 +877,12 @@ export default function ReportingPage() {
           onLogsLinked={() => {
             queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
             queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] }); 
-            toast({ title: "Logs Linked", description: "Compliance data is refreshing."});
+            // The useEffect in ReportingPage will re-calculate complianceReports
+            toast({ title: "Logs Linked", description: "Compliance data will refresh."});
           }}
         />
       )}
     </div>
   );
 }
+
