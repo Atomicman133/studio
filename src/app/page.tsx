@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2, CalendarClock } from "lucide-react";
-import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate, parseISO } from "date-fns";
+import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate, parseISO, startOfDay } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
 import type { TrainingLog } from "./training/training-schema";
@@ -80,12 +80,10 @@ async function fetchVisits(): Promise<SquadronVisit[]> {
 // --- Fetch Scheduled Meetings (Upcoming) ---
 async function fetchDashboardScheduledMeetings(): Promise<ScheduledMeeting[]> {
   const scheduledMeetingsCollectionRef = collection(db, 'scheduledMeetings');
-  // Fetch meetings where dateTime is in the future, order by soonest first, limit to e.g., 5
   const q = query(
     scheduledMeetingsCollectionRef, 
     where('dateTime', '>=', Timestamp.now()), 
     orderBy('dateTime', 'asc'),
-    // limit(5) // Optional: limit the number of meetings shown on dashboard
   );
   const querySnapshot = await getDocs(q);
   return querySnapshot.docs.map(doc => {
@@ -122,22 +120,17 @@ const processComplianceReportsForDashboard = (
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
-        const completionDate = new Date(selectedLog.completionDate);
+        const completionDate = startOfDay(new Date(selectedLog.completionDate));
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
         } else {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          const today = startOfDay(new Date());
 
           if (criterion.yearsToExpire) {
-            const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-            // Check if 'today' is strictly BEFORE 'expiryDate'.
-            // If completion is 1st Jan 2020, and it's valid for 3 years, it expires ON 1st Jan 2023.
-            // So it's valid up to and including 31st Dec 2022.
-            // isBefore(today, expiryDate) means valid IF today is 31st Dec 2022 for a 1st Jan 2023 expiry.
-            if (isBefore(today, expiryDate)) { 
-              isMet = true;
-              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(expiryDate, 'dd/MM/yyyy')}.`;
+            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
+            isMet = isBefore(today, expiryDate);
+            if (isMet) {
+              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(addDays(expiryDate, -1), 'dd/MM/yyyy')}.`;
             } else {
               details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
             }
@@ -149,17 +142,28 @@ const processComplianceReportsForDashboard = (
       }
       return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
     });
+    
+    const metCount = criteriaChecks.filter(c => c.isMet).length;
+    let complianceStatusText: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
+    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
+      complianceStatusText = "Compliant";
+    } else if (metCount >= 3) {
+      complianceStatusText = "Partially Compliant";
+    }
 
-    const isCompliant = criteriaChecks.every(c => c.isMet);
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
-      isCompliant,
+      isCompliant: complianceStatusText === "Compliant", // Based on new status text
       criteriaChecks,
       email: staff.email,
       staffServiceNumberActual: staff.serviceNumber,
+      complianceStatusText, // Storing the detailed status text
+      complianceStatusVariant: // This will be set in the ReportingPage based on status text
+        complianceStatusText === "Compliant" ? "default" :
+        complianceStatusText === "Partially Compliant" ? "secondary" : "destructive",
     };
   });
 };
@@ -185,6 +189,7 @@ interface UpcomingActionItem {
 
 const chartConfig = {
   compliant: { label: "Compliant", color: "hsl(var(--chart-1))" },
+  partiallyCompliant: { label: "Partially Compliant", color: "hsl(var(--chart-2))" },
   nonCompliant: { label: "Non-Compliant", color: "hsl(var(--destructive))" },
 } satisfies ChartConfig;
 
@@ -215,12 +220,16 @@ export default function DashboardPage() {
   });
 
   const { data: scheduledMeetings = [], isLoading: isLoadingScheduledMeetings, error: errorScheduledMeetings } = useQuery<ScheduledMeeting[], Error>({
-    queryKey: ['dashboardScheduledMeetings'], // Unique key for dashboard fetch
+    queryKey: ['dashboardScheduledMeetings'], 
     queryFn: fetchDashboardScheduledMeetings,
     enabled: commonEnabledCondition,
   });
 
-  const [complianceData, setComplianceData] = React.useState<{ compliant: number; nonCompliant: number } | null>(null);
+  const [complianceData, setComplianceData] = React.useState<{
+    compliant: number;
+    partiallyCompliant: number;
+    nonCompliant: number;
+  } | null>(null);
   const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
   const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
 
@@ -234,21 +243,31 @@ export default function DashboardPage() {
     if (staffList && staffList.length > 0 && trainingLogs && trainingLogs.length > 0) {
       return processComplianceReportsForDashboard(staffList, trainingLogs);
     }
-    return []; // Return empty array if data is not ready
+    return [];
   }, [staffList, trainingLogs]);
 
   React.useEffect(() => {
     if (processedReports.length > 0) {
-      const compliantCount = processedReports.filter(r => r.isCompliant).length;
-      const nonCompliantCount = processedReports.length - compliantCount;
+      const compliantCount = processedReports.filter(r => r.complianceStatusText === "Compliant").length;
+      const partiallyCompliantCount = processedReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+      const nonCompliantCount = processedReports.filter(r => r.complianceStatusText === "Not Compliant").length;
+
       setComplianceData(prevData => {
-        if (prevData && prevData.compliant === compliantCount && prevData.nonCompliant === nonCompliantCount) {
+        if (
+          prevData &&
+          prevData.compliant === compliantCount &&
+          prevData.partiallyCompliant === partiallyCompliantCount &&
+          prevData.nonCompliant === nonCompliantCount
+        ) {
           return prevData;
         }
-        return { compliant: compliantCount, nonCompliant: nonCompliantCount };
+        return { compliant: compliantCount, partiallyCompliant: partiallyCompliantCount, nonCompliant: nonCompliantCount };
       });
-    } else if (staffList.length > 0) { // If staff exists but no reports (e.g. no logs), show 0%
-        setComplianceData({ compliant: 0, nonCompliant: staffList.length});
+    } else if (staffList.length > 0) {
+        setComplianceData(prevData => {
+             if (prevData && prevData.compliant === 0 && prevData.partiallyCompliant === 0 && prevData.nonCompliant === staffList.length) return prevData;
+             return { compliant: 0, partiallyCompliant: 0, nonCompliant: staffList.length};
+        });
     } else {
       setComplianceData(null); 
     }
@@ -280,7 +299,7 @@ export default function DashboardPage() {
         }
       });
     });
-    return expiring.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5); // Show top 5
+    return expiring.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5);
   }, [staffList, trainingLogs]);
 
   React.useEffect(() => {
@@ -336,7 +355,7 @@ export default function DashboardPage() {
         }
       });
     });
-    return actions.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5); // Show top 5
+    return actions.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5);
   }, [audits, visits]);
 
   React.useEffect(() => {
@@ -348,9 +367,10 @@ export default function DashboardPage() {
 
   const pieData = complianceData
     ? [
-        { name: 'Compliant', value: complianceData.compliant, fill: "hsl(var(--chart-1))" },
-        { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: "hsl(var(--destructive))" },
-      ].filter(item => item.value > 0) // Filter out zero values for cleaner pie chart
+        { name: 'Compliant', value: complianceData.compliant, fill: chartConfig.compliant.color },
+        { name: 'Partially Compliant', value: complianceData.partiallyCompliant, fill: chartConfig.partiallyCompliant.color },
+        { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: chartConfig.nonCompliant.color },
+      ].filter(item => item.value > 0)
     : [];
 
   const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits || isLoadingScheduledMeetings;
@@ -440,11 +460,19 @@ export default function DashboardPage() {
           <CardContent>
             {complianceData && (staffList && staffList.length > 0) ? (
               <>
-                <div className="text-2xl font-bold mb-2">
-                  {((complianceData.compliant / (complianceData.compliant + complianceData.nonCompliant || 1)) * 100).toFixed(1)}%
+                <div className="flex flex-col items-center mb-1 text-center">
+                  <div className="text-xl font-bold" style={{ color: chartConfig.compliant.color }}>
+                    {complianceData.compliant} Compliant
+                  </div>
+                  <div className="text-xl font-bold" style={{ color: chartConfig.partiallyCompliant.color }}>
+                    {complianceData.partiallyCompliant} Partially Compliant
+                  </div>
+                  <div className="text-xl font-bold" style={{ color: chartConfig.nonCompliant.color }}>
+                    {complianceData.nonCompliant} Non-Compliant
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mb-4">
-                  {complianceData.compliant} of {complianceData.compliant + complianceData.nonCompliant} staff are compliant.
+                <p className="text-xs text-muted-foreground text-center mb-4">
+                  Out of {complianceData.compliant + complianceData.partiallyCompliant + complianceData.nonCompliant} total staff.
                 </p>
                 <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[250px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -465,7 +493,7 @@ export default function DashboardPage() {
                         labelLine={false}
                       >
                         {pieData.map((entry) => (
-                          <Cell key={entry.name} fill={entry.fill} />
+                          <Cell key={entry.name} fill={entry.fill as string} />
                         ))}
                       </Pie>
                        <Legend content={<ChartTooltipContent nameKey="name" hideIndicator />} />
@@ -575,7 +603,7 @@ export default function DashboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {scheduledMeetings.slice(0,5).map((meeting) => ( // Display top 5 upcoming
+                  {scheduledMeetings.slice(0,5).map((meeting) => ( 
                     <TableRow key={meeting.id}>
                       <TableCell className="font-medium">{meeting.title}</TableCell>
                       <TableCell>{format(meeting.dateTime, "PP p")}</TableCell>
