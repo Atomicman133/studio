@@ -9,13 +9,14 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  updateProfile, // Import updateProfile
+  updateProfile, 
+  sendPasswordResetEmail, // Import sendPasswordResetEmail
 } from 'firebase/auth';
 import * as React from 'react';
 import { auth } from '@/lib/firebase/config';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import type { ProfileUpdateFormData } from '@/app/profile/profile-schema'; // Import the profile form data type
+import type { ProfileUpdateFormData } from '@/app/profile/profile-schema'; 
 
 interface User extends FirebaseUser {
   customClaims?: ParsedToken;
@@ -28,7 +29,8 @@ interface AuthContextType {
   signUpWithEmail: (email: string, pass: string) => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
-  updateUserProfile: (data: ProfileUpdateFormData) => Promise<void>; // Add this
+  updateUserProfile: (data: ProfileUpdateFormData) => Promise<void>;
+  changeUserPassword: () => Promise<void>; // Add this
 }
 
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined);
@@ -117,16 +119,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await updateProfile(auth.currentUser, {
         displayName: data.displayName,
-        photoURL: data.photoURL || null, // Send null if empty string to clear it
+        photoURL: data.photoURL || null, 
       });
-      // Manually update the local user state for immediate UI feedback
+      
       setUser(prevUser => {
         if (!prevUser) return null;
-        // Create a new object for the user state to ensure re-render
-        const updatedFirebaseUser = { ...auth.currentUser } as FirebaseUser; // Get the latest from Firebase auth
+        const updatedFirebaseUser = { ...auth.currentUser } as FirebaseUser; 
         return {
-          ...prevUser, // Spread previous user to keep customClaims etc.
-          ...updatedFirebaseUser, // Spread the potentially updated FirebaseUser part
+          ...prevUser, 
+          ...updatedFirebaseUser, 
           displayName: data.displayName,
           photoURL: data.photoURL || null,
         } as User;
@@ -138,8 +139,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const changeUserPassword = async () => {
+    if (!auth.currentUser || !auth.currentUser.email) {
+      toast({ variant: 'destructive', title: 'Error', description: 'No authenticated user or email found.' });
+      return;
+    }
+    // It's generally good practice to ensure the email is verified before sending a password reset,
+    // but for password change of an ALREADY LOGGED IN user, we can assume they have access to their email.
+    // Firebase sendPasswordResetEmail also implicitly handles this.
+    try {
+      await sendPasswordResetEmail(auth, auth.currentUser.email);
+      toast({ title: 'Password Reset Email Sent', description: 'Please check your inbox (and spam folder) for a link to reset your password.' });
+    } catch (error: any) {
+      console.error('Password change (reset email) error:', error);
+      toast({ variant: 'destructive', title: 'Password Change Error', description: error.message });
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signUpWithEmail, signInWithEmail, logout, updateUserProfile }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signUpWithEmail, signInWithEmail, logout, updateUserProfile, changeUserPassword }}>
       {children}
     </AuthContext.Provider>
   );
