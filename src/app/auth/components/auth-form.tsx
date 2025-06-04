@@ -14,11 +14,15 @@ import { emailPasswordSchema, signUpSchema, type EmailPasswordFormData, type Sig
 import { useAuth } from "@/contexts/auth-context";
 import { Loader2 } from "lucide-react";
 import Image from "next/image"; // For Google icon
+import { sendPasswordResetEmail } from "firebase/auth"; // Import for password reset
+import { auth } from "@/lib/firebase/config"; // Import auth instance
+import { useToast } from "@/hooks/use-toast"; // Import useToast
 
 export function AuthForm() {
   const { signInWithGoogle, signUpWithEmail, signInWithEmail } = useAuth();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState("login");
+  const { toast } = useToast(); // Initialize toast
 
   const loginForm = useForm<EmailPasswordFormData>({
     resolver: zodResolver(emailPasswordSchema),
@@ -47,6 +51,31 @@ export function AuthForm() {
     await signInWithGoogle();
     setIsSubmitting(false);
   }
+
+  const handlePasswordReset = async () => {
+    const email = loginForm.getValues("email");
+    if (!email) {
+      loginForm.setError("email", { type: "manual", message: "Please enter your email to reset password." });
+      // toast({ variant: "destructive", title: "Email Required", description: "Please enter your email address to reset your password."});
+      return;
+    }
+    // Basic email validation, Zod resolver handles more complex cases on submit
+    if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(email)) {
+        loginForm.setError("email", { type: "manual", message: "Please enter a valid email address." });
+        // toast({ variant: "destructive", title: "Invalid Email", description: "Please enter a valid email address."});
+        return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      toast({ title: "Password Reset Email Sent", description: "If an account exists for this email, a password reset link has been sent. Please check your inbox (and spam folder)." });
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      toast({ variant: "destructive", title: "Password Reset Error", description: error.message });
+    }
+    setIsSubmitting(false);
+  };
 
   return (
     <Card className="w-full max-w-md shadow-xl">
@@ -82,7 +111,18 @@ export function AuthForm() {
                   name="password"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Password</FormLabel>
+                      <div className="flex justify-between items-center">
+                        <FormLabel>Password</FormLabel>
+                        <Button 
+                          variant="link" 
+                          type="button" 
+                          onClick={handlePasswordReset} 
+                          className="text-xs h-auto p-0 text-muted-foreground hover:text-primary disabled:text-muted-foreground/70"
+                          disabled={isSubmitting}
+                        >
+                          Forgot password?
+                        </Button>
+                      </div>
                       <FormControl>
                         <Input type="password" placeholder="••••••••" {...field} disabled={isSubmitting} />
                       </FormControl>
@@ -176,3 +216,4 @@ export function AuthForm() {
     </Card>
   );
 }
+
