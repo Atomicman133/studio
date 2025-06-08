@@ -749,7 +749,6 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
     }
     setIsImportingAccomplishments(true);
 
-    // Fetch current staff list to match against
     const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
     const staffMapByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
 
@@ -833,9 +832,9 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                   continue;
               }
               
-              const matchedStaff = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
+              const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
 
-              if (!matchedStaff) {
+              if (!matchedStaffFromMap) {
                   errors.push(`Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`);
                   continue; 
               }
@@ -848,25 +847,25 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
               const comment = csvRowData["Comment"]?.trim();
               
               if (!effectiveDateStr) {
-                  errors.push(`Row ${i + 1} (UID: ${matchedStaff.serviceNumber}): Missing "EffectiveDate".`);
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing "EffectiveDate".`);
                   continue;
               }
               
               const effectiveDate = parseDate(effectiveDateStr);
               if (!effectiveDate) {
-                  errors.push(`Row ${i + 1} (UID: ${matchedStaff.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}".`);
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}".`);
                   continue;
               }
               
-              const staffUpdateData = staffUpdates.get(matchedStaff.id!) || { serviceHistoryToAdd: [], ...matchedStaff };
+              const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...matchedStaffFromMap };
 
 
               if (changeType === "enrolment") {
                 staffUpdateData.joinDate = effectiveDate;
               } else if (changeType === "position") {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaff.serviceNumber}): 'Details' field required for Position change type.`); continue; }
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Position change type.`); continue; }
                 const positionEndDate = endDateStr ? parseDate(endDateStr) : null;
-                if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaff.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); continue; }
+                if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); continue; }
                 
                 staffUpdateData.serviceHistoryToAdd.push({
                     id: crypto.randomUUID(), type: "Position", item: details, 
@@ -876,9 +875,9 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                     staffUpdateData.role = details;
                 }
               } else if (changeType === "rank") {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaff.serviceNumber}): 'Details' field required for Rank change type.`); continue; }
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Rank change type.`); continue; }
                 const parsedRank = parseFullRankNameToAbbreviation(details);
-                if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaff.serviceNumber}): Could not parse rank from Details: "${details}".`); continue; }
+                if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Could not parse rank from Details: "${details}".`); continue; }
                 
                 staffUpdateData.serviceHistoryToAdd.push({
                     id: crypto.randomUUID(), type: "Rank", item: parsedRank, 
@@ -887,23 +886,23 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                 if (statusName === "current" && parsedRank !== staffUpdateData.rank) {
                     staffUpdateData.rank = parsedRank;
                 }
-              } else { // Default to creating a training log for "Accomplishment" or other types
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaff.serviceNumber}): Missing 'Details' for accomplishment/training log.`); continue; }
+              } else { 
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing 'Details' for accomplishment/training log.`); continue; }
                 const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
-                  rank: parsedNameRankUid.rank || matchedStaff.rank, // Prefer parsed, fallback to staff's current
-                  staffName: `${parsedNameRankUid.lastName || matchedStaff.lastName}, ${parsedNameRankUid.firstName || matchedStaff.firstName}`,
-                  squadron: csvRowData["Unit_1"] || matchedStaff.squadron || "N/A", 
-                  currentRole: matchedStaff.role || "N/A",  
+                  rank: parsedNameRankUid.rank || matchedStaffFromMap.rank, 
+                  staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
+                  squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A", 
+                  currentRole: matchedStaffFromMap.role || "N/A",  
                   courseName: details,
                   completionDate: effectiveDate,
                   qualificationAchieved: details, 
                   instructorQualification: "", 
-                  achievementDetails: comment || "", // Use comment for achievement details
-                  serviceNumber: matchedStaff.serviceNumber, 
+                  achievementDetails: comment || "", 
+                  serviceNumber: matchedStaffFromMap.serviceNumber, 
                 };
                 logsToAdd.push(newLog as Omit<TrainingLog, 'id'>);
               }
-              staffUpdates.set(matchedStaff.id!, staffUpdateData);
+              staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
         }
 
@@ -914,7 +913,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         for (const log of logsToAdd) {
            try {
                const collectionRef = collection(db, 'trainingLogs');
-               const { id, ...logDataForFirestore } = log; // exclude potential local id if any
+               const { id, ...logDataForFirestore } = log; 
                 const dataToSave: any = { 
                     ...logDataForFirestore,
                     completionDate: Timestamp.fromDate(log.completionDate),
@@ -924,7 +923,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                         delete dataToSave[key as keyof typeof dataToSave];
                     }
                 });
-               batch.set(doc(collectionRef), dataToSave); // Use set with new doc for new logs
+               batch.set(doc(collectionRef), dataToSave); 
                trainingLogsImportedCount++;
            } catch (err: any) {
                errors.push(`Failed to stage training log "${log.courseName}" for ${log.staffName}: ${err.message}`);
@@ -934,17 +933,24 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         staffUpdates.forEach((update, staffId) => {
             const staffDocRef = doc(db, "staff", staffId);
             const updatePayload: any = {};
-            if (update.joinDate !== undefined && update.joinDate !== staffMapByServiceNumber.get(matchedStaff.serviceNumber!)?.joinDate) { // Check if joinDate is part of this update
+
+            const originalStaffMember = currentStaffList.find(s => s.id === staffId);
+            if (!originalStaffMember) {
+                errors.push(`Consistency error: Could not find original staff data for ID ${staffId} during batch update.`);
+                return; 
+            }
+
+            if (update.joinDate !== undefined && update.joinDate !== originalStaffMember.joinDate) {
                  updatePayload.joinDate = Timestamp.fromDate(new Date(update.joinDate!));
             }
-            if (update.role !== undefined && update.role !== staffMapByServiceNumber.get(matchedStaff.serviceNumber!)?.role) {
+            if (update.role !== undefined && update.role !== originalStaffMember.role) {
                  updatePayload.role = update.role;
             }
-            if (update.rank !== undefined && update.rank !== staffMapByServiceNumber.get(matchedStaff.serviceNumber!)?.rank) {
+            if (update.rank !== undefined && update.rank !== originalStaffMember.rank) {
                  updatePayload.rank = update.rank;
             }
-            // For service history, merge with existing and add new ones
-            const existingHistory = staffMapByServiceNumber.get(matchedStaff.serviceNumber!)?.serviceHistory || [];
+            
+            const existingHistory = originalStaffMember.serviceHistory || [];
             const newHistoryEntries = update.serviceHistoryToAdd.map(entry => ({
                 ...entry,
                 effectiveDate: Timestamp.fromDate(new Date(entry.effectiveDate)),
