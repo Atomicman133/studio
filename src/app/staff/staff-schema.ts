@@ -19,6 +19,16 @@ export const RANKS = [
   "GPCAPT(AAFC)",
 ] as const;
 
+export const serviceHistoryEntrySchema = z.object({
+  id: z.string().uuid().optional(),
+  type: z.enum(["Rank", "Position"]),
+  item: z.string().describe("Abbreviated rank or position title"),
+  effectiveDate: z.date({ required_error: "Effective date is required for service history entry" }),
+  endDate: z.date().optional().nullable(),
+  notes: z.string().optional(),
+});
+export type ServiceHistoryEntry = z.infer<typeof serviceHistoryEntrySchema>;
+
 export const staffMemberSchema = z.object({
   id: z.string().uuid().optional(), // Will be generated on creation
   serviceNumber: z.string().min(1, "Service number is required"),
@@ -27,10 +37,11 @@ export const staffMemberSchema = z.object({
   lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Invalid email address").min(1, "Email is required"),
   phone: z.string().optional(),
-  role: z.string().optional(), // Changed: Role is now optional
-  joinDate: z.date().optional().nullable(), // Allow null for joinDate
+  role: z.string().optional(),
+  joinDate: z.date().optional().nullable(),
   squadron: z.string().optional(),
   address: z.string().optional(),
+  serviceHistory: z.array(serviceHistoryEntrySchema).optional().default([]),
 });
 
 export type StaffMember = z.infer<typeof staffMemberSchema>;

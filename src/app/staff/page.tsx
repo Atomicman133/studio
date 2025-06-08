@@ -1,8 +1,7 @@
-
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -58,7 +57,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import type { StaffMember } from "./staff-schema";
+import type { StaffMember, ServiceHistoryEntry } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
 import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
 import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
@@ -86,29 +85,15 @@ type StaffGroup = {
 const STAFF_TRAINING_LOGS_QUERY_KEY = 'staffTrainingLogs';
 
 async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promise<TrainingLog[]> {
-  if (!staffMember) return [];
+  if (!staffMember || !staffMember.serviceNumber) return []; // Require service number for this fetch
 
   const logsCollectionRef = collection(db, 'trainingLogs');
   
-  let q;
-  if (staffMember.id) {
-     q = query(
-        logsCollectionRef,
-        where('squadron', '==', staffMember.squadron),
-        where('rank', '==', staffMember.rank), 
-        where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`), 
-        orderBy('completionDate', 'desc')
-    );
-  } else {
-      q = query(
-          logsCollectionRef,
-          where('staffName', '==', `${staffMember.lastName}, ${staffMember.firstName}`),
-          where('rank', '==', staffMember.rank),
-          where('squadron', '==', staffMember.squadron),
-          orderBy('completionDate', 'desc')
-      );
-  }
-
+  const q = query(
+    logsCollectionRef,
+    where('serviceNumber', '==', staffMember.serviceNumber),
+    orderBy('completionDate', 'desc')
+  );
 
   try {
     const querySnapshot = await getDocs(q);
@@ -117,7 +102,7 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
       ...convertTrainingLogTimestamps(doc.data()), 
     })) as TrainingLog[];
   } catch (error) {
-    console.error("Error fetching training logs for staff:", error);
+    console.error("Error fetching training logs for staff SN:", staffMember.serviceNumber, error);
     return []; 
   }
 }
@@ -454,7 +439,7 @@ export default function StaffPage() {
           
           const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
 
-          const memberDataPayload: Omit<StaffMember, 'id'> & { id?: string } = {
+          const memberDataPayload: Omit<StaffMember, 'id' | 'serviceHistory'> & { id?: string; serviceHistory?: ServiceHistoryEntry[] } = {
             serviceNumber: serviceNumber,
             rank: rank, 
             firstName: firstName,
@@ -464,11 +449,13 @@ export default function StaffPage() {
             role: roleToSave,
             squadron: squadron,
             address: address,
-            joinDate: existingStaffMember?.joinDate || null, 
+            joinDate: existingStaffMember?.joinDate || null,
+            // serviceHistory will be handled separately by the other CSV import
           };
 
           if (existingStaffMember) { 
-            memberDataPayload.id = existingStaffMember.id; 
+            memberDataPayload.id = existingStaffMember.id;
+            memberDataPayload.serviceHistory = existingStaffMember.serviceHistory || []; // Preserve existing service history
             if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
                 continue;
@@ -490,6 +477,7 @@ export default function StaffPage() {
               })
             );
           } else { 
+            memberDataPayload.serviceHistory = []; // New staff start with empty history
             if (email && existingEmails.has(email)) {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
               continue;
@@ -497,7 +485,7 @@ export default function StaffPage() {
             addPromises.push(
               addStaffMutation.mutateAsync(memberDataPayload as Omit<StaffMember, 'id'>).then((newId) => {
                 importedCount++;
-                existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string }); 
+                existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string, serviceHistory: [] }); 
                 if(email) existingEmails.add(email);      
               }).catch((addError: any) => {
                 let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`;
@@ -558,25 +546,25 @@ export default function StaffPage() {
 
   const filteredMeetings: Meeting[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("TODO: Implement backend fetch for meetings for staff member:", viewingStaffMember.id);
+    // console.warn("TODO: Implement backend fetch for meetings for staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
   const filteredPdps: Pdp[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("TODO: Implement backend fetch for PDPs for staff member:", viewingStaffMember.id);
+    // console.warn("TODO: Implement backend fetch for PDPs for staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
   const filteredDisciplineActions: DisciplineAction[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("TODO: Implement backend fetch for discipline actions for staff member:", viewingStaffMember.id);
+    // console.warn("TODO: Implement backend fetch for discipline actions for staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
   const filteredAudits: SafetyAudit[] = React.useMemo(() => {
     if (!viewingStaffMember) return [];
-    console.warn("TODO: Implement backend fetch for audits involving staff member:", viewingStaffMember.id);
+    // console.warn("TODO: Implement backend fetch for audits involving staff member:", viewingStaffMember.id);
     return [];
   }, [viewingStaffMember]);
 
@@ -750,7 +738,7 @@ export default function StaffPage() {
             <li>Other headers (e.g., MemberType, IsPrimary, Active, ContactEmail1, ContactName, etc.) will be ignored.</li>
           </ul>
           If a record with a matching `MemberUID` is found, it will be updated. Otherwise, a new record will be created.
-          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates/creations skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones.
+          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates/creations skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones. Service History is not updated by this CSV import; use the "Import Accomplishments" CSV on the Training Overview page for that.
         </AlertDescription>
       </Alert>
 
@@ -818,6 +806,43 @@ export default function StaffPage() {
                       </Card>
                         
                         <Accordion type="multiple" collapsible className="w-full">
+                          <AccordionItem value="service-history">
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                                <History className="h-5 w-5" /> Service History ({(viewingStaffMember.serviceHistory || []).length})
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              <ScrollArea className="max-h-[300px] border rounded-md">
+                                {(viewingStaffMember.serviceHistory || []).length === 0 ? (
+                                  <p className="text-sm text-muted-foreground p-4 text-center">No service history recorded.</p>
+                                ) : (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Type</TableHead>
+                                        <TableHead>Item</TableHead>
+                                        <TableHead>Effective Date</TableHead>
+                                        <TableHead>End Date</TableHead>
+                                        <TableHead>Notes</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {(viewingStaffMember.serviceHistory || []).sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime()).map(entry => (
+                                        <TableRow key={entry.id}>
+                                          <TableCell><Badge variant={entry.type === "Rank" ? "secondary" : "outline"}>{entry.type}</Badge></TableCell>
+                                          <TableCell>{entry.item}</TableCell>
+                                          <TableCell>{format(new Date(entry.effectiveDate), "PP")}</TableCell>
+                                          <TableCell>{entry.endDate ? format(new Date(entry.endDate), "PP") : "N/A"}</TableCell>
+                                          <TableCell className="truncate max-w-xs">{entry.notes || "N/A"}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                )}
+                              </ScrollArea>
+                            </AccordionContent>
+                          </AccordionItem>
                           <AccordionItem value="training">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
@@ -983,4 +1008,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
