@@ -337,6 +337,25 @@ export default function TrainingPage() {
   const [accomplishmentCsvInputRef, setAccomplishmentCsvInputRef] = React.useState<HTMLInputElement | null>(null);
   const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false);
 
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isImportingAccomplishments) {
+        event.preventDefault();
+        event.returnValue = "Import is in progress. Are you sure you want to leave? This may interrupt the import.";
+      }
+    };
+
+    if (isImportingAccomplishments) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    } else {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isImportingAccomplishments]);
+
 
   const squadronStaffGroups = React.useMemo(() => {
     const logsBySquadron: Record<string, TrainingLog[]> = {};
@@ -438,7 +457,7 @@ export default function TrainingPage() {
     if (data.certificateFile) {
       try {
         const { name, dataUrl } = await convertFileToDataUrl(data.certificateFile);
-        certificateUpdates = { certificateFileName: name, certificateDataUrl: dataUrl };
+        certificateUpdates = { certificateFileName: name, dataUrl: dataUrl };
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
@@ -754,6 +773,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
 
     const reader = new FileReader();
     reader.onload = async (e) => { 
+      const skippedRecordsLog: string[] = [];
       try {
         const text = e.target?.result as string;
         if (!text) {
@@ -822,6 +842,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
               const surnameField = csvRowData["Surname"];
               if (!surnameField) {
                   errors.push(`Row ${i + 1}: Missing "Surname" field content.`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Missing "Surname" field.`);
                   continue;
               }
 
@@ -829,13 +850,16 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
 
               if (!parsedNameRankUid.memberUID) {
                   errors.push(`Row ${i + 1}: Could not parse MemberUID from Surname field: "${surnameField}".`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Could not parse MemberUID from "${surnameField}".`);
                   continue;
               }
               
               const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
 
               if (!matchedStaffFromMap) {
-                  errors.push(`Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`);
+                  const skipMsg = `Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`;
+                  errors.push(skipMsg);
+                  skippedRecordsLog.push(skipMsg);
                   continue; 
               }
               
@@ -848,24 +872,26 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
               
               if (!effectiveDateStr) {
                   errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing "EffectiveDate".`);
+                  skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Missing "EffectiveDate".`);
                   continue;
               }
               
               const effectiveDate = parseDate(effectiveDateStr);
               if (!effectiveDate) {
                   errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}".`);
+                  skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Invalid "EffectiveDate" ("${effectiveDateStr}").`);
                   continue;
               }
               
-              const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...matchedStaffFromMap };
+              const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...JSON.parse(JSON.stringify(matchedStaffFromMap)) };
 
 
               if (changeType === "enrolment") {
                 staffUpdateData.joinDate = effectiveDate;
               } else if (changeType === "position") {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Position change type.`); continue; }
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Position change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change missing 'Details'.`); continue; }
                 const positionEndDate = endDateStr ? parseDate(endDateStr) : null;
-                if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); continue; }
+                if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change invalid 'EndDate' ("${endDateStr}").`); continue; }
                 
                 staffUpdateData.serviceHistoryToAdd.push({
                     id: crypto.randomUUID(), type: "Position", item: details, 
@@ -875,9 +901,9 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                     staffUpdateData.role = details;
                 }
               } else if (changeType === "rank") {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Rank change type.`); continue; }
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Rank change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change missing 'Details'.`); continue; }
                 const parsedRank = parseFullRankNameToAbbreviation(details);
-                if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Could not parse rank from Details: "${details}".`); continue; }
+                if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Could not parse rank from Details: "${details}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change invalid rank in 'Details' ("${details}").`); continue; }
                 
                 staffUpdateData.serviceHistoryToAdd.push({
                     id: crypto.randomUUID(), type: "Rank", item: parsedRank, 
@@ -887,7 +913,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                     staffUpdateData.rank = parsedRank;
                 }
               } else { 
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing 'Details' for accomplishment/training log.`); continue; }
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing 'Details' for accomplishment/training log.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Accomplishment missing 'Details'.`); continue; }
                 const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
                   rank: parsedNameRankUid.rank || matchedStaffFromMap.rank, 
                   staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
@@ -953,12 +979,23 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             const existingHistory = originalStaffMember.serviceHistory || [];
             const newHistoryEntries = update.serviceHistoryToAdd.map(entry => ({
                 ...entry,
+                id: entry.id || crypto.randomUUID(),
                 effectiveDate: Timestamp.fromDate(new Date(entry.effectiveDate)),
                 endDate: entry.endDate ? Timestamp.fromDate(new Date(entry.endDate)) : null,
             }));
-            updatePayload.serviceHistory = [...existingHistory, ...newHistoryEntries];
 
-            if(Object.keys(updatePayload).length > 0 || update.serviceHistoryToAdd.length > 0) {
+            if (newHistoryEntries.length > 0) {
+              // Create a Set of existing entry identifiers to check for duplicates before adding
+              const existingEntryIdentifiers = new Set(existingHistory.map(eh => `${eh.type}-${eh.item}-${format(new Date(eh.effectiveDate), 'yyyy-MM-dd')}`));
+              const uniqueNewEntries = newHistoryEntries.filter(ne => !existingEntryIdentifiers.has(`${ne.type}-${ne.item}-${format(new Date(ne.effectiveDate.toDate()), 'yyyy-MM-dd')}`));
+              
+              if (uniqueNewEntries.length > 0) {
+                updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries);
+              }
+            }
+
+
+            if(Object.keys(updatePayload).length > 0 ) {
                  batch.update(staffDocRef, updatePayload);
                  staffProfilesUpdatedCount++;
             }
@@ -968,35 +1005,40 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             await batch.commit();
         }
         
+        let toastTitle = "Import Processing Complete";
+        let toastVariant: "default" | "destructive" = "default";
+        let toastDescription = "";
+
+        if (trainingLogsImportedCount > 0) toastDescription += `${trainingLogsImportedCount} training log(s) imported/updated. `;
+        if (staffProfilesUpdatedCount > 0) toastDescription += `${staffProfilesUpdatedCount} staff profile(s) updated. `;
+        
         if (errors.length > 0) {
-          const title = (trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0) ? "CSV Import Partially Successful" : "CSV Import Failed";
-          const variant = (trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0) ? "default" : "destructive";
-          const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-
-          let descriptionPrefix = "";
-          if (trainingLogsImportedCount > 0) descriptionPrefix += `${trainingLogsImportedCount} training log(s) staged. `;
-          if (staffProfilesUpdatedCount > 0) descriptionPrefix += `${staffProfilesUpdatedCount} staff profile(s) staged for update. `;
-          if (errors.length > 0) descriptionPrefix += "Errors found:\n";
-
-
-          toast({
-              variant: variant,
-              title: title,
-              description: (
-                <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}{errorMessages}</pre></ScrollArea>
-              ),
-              duration: 15000,
-          });
-        } else if (trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0) {
-             let successMessage = "";
-             if (trainingLogsImportedCount > 0) successMessage += `${trainingLogsImportedCount} training log(s) imported. `;
-             if (staffProfilesUpdatedCount > 0) successMessage += `${staffProfilesUpdatedCount} staff profile(s) updated. `;
-             toast({ title: "Import Successful", description: successMessage.trim() });
-        } else if (allRows.length <= 1 && trainingLogsImportedCount === 0 && staffProfilesUpdatedCount === 0){ 
-             toast({ title: "Import Information", description: "CSV file has no data rows to import." });
-        } else if (logsToAdd.length === 0 && staffUpdates.size === 0 && errors.length === 0 && allRows.length > 1) {
-             toast({ title: "Import Information", description: "No new records or staff updates processed from the CSV." });
+            toastTitle = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "Import Partially Successful" : "Import Failed";
+            toastVariant = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "default" : "destructive";
+            const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? `\n...and ${errors.length - 5} more errors.` : "");
+            toastDescription += `\nErrors (${errors.length}):\n${errorMessages}`;
         }
+        if (skippedRecordsLog.length > 0) {
+            if (errors.length === 0 && trainingLogsImportedCount === 0 && staffProfilesUpdatedCount === 0) toastTitle = "Import Information";
+            const skippedMessages = skippedRecordsLog.slice(0, 5).join("\n") + (skippedRecordsLog.length > 5 ? `\n...and ${skippedRecordsLog.length - 5} more skipped records.` : "");
+            toastDescription += `\nSkipped Records (${skippedRecordsLog.length}):\n${skippedMessages}`;
+        }
+
+        if (toastDescription.trim() === "" && allRows.length <= 1) {
+            toastTitle = "Import Information";
+            toastDescription = "CSV file has no data rows to import.";
+        } else if (toastDescription.trim() === "") {
+            toastTitle = "Import Information";
+            toastDescription = "No new records or staff updates processed from the CSV.";
+        }
+        
+        toast({
+            variant: toastVariant,
+            title: toastTitle,
+            description: (<ScrollArea className="max-h-60 w-full"><pre className="whitespace-pre-wrap text-xs">{toastDescription.trim()}</pre></ScrollArea>),
+            duration: errors.length > 0 || skippedRecordsLog.length > 0 ? 20000 : 8000,
+        });
+
 
         if (trainingLogsImportedCount > 0) queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
         if (staffProfilesUpdatedCount > 0) queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
