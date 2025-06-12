@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -355,7 +356,7 @@ export default function StaffPage() {
             currentStaffList = await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
         }
 
-        const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
+        const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s],));
         const existingEmails = new Set(currentStaffList.map(s => s.email).filter(Boolean));
 
         const addPromises: Promise<void>[] = [];
@@ -805,7 +806,7 @@ export default function StaffPage() {
                           </CardContent>
                       </Card>
                         
-                        <Accordion type="multiple" collapsible className="w-full">
+                        <Accordion type="multiple" className="w-full">
                           <AccordionItem value="service-history">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
@@ -1008,3 +1009,4 @@ export default function StaffPage() {
     </div>
   );
 }
+
