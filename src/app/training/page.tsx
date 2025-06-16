@@ -457,7 +457,7 @@ export default function TrainingPage() {
     if (data.certificateFile) {
       try {
         const { name, dataUrl } = await convertFileToDataUrl(data.certificateFile);
-        certificateUpdates = { certificateFileName: name, dataUrl: dataUrl };
+        certificateUpdates = { certificateFileName: name, certificateDataUrl: dataUrl };
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
@@ -1009,7 +1009,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         let toastVariant: "default" | "destructive" = "default";
         let toastDescription = "";
 
-        if (trainingLogsImportedCount > 0) toastDescription += `${trainingLogsImportedCount} training log(s) imported/updated. `;
+        if (trainingLogsImportedCount > 0) toastDescription += `${trainingLogsImportedCount} training log(s) staged. `;
         if (staffProfilesUpdatedCount > 0) toastDescription += `${staffProfilesUpdatedCount} staff profile(s) updated. `;
         
         if (errors.length > 0) {
