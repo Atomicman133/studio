@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -61,7 +61,7 @@ import {
 import type { StaffMember, ServiceHistoryEntry } from "./staff-schema";
 import { StaffForm } from "./components/staff-form";
 import { RANKS, STAFF_QUERY_KEY } from "./staff-schema";
-import { format, isValid as isValidDate, parse as parseDateFns } from "date-fns";
+import { format, isValid as isValidDate, parse as parseDateFns, addYears, isBefore, startOfDay, addDays, differenceInDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -69,13 +69,17 @@ import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/u
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
+import jsPDF from 'jspdf';
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { COMPLIANCE_CRITERIA_CONFIG, type ComplianceCriterionCheck, type StaffComplianceReport } from "@/app/reporting/reporting-schema";
+
 
 import type { TrainingLog } from "../training/training-schema";
 import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page";
-import type { Meeting } from "../meetings/meeting-schema";
-import type { DisciplineAction } from "../discipline/discipline-schema";
-import type { Pdp } from "../pdps/pdp-schema";
-import type { SafetyAudit } from "../audits/audit-schema";
+// import type { Meeting } from "../meetings/meeting-schema"; // Placeholder
+// import type { DisciplineAction } from "../discipline/discipline-schema"; // Placeholder
+// import type { Pdp } from "../pdps/pdp-schema"; // Placeholder
+// import type { SafetyAudit } from "../audits/audit-schema"; // Placeholder
 
 
 type StaffGroup = {
@@ -84,12 +88,15 @@ type StaffGroup = {
 };
 
 const STAFF_TRAINING_LOGS_QUERY_KEY = 'staffTrainingLogs';
+const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
+const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
+
 
 async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promise<TrainingLog[]> {
   if (!staffMember || !staffMember.serviceNumber) return []; // Require service number for this fetch
 
   const logsCollectionRef = collection(db, 'trainingLogs');
-  
+
   const q = query(
     logsCollectionRef,
     where('serviceNumber', '==', staffMember.serviceNumber),
@@ -100,11 +107,11 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => ({
       id: doc.id,
-      ...convertTrainingLogTimestamps(doc.data()), 
+      ...convertTrainingLogTimestamps(doc.data()),
     })) as TrainingLog[];
   } catch (error) {
     console.error("Error fetching training logs for staff SN:", staffMember.serviceNumber, error);
-    return []; 
+    return [];
   }
 }
 
@@ -115,29 +122,29 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
 
   for (const r of sortedRanksForParsing) {
-    if (namePart.toUpperCase().startsWith(r + " ")) { 
+    if (namePart.toUpperCase().startsWith(r + " ")) {
       rank = r as typeof RANKS[number];
       namePart = namePart.substring(r.length).trim();
       break;
     }
   }
 
-  if (!namePart) return { rank, firstName: null, lastName: null }; 
+  if (!namePart) return { rank, firstName: null, lastName: null };
 
-  const parts = namePart.split(' ').filter(p => p); 
+  const parts = namePart.split(' ').filter(p => p);
   if (parts.length >= 2) {
     const lastName = parts[parts.length - 1];
     const firstName = parts.slice(0, -1).join(' ');
-    if (firstName && lastName) { 
+    if (firstName && lastName) {
       return { rank, firstName, lastName };
     }
   }
-  
+
   if (parts.length === 1 && parts[0]) {
-    return { rank, firstName: null, lastName: parts[0] }; 
+    return { rank, firstName: null, lastName: parts[0] };
   }
 
-  return { rank, firstName: null, lastName: namePart }; 
+  return { rank, firstName: null, lastName: namePart };
 }
 
 
@@ -169,8 +176,8 @@ export default function StaffPage() {
   } = useQuery<TrainingLog[], Error>({
     queryKey: [STAFF_TRAINING_LOGS_QUERY_KEY, viewingStaffMember?.id || `${viewingStaffMember?.lastName}, ${viewingStaffMember?.firstName}_${viewingStaffMember?.rank}`],
     queryFn: () => fetchTrainingLogsForStaff(viewingStaffMember),
-    enabled: !!viewingStaffMember, 
-    staleTime: 1000 * 60 * 2, 
+    enabled: !!viewingStaffMember,
+    staleTime: 1000 * 60 * 2,
   });
 
   const staffGroups = React.useMemo(() => {
@@ -192,7 +199,7 @@ export default function StaffPage() {
         const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
 
         if (effectiveRankAIndex !== effectiveRankBIndex) {
-            return effectiveRankAIndex - effectiveRankBIndex; 
+            return effectiveRankAIndex - effectiveRankBIndex;
         }
         const lastNameCompare = a.lastName.localeCompare(b.lastName);
         if (lastNameCompare !== 0) return lastNameCompare;
@@ -205,7 +212,7 @@ export default function StaffPage() {
         squadronName,
         staffMembers
       }))
-      .sort((a, b) => a.squadronName.localeCompare(b.squadronName)); 
+      .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
   }, [staffList]);
 
   const handleAddStaff = async (data: Omit<StaffMember, 'id'>) => {
@@ -244,20 +251,20 @@ export default function StaffPage() {
        } catch (err: any) {
          console.error("Failed to delete staff:", err);
          toast({ variant: "destructive", title: "Error", description: `Failed to delete staff member: ${err.message}` });
-         setStaffToDelete(null); 
+         setStaffToDelete(null);
        }
     }
   };
 
   const handleEdit = (staffMember: StaffMember) => {
     setEditingStaff(staffMember);
-    setViewingStaffMember(null); 
+    setViewingStaffMember(null);
     setIsFormOpen(true);
   };
 
   const handleViewDetails = (staffMember: StaffMember) => {
     setViewingStaffMember(staffMember);
-    setEditingStaff(null); 
+    setEditingStaff(null);
     setIsFormOpen(false);
   };
 
@@ -285,7 +292,7 @@ export default function StaffPage() {
     "USA": "Unit Safety Advisor",
     "SSO": "Squadron Supply Officer",
     "TRS": "Trainee Staff",
-    "STAFF": "Staff", 
+    "STAFF": "Staff",
     "SQNXI": "Squadron Executive Instructor",
   };
 
@@ -309,50 +316,50 @@ export default function StaffPage() {
       const errors: string[] = [];
       let importedCount = 0;
       let updatedCount = 0;
-      
+
       try {
-        const lines = text.split(/\r\n|\n/).filter(line => line.trim()); 
-        if (lines.length < 2) { 
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim());
+        if (lines.length < 2) {
           throw new Error("CSV must have a header and at least one data row.");
         }
 
         const headerLine = lines[0].trim();
         const csvHeader = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-        
-        const expectedCsvHeaders = [ 
-          "PrimaryUnit", "MemberUID", "MemberName", "Appointment", 
+
+        const expectedCsvHeaders = [
+          "PrimaryUnit", "MemberUID", "MemberName", "Appointment",
           "EmailAddress", "PhoneNumber", "Address"
         ];
         const allRecognizedHeaders = [
             ...expectedCsvHeaders,
-            "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName", 
-            "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin", 
-            "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander", 
-            "FullTimeStudent", "EducationInstitution", "HighestEducationLevel", "Religion", 
+            "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName",
+            "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin",
+            "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander",
+            "FullTimeStudent", "EducationInstitution", "HighestEducationLevel", "Religion",
             "Citizenship", "DefenceVendorNumber", "Name"
         ];
-        
+
         const headerIndices: Record<string, number> = {};
-        allRecognizedHeaders.forEach(h => { 
+        allRecognizedHeaders.forEach(h => {
           const index = csvHeader.indexOf(h);
-          if (index !== -1) { 
+          if (index !== -1) {
             headerIndices[h] = index;
           }
         });
-        
+
         for (const expectedHeader of expectedCsvHeaders) {
             if (headerIndices[expectedHeader] === undefined) {
                  errors.push(`Missing required CSV header: "${expectedHeader}".`);
             }
         }
-        if (errors.length > 0) { 
+        if (errors.length > 0) {
             throw new Error(errors.join(" "));
         }
-        
+
         let currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || [];
-        if (currentStaffList.length === 0 && staffList.length > 0) { 
+        if (currentStaffList.length === 0 && staffList.length > 0) {
             currentStaffList = staffList;
-        } else if (currentStaffList.length === 0 && staffList.length === 0 && !isLoading) { 
+        } else if (currentStaffList.length === 0 && staffList.length === 0 && !isLoading) {
             currentStaffList = await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
         }
 
@@ -364,19 +371,19 @@ export default function StaffPage() {
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
-          if (!line) continue; 
+          if (!line) continue;
 
           const values = [];
           let currentVal = '';
           let inQuotes = false;
           for (let charIndex = 0; charIndex < line.length; charIndex++) {
             const char = line[charIndex];
-            if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) { 
+            if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) {
               if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
-                currentVal += '"'; 
-                charIndex++; 
+                currentVal += '"';
+                charIndex++;
               } else {
-                inQuotes = !inQuotes; 
+                inQuotes = !inQuotes;
               }
             } else if (char === ',' && !inQuotes) {
               values.push(currentVal.trim());
@@ -385,7 +392,7 @@ export default function StaffPage() {
               currentVal += char;
             }
           }
-          values.push(currentVal.trim()); 
+          values.push(currentVal.trim());
 
           if (values.length !== csvHeader.length) {
             errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
@@ -395,22 +402,22 @@ export default function StaffPage() {
           const csvData: Record<string, string | undefined> = {};
           allRecognizedHeaders.forEach(h => {
               const index = headerIndices[h];
-              if (index !== undefined && index < values.length) { 
+              if (index !== undefined && index < values.length) {
                 csvData[h] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
               } else {
-                csvData[h] = undefined; 
+                csvData[h] = undefined;
               }
           });
-          
+
           const phoneValue = csvData.PhoneNumber?.trim();
           if (!phoneValue) {
             errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
-            continue; 
+            continue;
           }
 
           const serviceNumber = csvData.MemberUID;
           const email = csvData.EmailAddress?.trim();
-          
+
           if (!serviceNumber) {
              errors.push(`Row ${i + 1}: MemberUID (Service Number) is blank. Skipping record.`);
              continue;
@@ -425,36 +432,35 @@ export default function StaffPage() {
              errors.push(`Row ${i + 1} (UID: ${serviceNumber}): MemberName "${csvData.MemberName || ''}" could not be parsed into Rank, First Name, and Last Name. Skipping record.`);
              continue;
           }
-          
-          let roleToSave = "Staff"; 
+
+          let roleToSave = "Staff";
           const rawAppointmentFromCsv = csvData.Appointment?.trim().toUpperCase();
           if (rawAppointmentFromCsv && appointmentMapping[rawAppointmentFromCsv]) {
               roleToSave = appointmentMapping[rawAppointmentFromCsv];
-          } else if (rawAppointmentFromCsv && rawAppointmentFromCsv.length > 0) { 
-              roleToSave = csvData.Appointment!.trim(); 
+          } else if (rawAppointmentFromCsv && rawAppointmentFromCsv.length > 0) {
+              roleToSave = csvData.Appointment!.trim();
           }
 
 
-          const squadron = csvData.PrimaryUnit || undefined; 
-          const address = csvData.Address || undefined; 
-          
+          const squadron = csvData.PrimaryUnit || undefined;
+          const address = csvData.Address || undefined;
+
           const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
 
           const memberDataPayload: Omit<StaffMember, 'id' | 'serviceHistory'> & { id?: string; serviceHistory?: ServiceHistoryEntry[] } = {
             serviceNumber: serviceNumber,
-            rank: rank, 
+            rank: rank,
             firstName: firstName,
             lastName: lastName,
-            email: email, 
+            email: email,
             phone: phoneValue,
             role: roleToSave,
             squadron: squadron,
             address: address,
             joinDate: existingStaffMember?.joinDate || null,
-            // serviceHistory will be handled separately by the other CSV import
           };
 
-          if (existingStaffMember) { 
+          if (existingStaffMember) {
             memberDataPayload.id = existingStaffMember.id;
             memberDataPayload.serviceHistory = existingStaffMember.serviceHistory || []; // Preserve existing service history
             if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
@@ -471,13 +477,13 @@ export default function StaffPage() {
                 existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberDataPayload });
               }).catch((updateError: any) => {
                 let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`;
-                if (updateError.errors) { 
+                if (updateError.errors) {
                   errorMessage += ` Details: ${JSON.stringify(updateError.errors)}`;
                 }
                 errors.push(errorMessage);
               })
             );
-          } else { 
+          } else {
             memberDataPayload.serviceHistory = []; // New staff start with empty history
             if (email && existingEmails.has(email)) {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
@@ -486,11 +492,11 @@ export default function StaffPage() {
             addPromises.push(
               addStaffMutation.mutateAsync(memberDataPayload as Omit<StaffMember, 'id'>).then((newId) => {
                 importedCount++;
-                existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string, serviceHistory: [] }); 
-                if(email) existingEmails.add(email);      
+                existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string, serviceHistory: [] });
+                if(email) existingEmails.add(email);
               }).catch((addError: any) => {
                 let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`;
-                if (addError.errors) { 
+                if (addError.errors) {
                   errorMessage += ` Details: ${JSON.stringify(addError.errors)}`;
                 }
                 errors.push(errorMessage);
@@ -504,23 +510,23 @@ export default function StaffPage() {
         let toastMessage = "";
         if (importedCount > 0) toastMessage += `${importedCount} new staff member(s) imported. `;
         if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
-        
-        if (toastMessage === "" && errors.length === 0 && lines.length > 1) { 
+
+        if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
             toast({ title: "Import Complete", description: "No new staff members were found to import or update based on provided UIDs." });
-        } else if (toastMessage !== "" && errors.length === 0) { 
+        } else if (toastMessage !== "" && errors.length === 0) {
             toast({ title: "Import Successful", description: toastMessage.trim() });
-        } else if (errors.length > 0) { 
+        } else if (errors.length > 0) {
             const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
             const title = (importedCount > 0 || updatedCount > 0) ? "CSV Import Partially Successful" : "CSV Import Failed";
             const descriptionPrefix = toastMessage !== "" ? toastMessage : "";
-            
+
             toast({
                 variant: (importedCount > 0 || updatedCount > 0) ? "default" : "destructive",
                 title: title,
                 description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}Errors:\n{errorMessages}</pre></ScrollArea> ),
-                duration: 15000, 
+                duration: 15000,
             });
-        } else if (lines.length <=1) { 
+        } else if (lines.length <=1) {
            toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
         }
 
@@ -529,7 +535,7 @@ export default function StaffPage() {
         toast({ variant: "destructive", title: "Import Error", description: error.message || "An unexpected error occurred during processing." });
       } finally {
         if (fileInputRef.current) {
-          fileInputRef.current.value = ""; 
+          fileInputRef.current.value = "";
         }
         setIsImportingCsv(false);
         queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
@@ -545,29 +551,193 @@ export default function StaffPage() {
     reader.readAsText(file);
   };
 
-  const filteredMeetings: Meeting[] = React.useMemo(() => {
-    if (!viewingStaffMember) return [];
-    // console.warn("TODO: Implement backend fetch for meetings for staff member:", viewingStaffMember.id);
-    return [];
-  }, [viewingStaffMember]);
+  const calculateSingleStaffCompliance = (staffMember: StaffMember, memberLogs: TrainingLog[]): { criteriaChecks: ComplianceCriterionCheck[], overallStatus: StaffComplianceReport["complianceStatusText"] } => {
+    const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
+      const relevantLogs = memberLogs
+        .filter(log => criterion.identifier(log))
+        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
-  const filteredPdps: Pdp[] = React.useMemo(() => {
-    if (!viewingStaffMember) return [];
-    // console.warn("TODO: Implement backend fetch for PDPs for staff member:", viewingStaffMember.id);
-    return [];
-  }, [viewingStaffMember]);
+      let isMet = false;
+      let details = "Missing";
+      let selectedLog: TrainingLog | undefined = undefined;
 
-  const filteredDisciplineActions: DisciplineAction[] = React.useMemo(() => {
-    if (!viewingStaffMember) return [];
-    // console.warn("TODO: Implement backend fetch for discipline actions for staff member:", viewingStaffMember.id);
-    return [];
-  }, [viewingStaffMember]);
+      if (relevantLogs.length > 0) {
+        selectedLog = relevantLogs[0];
+        const completionDate = startOfDay(new Date(selectedLog.completionDate));
+        if (!isValidDate(completionDate)) {
+          details = "Invalid completion date in record.";
+        } else {
+          const today = startOfDay(new Date());
+          if (criterion.yearsToExpire) {
+            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
+            isMet = isBefore(today, expiryDate);
+            if (isMet) {
+              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(addDays(expiryDate, -1), 'dd/MM/yyyy')}.`;
+            } else {
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+            }
+          } else {
+            isMet = true;
+            details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
+          }
+        }
+      }
+      return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
+    });
 
-  const filteredAudits: SafetyAudit[] = React.useMemo(() => {
-    if (!viewingStaffMember) return [];
-    // console.warn("TODO: Implement backend fetch for audits involving staff member:", viewingStaffMember.id);
-    return [];
-  }, [viewingStaffMember]);
+    const metCount = criteriaChecks.filter(c => c.isMet).length;
+    let overallStatus: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
+    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
+      overallStatus = "Compliant";
+    } else if (metCount >= 3) { // Assuming 3 is a threshold for "Partially Compliant"
+      overallStatus = "Partially Compliant";
+    }
+    return { criteriaChecks, overallStatus };
+  };
+
+  const handleExportFullProfilePdf = async (staffMember: StaffMember, staffTrainingLogs: TrainingLog[]) => {
+    const doc = new jsPDF();
+    resetLetterheadCache();
+    const filename = `profile_${staffMember.rank}_${staffMember.lastName}_${staffMember.firstName}_${staffMember.serviceNumber}.pdf`;
+
+    const margin = 15;
+    let yPos = margin;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxLineWidth = pageWidth - (margin * 2);
+    let headerHeight = 0;
+    let footerHeight = 0;
+
+    const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+    headerHeight = hh;
+    footerHeight = fh;
+    yPos = margin + headerHeight + 5;
+
+    const checkPageBreak = async (neededHeight: number = lineSpacing) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+            addPageNumbers(doc, footerHeight, margin); // Add page numbers before new page
+            doc.addPage();
+            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+            yPos = margin + headerHeight + 5;
+        }
+    };
+
+    const addSectionTitle = async (title: string) => {
+      await checkPageBreak(sectionSpacing + 14);
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing * 1.5;
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+    };
+
+    const addDetailLine = async (label: string, value?: string | null) => {
+      if (value === undefined || value === null || value.trim() === "") return;
+      await checkPageBreak(lineSpacing);
+      const labelWidth = doc.getTextWidth(`${label}: `) + 2;
+      doc.setFont(undefined, 'bold');
+      doc.text(`${label}:`, margin, yPos);
+      doc.setFont(undefined, 'normal');
+      const valueLines = doc.splitTextToSize(value, maxLineWidth - labelWidth);
+      await checkPageBreak(valueLines.length * (lineSpacing * 0.7));
+      doc.text(valueLines, margin + labelWidth, yPos);
+      yPos += valueLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
+    };
+
+    // --- Main Title ---
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing + 18);
+    doc.text(`Staff Profile: ${staffMember.rank} ${staffMember.firstName} ${staffMember.lastName}`, margin, yPos);
+    yPos += sectionSpacing;
+
+    // --- Basic Info ---
+    await addSectionTitle("Basic Information");
+    await addDetailLine("Service Number", staffMember.serviceNumber);
+    await addDetailLine("Role", staffMember.role);
+    await addDetailLine("Squadron", staffMember.squadron);
+    yPos += sectionSpacing * 0.5;
+
+    // --- Contact Details ---
+    await addSectionTitle("Contact Details");
+    await addDetailLine("Email", staffMember.email);
+    await addDetailLine("Phone", staffMember.phone);
+    await addDetailLine("Address", staffMember.address);
+    await addDetailLine("Join Date", staffMember.joinDate ? format(new Date(staffMember.joinDate), "PPP") : "N/A");
+    yPos += sectionSpacing * 0.5;
+
+    // --- Compliance Status ---
+    await addSectionTitle("Compliance Status");
+    const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, staffTrainingLogs);
+    await addDetailLine("Overall Status", overallStatus);
+    if (overallStatus !== "Compliant") {
+        await checkPageBreak(lineSpacing);
+        doc.setFont(undefined, 'bold');
+        doc.text("Non-Compliant Items:", margin, yPos);
+        yPos += lineSpacing * 0.8;
+        doc.setFont(undefined, 'normal');
+        for (const criterion of criteriaChecks) {
+            if (!criterion.isMet) {
+                const itemText = `- ${criterion.name}: ${criterion.details}`;
+                const lines = doc.splitTextToSize(itemText, maxLineWidth - indent);
+                await checkPageBreak(lines.length * (lineSpacing * 0.7));
+                doc.text(lines, margin + indent, yPos);
+                yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
+            }
+        }
+    }
+    yPos += sectionSpacing * 0.5;
+
+    // --- Service History ---
+    await addSectionTitle("Service History");
+    if (staffMember.serviceHistory && staffMember.serviceHistory.length > 0) {
+        for (const entry of staffMember.serviceHistory.sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime())) {
+            await checkPageBreak(lineSpacing * 3);
+            let entryText = `${entry.type}: ${entry.item} (Effective: ${format(new Date(entry.effectiveDate), "PP")}`;
+            if (entry.endDate) entryText += ` - End: ${format(new Date(entry.endDate), "PP")}`;
+            entryText += ")";
+            if (entry.notes) entryText += ` Notes: ${entry.notes}`;
+            const lines = doc.splitTextToSize(entryText, maxLineWidth);
+            doc.text(lines, margin, yPos);
+            yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
+        }
+    } else {
+        await addDetailLine("", "No service history recorded.");
+    }
+    yPos += sectionSpacing * 0.5;
+
+    // --- Training Records ---
+    await addSectionTitle("Training Records");
+    if (staffTrainingLogs && staffTrainingLogs.length > 0) {
+        for (const log of staffTrainingLogs) {
+            await checkPageBreak(lineSpacing * 3);
+            let logText = `${log.courseName} (Completed: ${format(new Date(log.completionDate), "PP")})`;
+            if (log.qualificationAchieved) logText += ` - Qual: ${log.qualificationAchieved}`;
+            if (log.instructorQualification) logText += ` - Instr. Qual: ${log.instructorQualification}`;
+            const lines = doc.splitTextToSize(logText, maxLineWidth);
+            doc.text(lines, margin, yPos);
+            yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
+        }
+    } else {
+        await addDetailLine("", "No training records found for this staff member.");
+    }
+    yPos += sectionSpacing * 0.5;
+    
+    // --- Placeholder Sections ---
+    const placeholderSections = ["Meetings Attended", "Professional Development Plans", "Discipline Actions Involvement", "Safety Audits Involvement"];
+    for (const sectionTitle of placeholderSections) {
+        await addSectionTitle(sectionTitle);
+        await addDetailLine("", `Data for ${sectionTitle.toLowerCase()} is not yet integrated into this profile export.`);
+        yPos += sectionSpacing * 0.5;
+    }
+
+    addPageNumbers(doc, footerHeight, margin);
+    doc.save(filename);
+    toast({title: "Profile PDF Exported", description: `${filename} has been downloaded.`});
+  };
 
 
   return (
@@ -629,7 +799,7 @@ export default function StaffPage() {
       {!isLoading && !error && staffGroups.map(group => (
         <Card key={group.squadronName} className="shadow-xl mb-8">
           <Collapsible
-            open={openSquadrons[group.squadronName] ?? true} 
+            open={openSquadrons[group.squadronName] ?? true}
             onOpenChange={() => toggleSquadron(group.squadronName)}
             className="w-full"
           >
@@ -650,7 +820,7 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="h-[400px] w-full border"> 
+                  <ScrollArea className="h-[400px] w-full border">
                     <Table>
                       <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                         <TableRow>
@@ -805,8 +975,38 @@ export default function StaffPage() {
                             </div>
                           </CardContent>
                       </Card>
-                        
+
                         <Accordion type="multiple" className="w-full">
+                           <AccordionItem value="compliance-status">
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                                <ShieldCheck className="h-5 w-5" /> Compliance Status
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              {isLoadingViewedStaffLogs ? (
+                                <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                              ) : errorViewedStaffLogs ? (
+                                <p className="text-sm text-destructive p-4">Error loading compliance data: {errorViewedStaffLogs.message}</p>
+                              ) : (
+                                (() => {
+                                  const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(viewingStaffMember, viewedStaffTrainingLogs);
+                                  return (
+                                    <div className="space-y-2 p-2 border rounded-md">
+                                      <p className="text-sm"><strong>Overall:</strong> <Badge variant={overallStatus === "Compliant" ? "default" : overallStatus === "Partially Compliant" ? "secondary" : "destructive"}>{overallStatus}</Badge></p>
+                                      {overallStatus !== "Compliant" && (
+                                        <ul className="list-disc pl-5 text-xs">
+                                          {criteriaChecks.filter(c => !c.isMet).map(c => (
+                                            <li key={c.key} className="text-muted-foreground">{c.name}: {c.details}</li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </div>
+                                  );
+                                })()
+                              )}
+                            </AccordionContent>
+                          </AccordionItem>
                           <AccordionItem value="service-history">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
@@ -881,89 +1081,54 @@ export default function StaffPage() {
                             </AccordionContent>
                           </AccordionItem>
 
+                          {/* Placeholder Accordion Items */}
                           <AccordionItem value="meetings">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
-                               <FileText className="h-5 w-5" /> Meetings Attended ({filteredMeetings.length})
+                               <FileText className="h-5 w-5" /> Meetings Attended
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {filteredMeetings.length > 0 ? (
-                                    <ul className="list-disc pl-5 space-y-1 text-sm">
-                                    {filteredMeetings.map(meeting => (
-                                        <li key={meeting.id}>{meeting.title} - Date: {meeting.date && isValidDate(new Date(meeting.date)) ? format(new Date(meeting.date), "PP") : "Invalid Date"}
-                                        <br/>Attendees: {meeting.attendees}
-                                        </li>
-                                    ))}
-                                    </ul>
-                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No meeting records found (fetching not implemented).</p>}
+                               <p className="text-sm text-muted-foreground p-4 text-center">Meeting attendance data not yet integrated.</p>
                             </AccordionContent>
                           </AccordionItem>
 
                           <AccordionItem value="pdps">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
-                                <Briefcase className="h-5 w-5" /> Professional Development ({filteredPdps.length})
+                                <Briefcase className="h-5 w-5" /> Professional Development
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {filteredPdps.length > 0 ? (
-                                    <ul className="list-disc pl-5 space-y-1 text-sm">
-                                    {filteredPdps.map(pdp => (
-                                        <li key={pdp.id}>
-                                        PDP Period: {pdp.pdpPeriod}
-                                        <br/>Goals: {pdp.goals.length}
-                                        {pdp.reviewDate && isValidDate(new Date(pdp.reviewDate)) && ` | Next Review: ${format(new Date(pdp.reviewDate), "PP")}`}
-                                        </li>
-                                    ))}
-                                    </ul>
-                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No PDPs found (fetching not implemented).</p>}
+                                <p className="text-sm text-muted-foreground p-4 text-center">PDP data not yet integrated.</p>
                             </AccordionContent>
                           </AccordionItem>
 
                           <AccordionItem value="discipline">
                             <AccordionTrigger>
                                 <div className="flex items-center gap-2">
-                                    <Gavel className="h-5 w-5" /> Discipline Actions ({filteredDisciplineActions.length})
+                                    <Gavel className="h-5 w-5" /> Discipline Actions
                                 </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                 {filteredDisciplineActions.length > 0 ? (
-                                    <ul className="list-disc pl-5 space-y-1 text-sm">
-                                    {filteredDisciplineActions.map(action => (
-                                        <li key={action.id}>
-                                        {action.typeOfAction} - Incident Date: {action.dateOfIncident && isValidDate(new Date(action.dateOfIncident)) ? format(new Date(action.dateOfIncident), "PP") : "Invalid Date"}
-                                        <br/>Description: {action.incidentDescription}
-                                        </li>
-                                    ))}
-                                    </ul>
-                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No discipline actions found (fetching not implemented).</p>}
+                                 <p className="text-sm text-muted-foreground p-4 text-center">Discipline action data not yet integrated.</p>
                             </AccordionContent>
                           </AccordionItem>
 
                           <AccordionItem value="audits">
                             <AccordionTrigger>
                                 <div className="flex items-center gap-2">
-                                    <ShieldCheck className="h-5 w-5" /> Safety Audits Involved In ({filteredAudits.length})
+                                    <ShieldCheck className="h-5 w-5" /> Safety Audits Involvement
                                 </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                                {filteredAudits.length > 0 ? (
-                                    <ul className="list-disc pl-5 space-y-1 text-sm">
-                                    {filteredAudits.map(audit => (
-                                        <li key={audit.id}>
-                                        {audit.auditTitle} - Date: {audit.auditDate && isValidDate(new Date(audit.auditDate)) ? format(new Date(audit.auditDate), "PP") : "Invalid Date"}
-                                        <br/>Type: {audit.auditType}
-                                        </li>
-                                    ))}
-                                    </ul>
-                                ) : <p className="text-sm text-muted-foreground p-4 text-center">No safety audits found where this member was involved (fetching not implemented).</p>}
+                                <p className="text-sm text-muted-foreground p-4 text-center">Safety audit involvement data not yet integrated.</p>
                             </AccordionContent>
                           </AccordionItem>
                         </Accordion>
                       </div>
                 </ScrollArea>
-                <DialogFooter className="pt-4 border-t">
+                <DialogFooter className="pt-4 border-t gap-2">
                     <Button variant="outline" onClick={() => {
                       if (viewingStaffMember) {
                         handleEdit(viewingStaffMember);
@@ -972,6 +1137,14 @@ export default function StaffPage() {
                     disabled={updateStaffMutation.isPending || isImportingCsv}
                     >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
+                    </Button>
+                    <Button
+                        variant="default"
+                        onClick={() => viewingStaffMember && handleExportFullProfilePdf(viewingStaffMember, viewedStaffTrainingLogs)}
+                        disabled={isLoadingViewedStaffLogs || updateStaffMutation.isPending || isImportingCsv}
+                    >
+                        {isLoadingViewedStaffLogs && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Full Profile (PDF)
                     </Button>
                     <Button onClick={closeViewDialog} disabled={updateStaffMutation.isPending || isImportingCsv}>Close</Button>
                 </DialogFooter>

@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -53,16 +52,16 @@ import { format, parse as parseDateFns, isValid as isValidDate } from "date-fns"
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { RANKS, type StaffMember, type ServiceHistoryEntry, STAFF_QUERY_KEY } from "@/app/staff/staff-schema";
-import { useStaff } from "@/hooks/useStaffData"; 
+import { useStaff } from "@/hooks/useStaffData";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, writeBatch, arrayUnion } from 'firebase/firestore';
-import { convertFileToDataUrl, addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils"; 
+import { convertFileToDataUrl, addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 import jsPDF from 'jspdf';
 
 
-export const TRAINING_LOGS_QUERY_KEY = 'trainingLogs'; 
+export const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
@@ -110,7 +109,7 @@ export const convertLogTimestamps = (data: any): Partial<TrainingLog> => {
     console.warn(`Invalid completionDate encountered during timestamp conversion: ${data.completionDate?.toString()}`);
     return {
       ...data,
-      completionDate: undefined, 
+      completionDate: undefined,
       serviceNumber: data.serviceNumber || undefined,
     };
   }
@@ -123,7 +122,7 @@ export const convertLogTimestamps = (data: any): Partial<TrainingLog> => {
 
 // --- Fetch Training Logs ---
 async function fetchTrainingLogs(): Promise<TrainingLog[]> {
-  const collectionRef = collection(db, 'trainingLogs'); 
+  const collectionRef = collection(db, 'trainingLogs');
   const q = query(collectionRef, orderBy('completionDate', 'desc'));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => {
@@ -131,19 +130,19 @@ async function fetchTrainingLogs(): Promise<TrainingLog[]> {
     const convertedData = convertLogTimestamps(data);
     return {
       id: doc.id,
-      rank: data.rank || undefined, 
+      rank: data.rank || undefined,
       staffName: data.staffName || "Unknown Staff",
       squadron: data.squadron || "N/A",
       currentRole: data.currentRole || "N/A",
       courseName: data.courseName || "Unnamed Course",
-      completionDate: convertedData.completionDate instanceof Date ? convertedData.completionDate : new Date(), 
+      completionDate: convertedData.completionDate instanceof Date ? convertedData.completionDate : new Date(),
       qualificationAchieved: data.qualificationAchieved || undefined,
       instructorQualification: data.instructorQualification || undefined,
       achievementDetails: data.achievementDetails || undefined,
       certificateFileName: data.certificateFileName || undefined,
       certificateDataUrl: data.certificateDataUrl || undefined,
       serviceNumber: data.serviceNumber || undefined,
-      ...convertedData, 
+      ...convertedData,
     } as TrainingLog;
   })
 }
@@ -152,7 +151,7 @@ async function fetchTrainingLogs(): Promise<TrainingLog[]> {
 // --- Add Training Log ---
 async function addTrainingLog(newLogData: Omit<TrainingLog, 'id'>): Promise<string> {
   const collectionRef = collection(db, 'trainingLogs');
-  const dataToSave: any = { 
+  const dataToSave: any = {
     ...newLogData,
     completionDate: Timestamp.fromDate(newLogData.completionDate),
     qualificationAchieved: newLogData.qualificationAchieved || null,
@@ -160,9 +159,9 @@ async function addTrainingLog(newLogData: Omit<TrainingLog, 'id'>): Promise<stri
     achievementDetails: newLogData.achievementDetails || null,
     certificateFileName: newLogData.certificateFileName || null,
     certificateDataUrl: newLogData.certificateDataUrl || null,
-    serviceNumber: newLogData.serviceNumber || null, 
+    serviceNumber: newLogData.serviceNumber || null,
   };
-  
+
   Object.keys(dataToSave).forEach(key => {
       const typedKey = key as keyof typeof dataToSave;
       if (dataToSave[typedKey] === null || dataToSave[typedKey] === undefined) {
@@ -179,7 +178,7 @@ async function updateTrainingLog(updatedLog: TrainingLog): Promise<void> {
   if (!updatedLog.id) throw new Error("Log ID is required for update.");
   const docRef = doc(db, 'trainingLogs', updatedLog.id);
   const { id, ...dataToUpdate } = updatedLog;
-  const dataToSave: any = { 
+  const dataToSave: any = {
     ...dataToUpdate,
     completionDate: Timestamp.fromDate(dataToUpdate.completionDate),
      qualificationAchieved: dataToUpdate.qualificationAchieved || null,
@@ -187,7 +186,7 @@ async function updateTrainingLog(updatedLog: TrainingLog): Promise<void> {
      achievementDetails: dataToUpdate.achievementDetails || null,
      certificateFileName: dataToUpdate.certificateFileName || null,
      certificateDataUrl: dataToUpdate.certificateDataUrl || null,
-     serviceNumber: dataToUpdate.serviceNumber || null, 
+     serviceNumber: dataToUpdate.serviceNumber || null,
   };
 
   Object.keys(dataToSave).forEach(key => {
@@ -227,7 +226,7 @@ const robustCsvParser = (csvText: string): string[][] => {
     let currentRow: string[] = [];
     let currentField = "";
     let inQuotedField = false;
-    const normalizedText = csvText.replace(/\r\n|\r/g, '\n'); 
+    const normalizedText = csvText.replace(/\r\n|\r/g, '\n');
 
     for (let i = 0; i < normalizedText.length; i++) {
         const char = normalizedText[i];
@@ -235,40 +234,40 @@ const robustCsvParser = (csvText: string): string[][] => {
         if (inQuotedField) {
             if (char === '"') {
                 if (i + 1 < normalizedText.length && normalizedText[i + 1] === '"') {
-                    currentField += '"'; 
-                    i++; 
+                    currentField += '"';
+                    i++;
                 } else {
-                    inQuotedField = false; 
+                    inQuotedField = false;
                 }
             } else {
-                currentField += char; 
+                currentField += char;
             }
-        } else { 
+        } else {
             if (char === '"') {
                 if (currentField.trim() === "") {
                     inQuotedField = true;
-                } else { 
-                    currentField += char; 
+                } else {
+                    currentField += char;
                 }
             } else if (char === ',') {
-                currentRow.push(currentField.trim()); 
+                currentRow.push(currentField.trim());
                 currentField = "";
             } else if (char === '\n') {
-                currentRow.push(currentField.trim()); 
+                currentRow.push(currentField.trim());
                 currentField = "";
                 if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim() !== "") : true) ) {
                     rows.push([...currentRow]);
                 }
                 currentRow = [];
             } else {
-                currentField += char; 
+                currentField += char;
             }
         }
     }
-    if (currentField || currentRow.length > 0) { 
+    if (currentField || currentRow.length > 0) {
         currentRow.push(currentField.trim());
     }
-    if (currentRow.length > 0 && currentRow.some(f => f.trim() !== "")) { 
+    if (currentRow.length > 0 && currentRow.some(f => f.trim() !== "")) {
         rows.push([...currentRow]);
     }
     return rows;
@@ -278,7 +277,7 @@ const robustCsvParser = (csvText: string): string[][] => {
 export default function TrainingPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { data: staffList = [], isLoading: isLoadingStaff } = useStaff(); 
+  const { data: staffList = [], isLoading: isLoadingStaff } = useStaff();
 
   const { data: trainingLogsList = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
     queryKey: [TRAINING_LOGS_QUERY_KEY],
@@ -360,7 +359,7 @@ export default function TrainingPage() {
   const squadronStaffGroups = React.useMemo(() => {
     const logsBySquadron: Record<string, TrainingLog[]> = {};
     trainingLogsList.forEach(log => {
-      const sqn = log.squadron || "Unassigned"; 
+      const sqn = log.squadron || "Unassigned";
       if (!logsBySquadron[sqn]) {
         logsBySquadron[sqn] = [];
       }
@@ -414,14 +413,14 @@ export default function TrainingPage() {
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
-        return; 
+        return;
       }
     }
 
     let serviceNumberToSave: string | undefined = undefined;
     if (data.staffName && data.rank && data.squadron && staffList.length > 0) {
-        const matchedStaff = staffList.find(sm => 
-            sm.rank === data.rank && 
+        const matchedStaff = staffList.find(sm =>
+            sm.rank === data.rank &&
             `${sm.lastName}, ${sm.firstName}` === data.staffName &&
             sm.squadron === data.squadron
         );
@@ -433,7 +432,7 @@ export default function TrainingPage() {
     }
 
 
-    const newLog: Omit<TrainingLog, 'id'> = { 
+    const newLog: Omit<TrainingLog, 'id'> = {
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -443,11 +442,11 @@ export default function TrainingPage() {
       qualificationAchieved: data.qualificationAchieved,
       instructorQualification: data.instructorQualification,
       achievementDetails: data.achievementDetails,
-      certificateFileName: certificateInfo.certificateFileName, 
+      certificateFileName: certificateInfo.certificateFileName,
       certificateDataUrl: certificateInfo.certificateDataUrl,
-      serviceNumber: serviceNumberToSave, 
+      serviceNumber: serviceNumberToSave,
     };
-    addLogMutation.mutate(newLog); 
+    addLogMutation.mutate(newLog);
   };
 
   const handleUpdateLog = async (data: TrainingLogFormData) => {
@@ -461,7 +460,7 @@ export default function TrainingPage() {
       } catch (error) {
         console.error("Error converting file:", error);
         toast({ variant: "destructive", title: "File Error", description: "Could not process certificate file."});
-        return; 
+        return;
       }
     } else if (data.certificateFileName === undefined && data.certificateDataUrl === undefined) {
       // This case handles when the "Remove Certificate" button was clicked
@@ -469,10 +468,10 @@ export default function TrainingPage() {
     }
 
 
-    let serviceNumberToSave: string | undefined = editingLog.serviceNumber; 
+    let serviceNumberToSave: string | undefined = editingLog.serviceNumber;
     if (data.staffName && data.rank && data.squadron && staffList.length > 0) {
-        const matchedStaff = staffList.find(sm => 
-            sm.rank === data.rank && 
+        const matchedStaff = staffList.find(sm =>
+            sm.rank === data.rank &&
             `${sm.lastName}, ${sm.firstName}` === data.staffName &&
             sm.squadron === data.squadron
         );
@@ -482,9 +481,9 @@ export default function TrainingPage() {
             console.warn(`Manual Log Update: Could not find exact staff match for ${data.staffName}, ${data.rank}, ${data.squadron} to update serviceNumber. Previous: ${serviceNumberToSave}`);
         }
     }
-    
+
     const updatedLog: TrainingLog = {
-      id: editingLog.id, 
+      id: editingLog.id,
       rank: data.rank,
       staffName: data.staffName,
       squadron: data.squadron,
@@ -496,10 +495,10 @@ export default function TrainingPage() {
       achievementDetails: data.achievementDetails,
       certificateFileName: certificateUpdates.hasOwnProperty('certificateFileName') ? certificateUpdates.certificateFileName : editingLog.certificateFileName,
       certificateDataUrl: certificateUpdates.hasOwnProperty('certificateDataUrl') ? certificateUpdates.certificateDataUrl : editingLog.certificateDataUrl,
-      serviceNumber: serviceNumberToSave, 
+      serviceNumber: serviceNumberToSave,
     };
 
-    updateLogMutation.mutate(updatedLog); 
+    updateLogMutation.mutate(updatedLog);
   };
 
   const handleEdit = (log: TrainingLog) => {
@@ -516,13 +515,13 @@ export default function TrainingPage() {
 
   const handleDeleteConfirm = () => {
     if (logToDelete && logToDelete.id) {
-      deleteLogMutation.mutate(logToDelete.id); 
+      deleteLogMutation.mutate(logToDelete.id);
     }
   };
 
   const handleExportIndividualRecord = async (log: TrainingLog) => {
     const doc = new jsPDF();
-    resetLetterheadCache(); 
+    resetLetterheadCache();
     const recordDate = format(log.completionDate, "yyyy-MM-dd");
     const filename = `training_record_${log.rank}_${log.staffName.replace(/\s*,\s*|\s+/g, '_')}_${log.courseName.replace(/\s+/g, '_')}_${recordDate}.pdf`;
 
@@ -570,7 +569,7 @@ export default function TrainingPage() {
       doc.text(textLines, margin + doc.getTextWidth(`${label}: `) + 2, yPos);
       yPos += (textLines.length * lineSpacing * 0.7) + (lineSpacing * 0.3);
     };
-    
+
     await addText("Staff Name", `${log.rank} ${log.staffName}`);
     if(log.serviceNumber) await addText("Service Number", log.serviceNumber);
     await addText("Squadron", log.squadron);
@@ -600,7 +599,7 @@ export default function TrainingPage() {
     const maxLineWidth = pageWidth - margin * 2;
     let headerHeight = 0;
     let footerHeight = 0;
-    
+
     const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
     headerHeight = hh;
     footerHeight = fh;
@@ -623,17 +622,17 @@ export default function TrainingPage() {
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
     await checkPageBreak(lineSpacing);
-    const memberServiceNumber = staffMemberGroup.logs[0]?.serviceNumber; 
+    const memberServiceNumber = staffMemberGroup.logs[0]?.serviceNumber;
     if(memberServiceNumber) await checkPageBreak(lineSpacing); doc.text(`Service Number: ${memberServiceNumber}`, margin, yPos); yPos += lineSpacing;
     await checkPageBreak(lineSpacing);
     doc.text(`Associated with Squadron(s): ${Array.from(new Set(staffMemberGroup.logs.map(l => l.squadron))).join(', ')}`, margin, yPos);
     yPos += sectionSpacing * 1.5;
 
     for (const [index, log] of staffMemberGroup.logs.entries()) {
-      await checkPageBreak(sectionSpacing * 2 + lineSpacing * 7 + 12); 
+      await checkPageBreak(sectionSpacing * 2 + lineSpacing * 7 + 12);
       doc.setLineWidth(0.2);
-      doc.line(margin, yPos - (lineSpacing / 2), pageWidth - margin, yPos - (lineSpacing / 2)); 
-      
+      doc.line(margin, yPos - (lineSpacing / 2), pageWidth - margin, yPos - (lineSpacing / 2));
+
       doc.setFontSize(12);
       doc.setFont(undefined, 'bold');
       doc.text(`Record ${index + 1}: ${log.courseName}`, margin, yPos);
@@ -657,7 +656,7 @@ export default function TrainingPage() {
       await addDetail("Instructor Qualification", log.instructorQualification);
       await addDetail("Achievements/Awards", log.achievementDetails);
       await addDetail("Certificate", log.certificateFileName);
-      yPos += lineSpacing * 0.5; 
+      yPos += lineSpacing * 0.5;
     }
     addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
@@ -693,23 +692,23 @@ export default function TrainingPage() {
 
 function parseCompositeSurnameField(surnameFieldInput: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
     const surnameField = surnameFieldInput.trim().replace(/\r\n|\n|\r/g, " ");
-    
+
     let namePart = surnameField;
     let foundRank: typeof RANKS[number] | null = null;
     let memberUID: string | null = null;
 
-    const uidMatch = namePart.match(/(\d{7,})$/); 
+    const uidMatch = namePart.match(/(\d{7,})$/);
     if (uidMatch && uidMatch[1]) {
         memberUID = uidMatch[1];
         namePart = namePart.substring(0, namePart.lastIndexOf(memberUID)).trim();
     } else {
         const partsForUid = namePart.split(/\s+/);
         if (partsForUid.length > 1 && /^\d+$/.test(partsForUid[partsForUid.length - 1])) {
-            memberUID = partsForUid.pop()!; 
+            memberUID = partsForUid.pop()!;
             namePart = partsForUid.join(" ");
         }
     }
-    
+
     const sortedRanks = [...RANKS].sort((a, b) => b.length - a.length);
     let rankIndex = -1;
     let rankLength = 0;
@@ -721,7 +720,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         if (currentRankIndex !== -1) {
             const charBefore = currentRankIndex > 0 ? namePartUpper[currentRankIndex - 1] : ' ';
             const charAfter = currentRankIndex + rUpper.length < namePartUpper.length ? namePartUpper[currentRankIndex + rUpper.length] : ' ';
-            
+
             if (charBefore.match(/\s|,|^/) && charAfter.match(/\s|,|$/)) {
                  foundRank = r;
                  rankIndex = currentRankIndex;
@@ -734,15 +733,15 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
     if (foundRank && rankIndex !== -1) {
         namePart = (namePart.substring(0, rankIndex) + namePart.substring(rankIndex + rankLength)).trim().replace(/\s+/g, " ");
     }
-    
+
     let lastName: string | null = null;
     let firstName: string | null = null;
     if (namePart) {
         const nameParts = namePart.split(/\s+/).filter(p => p); // Filter empty strings
         if (nameParts.length > 0) {
-            if (nameParts.length === 1) { 
+            if (nameParts.length === 1) {
                 lastName = nameParts[0];
-                firstName = ""; 
+                firstName = "";
             } else {
                 if (namePart.includes(",")) {
                     const commaParts = namePart.split(",").map(p => p.trim());
@@ -755,7 +754,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             }
         }
     }
-    
+
     return { lastName, firstName, rank: foundRank, memberUID };
 }
 
@@ -772,7 +771,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
     const staffMapByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
 
     const reader = new FileReader();
-    reader.onload = async (e) => { 
+    reader.onload = async (e) => {
       const skippedRecordsLog: string[] = [];
       try {
         const text = e.target?.result as string;
@@ -782,10 +781,10 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
           return;
         }
 
-        const logsToAdd: Omit<TrainingLog, 'id'>[] = []; 
+        const logsToAdd: Omit<TrainingLog, 'id'>[] = [];
         const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
         const errors: string[] = [];
-        
+
         const allRows = robustCsvParser(text);
 
         if (allRows.length < 2) {
@@ -793,16 +792,16 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         } else {
           const header = allRows[0].map(h => h.trim());
           const expectedHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
-          const requiredDataHeaders = ["Surname", "EffectiveDate", "Details", "ChangeType"]; 
+          const requiredDataHeaders = ["Surname", "EffectiveDate", "Details", "ChangeType"];
 
           const headerIndices: Record<string, number> = {};
           let allRequiredHeadersPresent = true;
 
-          expectedHeaders.forEach(eh => { 
+          expectedHeaders.forEach(eh => {
             const index = header.indexOf(eh);
             if (index !== -1) {
               headerIndices[eh] = index;
-            } else if (requiredDataHeaders.includes(eh)) { 
+            } else if (requiredDataHeaders.includes(eh)) {
               errors.push(`Missing required CSV header: "${eh}".`);
               allRequiredHeadersPresent = false;
             }
@@ -816,13 +815,13 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                   duration: 15000,
               });
               if (accomplishmentCsvInputRef) accomplishmentCsvInputRef.value = "";
-              setIsImportingAccomplishments(false); 
+              setIsImportingAccomplishments(false);
               return;
           }
-          
-          for (let i = 1; i < allRows.length; i++) { 
+
+          for (let i = 1; i < allRows.length; i++) {
               const values = allRows[i];
-              if (values.every(val => val.trim() === "")) continue; 
+              if (values.every(val => val.trim() === "")) continue;
 
               if (values.length !== header.length) {
                   errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${allRows[i].join(",").substring(0,100)}..."`);
@@ -833,12 +832,12 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                expectedHeaders.forEach(eh => {
                    const index = headerIndices[eh];
                    if (index !== undefined && index < values.length) {
-                       csvRowData[eh] = values[index]; 
+                       csvRowData[eh] = values[index];
                    } else {
-                       csvRowData[eh] = ""; 
+                       csvRowData[eh] = "";
                    }
               });
-              
+
               const surnameField = csvRowData["Surname"];
               if (!surnameField) {
                   errors.push(`Row ${i + 1}: Missing "Surname" field content.`);
@@ -853,36 +852,35 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                   skippedRecordsLog.push(`Row ${i + 1}: Skipped - Could not parse MemberUID from "${surnameField}".`);
                   continue;
               }
-              
+
               const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
 
               if (!matchedStaffFromMap) {
                   const skipMsg = `Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`;
-                  errors.push(skipMsg);
-                  skippedRecordsLog.push(skipMsg);
-                  continue; 
+                  skippedRecordsLog.push(skipMsg); // No need to push to errors as it's a skip condition
+                  continue;
               }
-              
+
               const details = csvRowData["Details"]?.trim();
               const effectiveDateStr = csvRowData["EffectiveDate"];
               const endDateStr = csvRowData["EndDate"]?.trim();
               const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
               const statusName = csvRowData["StatusName"]?.trim().toLowerCase();
               const comment = csvRowData["Comment"]?.trim();
-              
+
               if (!effectiveDateStr) {
                   errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing "EffectiveDate".`);
                   skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Missing "EffectiveDate".`);
                   continue;
               }
-              
+
               const effectiveDate = parseDate(effectiveDateStr);
               if (!effectiveDate) {
                   errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}".`);
                   skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Invalid "EffectiveDate" ("${effectiveDateStr}").`);
                   continue;
               }
-              
+
               const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...JSON.parse(JSON.stringify(matchedStaffFromMap)) };
 
 
@@ -892,10 +890,10 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                 if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Position change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change missing 'Details'.`); continue; }
                 const positionEndDate = endDateStr ? parseDate(endDateStr) : null;
                 if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change invalid 'EndDate' ("${endDateStr}").`); continue; }
-                
+
                 staffUpdateData.serviceHistoryToAdd.push({
-                    id: crypto.randomUUID(), type: "Position", item: details, 
-                    effectiveDate: effectiveDate, endDate: positionEndDate, notes: comment 
+                    id: crypto.randomUUID(), type: "Position", item: details,
+                    effectiveDate: effectiveDate, endDate: positionEndDate, notes: comment
                 });
                 if (statusName === "current" && details !== staffUpdateData.role) {
                     staffUpdateData.role = details;
@@ -904,27 +902,27 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                 if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Rank change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change missing 'Details'.`); continue; }
                 const parsedRank = parseFullRankNameToAbbreviation(details);
                 if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Could not parse rank from Details: "${details}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change invalid rank in 'Details' ("${details}").`); continue; }
-                
+
                 staffUpdateData.serviceHistoryToAdd.push({
-                    id: crypto.randomUUID(), type: "Rank", item: parsedRank, 
+                    id: crypto.randomUUID(), type: "Rank", item: parsedRank,
                     effectiveDate: effectiveDate, notes: comment
                 });
                 if (statusName === "current" && parsedRank !== staffUpdateData.rank) {
                     staffUpdateData.rank = parsedRank;
                 }
-              } else { 
+              } else {
                 if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing 'Details' for accomplishment/training log.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Accomplishment missing 'Details'.`); continue; }
                 const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
-                  rank: parsedNameRankUid.rank || matchedStaffFromMap.rank, 
+                  rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
                   staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
-                  squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A", 
-                  currentRole: matchedStaffFromMap.role || "N/A",  
+                  squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
+                  currentRole: matchedStaffFromMap.role || "N/A",
                   courseName: details,
                   completionDate: effectiveDate,
-                  qualificationAchieved: details, 
-                  instructorQualification: "", 
-                  achievementDetails: comment || "", 
-                  serviceNumber: matchedStaffFromMap.serviceNumber, 
+                  qualificationAchieved: details,
+                  instructorQualification: "",
+                  achievementDetails: comment || "",
+                  serviceNumber: matchedStaffFromMap.serviceNumber,
                 };
                 logsToAdd.push(newLog as Omit<TrainingLog, 'id'>);
               }
@@ -939,8 +937,8 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         for (const log of logsToAdd) {
            try {
                const collectionRef = collection(db, 'trainingLogs');
-               const { id, ...logDataForFirestore } = log; 
-                const dataToSave: any = { 
+               const { id, ...logDataForFirestore } = log;
+                const dataToSave: any = {
                     ...logDataForFirestore,
                     completionDate: Timestamp.fromDate(log.completionDate),
                 };
@@ -949,13 +947,13 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                         delete dataToSave[key as keyof typeof dataToSave];
                     }
                 });
-               batch.set(doc(collectionRef), dataToSave); 
+               batch.set(doc(collectionRef), dataToSave);
                trainingLogsImportedCount++;
            } catch (err: any) {
                errors.push(`Failed to stage training log "${log.courseName}" for ${log.staffName}: ${err.message}`);
            }
         }
-        
+
         staffUpdates.forEach((update, staffId) => {
             const staffDocRef = doc(db, "staff", staffId);
             const updatePayload: any = {};
@@ -963,7 +961,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             const originalStaffMember = currentStaffList.find(s => s.id === staffId);
             if (!originalStaffMember) {
                 errors.push(`Consistency error: Could not find original staff data for ID ${staffId} during batch update.`);
-                return; 
+                return;
             }
 
             if (update.joinDate !== undefined && update.joinDate !== originalStaffMember.joinDate) {
@@ -975,7 +973,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             if (update.rank !== undefined && update.rank !== originalStaffMember.rank) {
                  updatePayload.rank = update.rank;
             }
-            
+
             const existingHistory = originalStaffMember.serviceHistory || [];
             const newHistoryEntries = update.serviceHistoryToAdd.map(entry => ({
                 ...entry,
@@ -985,10 +983,9 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             }));
 
             if (newHistoryEntries.length > 0) {
-              // Create a Set of existing entry identifiers to check for duplicates before adding
               const existingEntryIdentifiers = new Set(existingHistory.map(eh => `${eh.type}-${eh.item}-${format(new Date(eh.effectiveDate), 'yyyy-MM-dd')}`));
               const uniqueNewEntries = newHistoryEntries.filter(ne => !existingEntryIdentifiers.has(`${ne.type}-${ne.item}-${format(new Date(ne.effectiveDate.toDate()), 'yyyy-MM-dd')}`));
-              
+
               if (uniqueNewEntries.length > 0) {
                 updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries);
               }
@@ -1004,14 +1001,14 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
         if (trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0) {
             await batch.commit();
         }
-        
+
         let toastTitle = "Import Processing Complete";
         let toastVariant: "default" | "destructive" = "default";
         let toastDescription = "";
 
         if (trainingLogsImportedCount > 0) toastDescription += `${trainingLogsImportedCount} training log(s) staged. `;
         if (staffProfilesUpdatedCount > 0) toastDescription += `${staffProfilesUpdatedCount} staff profile(s) updated. `;
-        
+
         if (errors.length > 0) {
             toastTitle = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "Import Partially Successful" : "Import Failed";
             toastVariant = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "default" : "destructive";
@@ -1031,7 +1028,7 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
             toastTitle = "Import Information";
             toastDescription = "No new records or staff updates processed from the CSV.";
         }
-        
+
         toast({
             variant: toastVariant,
             title: toastTitle,
@@ -1432,4 +1429,3 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
     </div>
   );
 }
-    
