@@ -97,6 +97,8 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
 
   const logsCollectionRef = collection(db, 'trainingLogs');
 
+  // This query requires a composite index on (serviceNumber, completionDate DESC)
+  // The error message from Firebase will provide a link to create it if missing.
   const q = query(
     logsCollectionRef,
     where('serviceNumber', '==', staffMember.serviceNumber),
@@ -145,6 +147,31 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   }
 
   return { rank, firstName: null, lastName: namePart };
+}
+
+function calculateOICLevel(logs: TrainingLog[]): number | null {
+  let maxLevel = null;
+  // Regex to find "Activity OIC Level X" or "OIC Level X" (case-insensitive)
+  // It captures the number X. \b ensures word boundaries.
+  const oicPattern = /\b(?:Activity\s+)?OIC Level\s*(\d+)\b/i;
+
+  for (const log of logs) {
+    const sourcesToSearch = [log.courseName, log.qualificationAchieved];
+    for (const source of sourcesToSearch) {
+      if (source) {
+        const match = source.match(oicPattern);
+        if (match && match[1]) { // match[1] will contain the number X
+          const level = parseInt(match[1], 10);
+          if (!isNaN(level)) {
+            if (maxLevel === null || level > maxLevel) {
+              maxLevel = level;
+            }
+          }
+        }
+      }
+    }
+  }
+  return maxLevel;
 }
 
 
@@ -657,6 +684,10 @@ export default function StaffPage() {
     // --- Basic Info ---
     await addSectionTitle("Basic Information");
     await addDetailLine("Service Number", staffMember.serviceNumber);
+    const oicLevel = calculateOICLevel(staffTrainingLogs);
+    if (oicLevel !== null) {
+      await addDetailLine("OIC Level", oicLevel.toString());
+    }
     await addDetailLine("Role", staffMember.role);
     await addDetailLine("Squadron", staffMember.squadron);
     yPos += sectionSpacing * 0.5;
@@ -947,7 +978,12 @@ export default function StaffPage() {
                 <DialogHeader>
                     <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
                     <DialogDescription>
-                       Service No: {viewingStaffMember.serviceNumber} | Role: {viewingStaffMember.role || "N/A"} | Squadron: {viewingStaffMember.squadron || 'N/A'}
+                       Service No: {viewingStaffMember.serviceNumber}
+                       {(() => {
+                         const oicLevel = calculateOICLevel(viewedStaffTrainingLogs);
+                         return oicLevel !== null ? ` | OIC Level: ${oicLevel}` : '';
+                       })()}
+                       {' '}| Role: {viewingStaffMember.role || "N/A"} | Squadron: {viewingStaffMember.squadron || 'N/A'}
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh] p-1 pr-4">
@@ -1182,4 +1218,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
