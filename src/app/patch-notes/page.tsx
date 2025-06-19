@@ -12,8 +12,29 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.1.3",
+    version: "0.1.4",
     date: "Current",
+    title: "Patch Notes Page & Export Functionality",
+    sections: [
+      {
+        title: "New 'Patch Notes' Module (/patch-notes)",
+        items: [
+          "Created a dedicated page to display a history of application updates and improvements.",
+          "Added functionality to export the complete patch notes as a PDF document.",
+          "Integrated a 'Patch Notes' link into the main sidebar navigation for easy access.",
+        ],
+      },
+      {
+        title: "Configuration Fix",
+        items: [
+          "Updated Next.js configuration (next.config.ts) to include necessary `allowedDevOrigins` to resolve cross-origin request errors in the Firebase Studio development environment.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.1.3",
+    date: "Previous Update",
     title: "Dashboard Interactivity, New Reports Module, Staff Module Enhancements",
     sections: [
       {
