@@ -2,6 +2,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type jsPDF from 'jspdf';
+import type { TrainingLog } from "@/app/training/training-schema"; // Added for OIC Level calculation
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -146,4 +147,28 @@ export function resetLetterheadCache() {
   footerImageBase64 = null;
   headerImageDimensions = null;
   footerImageDimensions = null;
+}
+
+// Moved from staff/page.tsx
+export function calculateOICLevel(logs: TrainingLog[]): number | null {
+  let maxLevel = null;
+  const oicPattern = /\b(?:Activity\s+)?OIC Level\s*(\d+)\b/i;
+
+  for (const log of logs) {
+    const sourcesToSearch = [log.courseName, log.qualificationAchieved];
+    for (const source of sourcesToSearch) {
+      if (source) {
+        const match = source.match(oicPattern);
+        if (match && match[1]) { 
+          const level = parseInt(match[1], 10);
+          if (!isNaN(level)) {
+            if (maxLevel === null || level > maxLevel) {
+              maxLevel = level;
+            }
+          }
+        }
+      }
+    }
+  }
+  return maxLevel;
 }

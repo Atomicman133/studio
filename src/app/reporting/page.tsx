@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -211,7 +211,7 @@ const processComplianceReports = (
 };
 
 
-export default function ReportingPage() {
+export default function CompliancePage() {
   const { data: staffList = [], isLoading: isLoadingStaff, error: errorStaff } = useStaff();
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs, refetch: refetchTrainingLogs } = useQuery<TrainingLog[], Error>({
     queryKey: [TRAINING_LOGS_QUERY_KEY],
@@ -733,9 +733,9 @@ export default function ReportingPage() {
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-3">
-              <FileSearch className="h-8 w-8 text-primary hidden sm:block" />
+              <BarChart3 className="h-8 w-8 text-primary hidden sm:block" />
               <div>
-                <CardTitle className="text-2xl">Compliance Reporting</CardTitle>
+                <CardTitle className="text-2xl">Compliance</CardTitle>
                 <CardDescription>
                   Overview of staff compliance status based on training records and defined criteria.
                 </CardDescription>

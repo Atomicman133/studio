@@ -70,7 +70,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import jsPDF from 'jspdf';
-import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, calculateOICLevel } from '@/lib/utils'; // Import calculateOICLevel from utils
 import { COMPLIANCE_CRITERIA_CONFIG, type ComplianceCriterionCheck, type StaffComplianceReport } from "@/app/reporting/reporting-schema";
 
 
@@ -113,7 +113,7 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
     })) as TrainingLog[];
   } catch (error) {
     console.error("Error fetching training logs for staff SN:", staffMember.serviceNumber, error);
-    return [];
+    return []; 
   }
 }
 
@@ -147,31 +147,6 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   }
 
   return { rank, firstName: null, lastName: namePart };
-}
-
-function calculateOICLevel(logs: TrainingLog[]): number | null {
-  let maxLevel = null;
-  // Regex to find "Activity OIC Level X" or "OIC Level X" (case-insensitive)
-  // It captures the number X. \b ensures word boundaries.
-  const oicPattern = /\b(?:Activity\s+)?OIC Level\s*(\d+)\b/i;
-
-  for (const log of logs) {
-    const sourcesToSearch = [log.courseName, log.qualificationAchieved];
-    for (const source of sourcesToSearch) {
-      if (source) {
-        const match = source.match(oicPattern);
-        if (match && match[1]) { // match[1] will contain the number X
-          const level = parseInt(match[1], 10);
-          if (!isNaN(level)) {
-            if (maxLevel === null || level > maxLevel) {
-              maxLevel = level;
-            }
-          }
-        }
-      }
-    }
-  }
-  return maxLevel;
 }
 
 

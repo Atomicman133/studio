@@ -14,11 +14,12 @@ import {
   LogOut, 
   LayoutDashboard,
   Plane,
-  FileSearch,
+  FileSearch, // Used for new Reports icon
   ClipboardList, 
   UserCircle,
   Sun,
   Moon,
+  BarChart3, // New icon for Compliance
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation"; 
@@ -69,7 +70,8 @@ const navItems: NavItem[] = [
   { href: "/discipline", label: "Discipline Actions", icon: Gavel },
   { href: "/audits", label: "Safety Audits", icon: ShieldCheck },
   { href: "/squadron-visits", label: "Squadron Visits", icon: ClipboardList }, 
-  { href: "/reporting", label: "Compliance Reporting", icon: FileSearch }, 
+  { href: "/reporting", label: "Compliance", icon: BarChart3 }, 
+  { href: "/reports", label: "Reports", icon: FileSearch },
   { href: "/staff", label: "Staff Management", icon: Users },
 ];
 
