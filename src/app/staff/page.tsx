@@ -68,18 +68,14 @@ import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, Timestamp, writeBatch, doc, arrayUnion, addDoc } from 'firebase/firestore';
 import jsPDF from 'jspdf';
-import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, calculateOICLevel } from '@/lib/utils'; // Import calculateOICLevel from utils
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, calculateOICLevel } from '@/lib/utils'; 
 import { COMPLIANCE_CRITERIA_CONFIG, type ComplianceCriterionCheck, type StaffComplianceReport } from "@/app/reporting/reporting-schema";
 
 
 import type { TrainingLog } from "../training/training-schema";
-import { convertLogTimestamps as convertTrainingLogTimestamps } from "../training/page";
-// import type { Meeting } from "../meetings/meeting-schema"; // Placeholder
-// import type { DisciplineAction } from "../discipline/discipline-schema"; // Placeholder
-// import type { Pdp } from "../pdps/pdp-schema"; // Placeholder
-// import type { SafetyAudit } from "../audits/audit-schema"; // Placeholder
+import { convertLogTimestamps as convertTrainingLogTimestamps, TRAINING_LOGS_QUERY_KEY } from "../training/training-schema"; // Use schema for key
 
 
 type StaffGroup = {
@@ -91,20 +87,175 @@ const STAFF_TRAINING_LOGS_QUERY_KEY = 'staffTrainingLogs';
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
+// Moved from training/page.tsx
+const FULL_RANK_TO_ABBREVIATION_MAP: Record<string, typeof RANKS[number]> = {
+  "AIRCRAFTMAN (AAFC)": "AC(AAFC)",
+  "AIRCRAFTWOMAN (AAFC)": "ACW(AAFC)",
+  "LEADING AIRCRAFTMAN (AAFC)": "LAC(AAFC)",
+  "LEADING AIRCRAFTWOMAN (AAFC)": "LACW(AAFC)",
+  "CORPORAL (AAFC)": "CPL(AAFC)",
+  "SERGEANT (AAFC)": "SGT(AAFC)",
+  "FLIGHT SERGEANT (AAFC)": "FSGT(AAFC)",
+  "WARRANT OFFICER (AAFC)": "WOFF(AAFC)",
+  "PILOT OFFICER (AAFC)": "PLTOFF(AAFC)",
+  "FLYING OFFICER (AAFC)": "FLGOFF(AAFC)",
+  "FLIGHT LIEUTENANT (AAFC)": "FLTLT(AAFC)",
+  "SQUADRON LEADER (AAFC)": "SQNLDR(AAFC)",
+  "WING COMMANDER (AAFC)": "WGCDR(AAFC)",
+  "GROUP CAPTAIN (AAFC)": "GPCAPT(AAFC)",
+  "CIVILIAN INSTRUCTOR": "CIV",
+  "REGIONAL WARRANT OFFICER": "WOFF(AAFC)",
+  "DIRECTOR GENERAL CADETS - AIR FORCE": "GPCAPT(AAFC)",
+  "COMMANDER AUSTRALIAN AIR FORCE CADETS": "WGCDR(AAFC)",
+};
+
+// Moved from training/page.tsx
+function parseFullRankNameToAbbreviation(fullRankStringInput: string | undefined): typeof RANKS[number] | null {
+  if (!fullRankStringInput) return null;
+  const upperFullRankString = fullRankStringInput.toUpperCase().replace(/^ACTUAL - /i, "").trim();
+  if (FULL_RANK_TO_ABBREVIATION_MAP[upperFullRankString]) {
+    return FULL_RANK_TO_ABBREVIATION_MAP[upperFullRankString];
+  }
+  const rankAsConst = upperFullRankString as typeof RANKS[number];
+  if (RANKS.includes(rankAsConst)) {
+    return rankAsConst;
+  }
+  console.warn(`[RankParse] Could not parse full rank: "${fullRankStringInput}" to an abbreviation. Input normalized to: "${upperFullRankString}"`);
+  return null;
+}
+
+// Moved from training/page.tsx
+function parseCompositeSurnameField(surnameFieldInput: string): { lastName: string | null, firstName: string | null, rank: typeof RANKS[number] | null, memberUID: string | null } {
+    const surnameField = surnameFieldInput.trim().replace(/\r\n|\n|\r/g, " ");
+
+    let namePart = surnameField;
+    let foundRank: typeof RANKS[number] | null = null;
+    let memberUID: string | null = null;
+
+    const uidMatch = namePart.match(/(\d{7,})$/);
+    if (uidMatch && uidMatch[1]) {
+        memberUID = uidMatch[1];
+        namePart = namePart.substring(0, namePart.lastIndexOf(memberUID)).trim();
+    } else {
+        const partsForUid = namePart.split(/\s+/);
+        if (partsForUid.length > 1 && /^\d+$/.test(partsForUid[partsForUid.length - 1])) {
+            memberUID = partsForUid.pop()!;
+            namePart = partsForUid.join(" ");
+        }
+    }
+
+    const sortedRanks = [...RANKS].sort((a, b) => b.length - a.length);
+    let rankIndex = -1;
+    let rankLength = 0;
+
+    for (const r of sortedRanks) {
+        const rUpper = r.toUpperCase();
+        const namePartUpper = namePart.toUpperCase();
+        const currentRankIndex = namePartUpper.indexOf(rUpper);
+        if (currentRankIndex !== -1) {
+            const charBefore = currentRankIndex > 0 ? namePartUpper[currentRankIndex - 1] : ' ';
+            const charAfter = currentRankIndex + rUpper.length < namePartUpper.length ? namePartUpper[currentRankIndex + rUpper.length] : ' ';
+
+            if (charBefore.match(/\s|,|^/) && charAfter.match(/\s|,|$/)) {
+                 foundRank = r;
+                 rankIndex = currentRankIndex;
+                 rankLength = r.length;
+                 break;
+            }
+        }
+    }
+
+    if (foundRank && rankIndex !== -1) {
+        namePart = (namePart.substring(0, rankIndex) + namePart.substring(rankIndex + rankLength)).trim().replace(/\s+/g, " ");
+    }
+
+    let lastName: string | null = null;
+    let firstName: string | null = null;
+    if (namePart) {
+        const nameParts = namePart.split(/\s+/).filter(p => p); 
+        if (nameParts.length > 0) {
+            if (nameParts.length === 1) {
+                lastName = nameParts[0];
+                firstName = "";
+            } else {
+                if (namePart.includes(",")) {
+                    const commaParts = namePart.split(",").map(p => p.trim());
+                    lastName = commaParts[0];
+                    firstName = commaParts.length > 1 ? commaParts[1] : "";
+                } else {
+                    lastName = nameParts[nameParts.length - 1];
+                    firstName = nameParts.slice(0, -1).join(" ");
+                }
+            }
+        }
+    }
+
+    return { lastName, firstName, rank: foundRank, memberUID };
+}
+
+const robustCsvParser = (csvText: string): string[][] => {
+    const rows: string[][] = [];
+    if (!csvText || csvText.trim() === "") return rows;
+
+    let currentRow: string[] = [];
+    let currentField = "";
+    let inQuotedField = false;
+    const normalizedText = csvText.replace(/\r\n|\r/g, '\n');
+
+    for (let i = 0; i < normalizedText.length; i++) {
+        const char = normalizedText[i];
+
+        if (inQuotedField) {
+            if (char === '"') {
+                if (i + 1 < normalizedText.length && normalizedText[i + 1] === '"') {
+                    currentField += '"';
+                    i++;
+                } else {
+                    inQuotedField = false;
+                }
+            } else {
+                currentField += char;
+            }
+        } else {
+            if (char === '"') {
+                if (currentField.trim() === "") {
+                    inQuotedField = true;
+                } else {
+                    currentField += char;
+                }
+            } else if (char === ',') {
+                currentRow.push(currentField.trim());
+                currentField = "";
+            } else if (char === '\n') {
+                currentRow.push(currentField.trim());
+                currentField = "";
+                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim() !== "") : true) ) {
+                    rows.push([...currentRow]);
+                }
+                currentRow = [];
+            } else {
+                currentField += char;
+            }
+        }
+    }
+    if (currentField || currentRow.length > 0) {
+        currentRow.push(currentField.trim());
+    }
+    if (currentRow.length > 0 && currentRow.some(f => f.trim() !== "")) {
+        rows.push([...currentRow]);
+    }
+    return rows;
+};
+
 
 async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promise<TrainingLog[]> {
-  if (!staffMember || !staffMember.serviceNumber) return []; // Require service number for this fetch
-
+  if (!staffMember || !staffMember.serviceNumber) return []; 
   const logsCollectionRef = collection(db, 'trainingLogs');
-
-  // This query requires a composite index on (serviceNumber, completionDate DESC)
-  // The error message from Firebase will provide a link to create it if missing.
   const q = query(
     logsCollectionRef,
     where('serviceNumber', '==', staffMember.serviceNumber),
     orderBy('completionDate', 'desc')
   );
-
   try {
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => ({
@@ -120,9 +271,7 @@ async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promi
 function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[number] | null, firstName: string | null, lastName: string | null } {
   let rank: typeof RANKS[number] | null = null;
   let namePart = memberNameInput.trim();
-
   const sortedRanksForParsing = [...RANKS].sort((a, b) => b.length - a.length);
-
   for (const r of sortedRanksForParsing) {
     if (namePart.toUpperCase().startsWith(r + " ")) {
       rank = r as typeof RANKS[number];
@@ -130,9 +279,7 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
       break;
     }
   }
-
   if (!namePart) return { rank, firstName: null, lastName: null };
-
   const parts = namePart.split(' ').filter(p => p);
   if (parts.length >= 2) {
     const lastName = parts[parts.length - 1];
@@ -141,11 +288,9 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
       return { rank, firstName, lastName };
     }
   }
-
   if (parts.length === 1 && parts[0]) {
     return { rank, firstName: null, lastName: parts[0] };
   }
-
   return { rank, firstName: null, lastName: namePart };
 }
 
@@ -161,14 +306,35 @@ export default function StaffPage() {
   const [editingStaff, setEditingStaff] = React.useState<StaffMember | null>(null);
   const [staffToDelete, setStaffToDelete] = React.useState<StaffMember | null>(null);
   const [viewingStaffMember, setViewingStaffMember] = React.useState<StaffMember | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const staffCsvInputRef = React.useRef<HTMLInputElement>(null); // Renamed for clarity
+  const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null); // New ref for accomplishment CSVs
   const { toast } = useToast();
-  const [isImportingCsv, setIsImportingCsv] = React.useState(false);
+  const [isImportingStaffCsv, setIsImportingStaffCsv] = React.useState(false); // Renamed
+  const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false); // New state
   const [openSquadrons, setOpenSquadrons] = React.useState<Record<string, boolean>>({});
 
   const toggleSquadron = (squadronName: string) => {
     setOpenSquadrons(prev => ({ ...prev, [squadronName]: !(prev[squadronName] ?? true) }));
   };
+
+   React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isImportingStaffCsv || isImportingAccomplishments) {
+        event.preventDefault();
+        event.returnValue = "Import is in progress. Are you sure you want to leave? This may interrupt the import.";
+      }
+    };
+
+    if (isImportingStaffCsv || isImportingAccomplishments) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    } else {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isImportingStaffCsv, isImportingAccomplishments]);
 
 
   const {
@@ -298,20 +464,20 @@ export default function StaffPage() {
     "SQNXI": "Squadron Executive Instructor",
   };
 
-  const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStaffCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
       toast({ variant: "destructive", title: "Import Error", description: "No file selected." });
       return;
     }
-    setIsImportingCsv(true);
+    setIsImportingStaffCsv(true);
 
     const reader = new FileReader();
     reader.onload = async (e) => {
       const text = e.target?.result as string;
       if (!text) {
         toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
-        setIsImportingCsv(false);
+        setIsImportingStaffCsv(false);
         return;
       }
 
@@ -464,7 +630,7 @@ export default function StaffPage() {
 
           if (existingStaffMember) {
             memberDataPayload.id = existingStaffMember.id;
-            memberDataPayload.serviceHistory = existingStaffMember.serviceHistory || []; // Preserve existing service history
+            memberDataPayload.serviceHistory = existingStaffMember.serviceHistory || []; 
             if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
                 errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
                 continue;
@@ -486,7 +652,7 @@ export default function StaffPage() {
               })
             );
           } else {
-            memberDataPayload.serviceHistory = []; // New staff start with empty history
+            memberDataPayload.serviceHistory = []; 
             if (email && existingEmails.has(email)) {
               errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
               continue;
@@ -536,22 +702,335 @@ export default function StaffPage() {
         console.error("Error during CSV import processing:", error);
         toast({ variant: "destructive", title: "Import Error", description: error.message || "An unexpected error occurred during processing." });
       } finally {
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
+        if (staffCsvInputRef.current) {
+          staffCsvInputRef.current.value = "";
         }
-        setIsImportingCsv(false);
+        setIsImportingStaffCsv(false);
         queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
       }
     };
     reader.onerror = () => {
       toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (staffCsvInputRef.current) {
+        staffCsvInputRef.current.value = "";
       }
-      setIsImportingCsv(false);
+      setIsImportingStaffCsv(false);
     };
     reader.readAsText(file);
   };
+
+  const parseDateForAccomplishment = (dateString: string): Date | null => {
+    const formatsToTry = ["dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "dd-MM-yyyy", "yyyy/MM/dd", "dd/MM/yy", "d-MMM-yy"];
+    for (const fmt of formatsToTry) {
+      const parsed = parseDateFns(dateString, fmt, new Date());
+      if (isValidDate(parsed)) return parsed;
+    }
+    const directParsed = new Date(dateString);
+    if (isValidDate(directParsed)) return directParsed;
+    console.warn(`[AccomplishmentDateParse] Could not parse date: "${dateString}" with any known format.`);
+    return null;
+  };
+
+
+  const handleAccomplishmentCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      toast({ variant: "destructive", title: "Import Error", description: "No file selected." });
+      return;
+    }
+    setIsImportingAccomplishments(true);
+
+    const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
+    const staffMapByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const skippedRecordsLog: string[] = [];
+      try {
+        const text = e.target?.result as string;
+        if (!text) {
+          toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
+          setIsImportingAccomplishments(false);
+          return;
+        }
+
+        const logsToAdd: Omit<TrainingLog, 'id'>[] = [];
+        const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
+        const errors: string[] = [];
+
+        const allRows = robustCsvParser(text);
+
+        if (allRows.length < 2) {
+          errors.push("CSV must have a header and at least one data row.");
+        } else {
+          const header = allRows[0].map(h => h.trim());
+          const expectedHeaders = ["Unit_1", "Surname", "EffectiveDate", "EndDate", "ChangeType", "StatusName", "Details", "Comment"];
+          const requiredDataHeaders = ["Surname", "EffectiveDate", "Details", "ChangeType"];
+
+          const headerIndices: Record<string, number> = {};
+          let allRequiredHeadersPresent = true;
+
+          expectedHeaders.forEach(eh => {
+            const index = header.indexOf(eh);
+            if (index !== -1) {
+              headerIndices[eh] = index;
+            } else if (requiredDataHeaders.includes(eh)) {
+              errors.push(`Missing required CSV header: "${eh}".`);
+              allRequiredHeadersPresent = false;
+            }
+          });
+
+          if (!allRequiredHeadersPresent) {
+               toast({
+                  variant: "destructive",
+                  title: "CSV Import Failed: Header Mismatch",
+                  description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
+                  duration: 15000,
+              });
+              if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+              setIsImportingAccomplishments(false);
+              return;
+          }
+
+          for (let i = 1; i < allRows.length; i++) {
+              const values = allRows[i];
+              if (values.every(val => val.trim() === "")) continue;
+
+              if (values.length !== header.length) {
+                  errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${allRows[i].join(",").substring(0,100)}..."`);
+                  continue;
+              }
+
+              const csvRowData: Record<string, string> = {};
+               expectedHeaders.forEach(eh => {
+                   const index = headerIndices[eh];
+                   if (index !== undefined && index < values.length) {
+                       csvRowData[eh] = values[index];
+                   } else {
+                       csvRowData[eh] = "";
+                   }
+              });
+
+              const surnameField = csvRowData["Surname"];
+              if (!surnameField) {
+                  errors.push(`Row ${i + 1}: Missing "Surname" field content.`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Missing "Surname" field.`);
+                  continue;
+              }
+
+              const parsedNameRankUid = parseCompositeSurnameField(surnameField);
+
+              if (!parsedNameRankUid.memberUID) {
+                  errors.push(`Row ${i + 1}: Could not parse MemberUID from Surname field: "${surnameField}".`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Could not parse MemberUID from "${surnameField}".`);
+                  continue;
+              }
+
+              const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
+
+              if (!matchedStaffFromMap) {
+                  const skipMsg = `Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`;
+                  skippedRecordsLog.push(skipMsg);
+                  continue;
+              }
+
+              const details = csvRowData["Details"]?.trim();
+              const effectiveDateStr = csvRowData["EffectiveDate"];
+              const endDateStr = csvRowData["EndDate"]?.trim();
+              const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
+              const statusName = csvRowData["StatusName"]?.trim().toLowerCase();
+              const comment = csvRowData["Comment"]?.trim();
+
+              if (!effectiveDateStr) {
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing "EffectiveDate".`);
+                  skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Missing "EffectiveDate".`);
+                  continue;
+              }
+
+              const effectiveDate = parseDateForAccomplishment(effectiveDateStr);
+              if (!effectiveDate) {
+                  errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}".`);
+                  skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Invalid "EffectiveDate" ("${effectiveDateStr}").`);
+                  continue;
+              }
+
+              const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...JSON.parse(JSON.stringify(matchedStaffFromMap)) };
+
+              if (changeType === "enrolment") {
+                staffUpdateData.joinDate = effectiveDate;
+              } else if (changeType === "position") {
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Position change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change missing 'Details'.`); continue; }
+                const positionEndDate = endDateStr ? parseDateForAccomplishment(endDateStr) : null;
+                if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change invalid 'EndDate' ("${endDateStr}").`); continue; }
+
+                staffUpdateData.serviceHistoryToAdd.push({
+                    id: crypto.randomUUID(), type: "Position", item: details,
+                    effectiveDate: effectiveDate, endDate: positionEndDate, notes: comment
+                });
+                if (statusName === "current" && details !== staffUpdateData.role) {
+                    staffUpdateData.role = details;
+                }
+              } else if (changeType === "rank") {
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Rank change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change missing 'Details'.`); continue; }
+                const parsedRank = parseFullRankNameToAbbreviation(details);
+                if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Could not parse rank from Details: "${details}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change invalid rank in 'Details' ("${details}").`); continue; }
+
+                staffUpdateData.serviceHistoryToAdd.push({
+                    id: crypto.randomUUID(), type: "Rank", item: parsedRank,
+                    effectiveDate: effectiveDate, notes: comment
+                });
+                if (statusName === "current" && parsedRank !== staffUpdateData.rank) {
+                    staffUpdateData.rank = parsedRank;
+                }
+              } else {
+                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing 'Details' for accomplishment/training log.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Accomplishment missing 'Details'.`); continue; }
+                const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
+                  rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
+                  staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
+                  squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
+                  currentRole: matchedStaffFromMap.role || "N/A",
+                  courseName: details,
+                  completionDate: effectiveDate,
+                  qualificationAchieved: details, // Assuming Details field contains qualification for accomplishments
+                  instructorQualification: "",
+                  achievementDetails: comment || "",
+                  serviceNumber: matchedStaffFromMap.serviceNumber,
+                };
+                logsToAdd.push(newLog as Omit<TrainingLog, 'id'>);
+              }
+              staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
+          }
+        }
+
+        const batch = writeBatch(db);
+        let trainingLogsImportedCount = 0;
+        let staffProfilesUpdatedCount = 0;
+
+        for (const log of logsToAdd) {
+           try {
+               const collectionRef = collection(db, 'trainingLogs');
+               const { id, ...logDataForFirestore } = log; 
+                const dataToSave: any = {
+                    ...logDataForFirestore,
+                    completionDate: Timestamp.fromDate(log.completionDate),
+                };
+                Object.keys(dataToSave).forEach(key => {
+                    if (dataToSave[key as keyof typeof dataToSave] === null || dataToSave[key as keyof typeof dataToSave] === undefined) {
+                        delete dataToSave[key as keyof typeof dataToSave];
+                    }
+                });
+               batch.set(doc(collectionRef), dataToSave);
+               trainingLogsImportedCount++;
+           } catch (err: any) {
+               errors.push(`Failed to stage training log "${log.courseName}" for ${log.staffName}: ${err.message}`);
+           }
+        }
+
+        staffUpdates.forEach((update, staffId) => {
+            const staffDocRef = doc(db, "staff", staffId);
+            const updatePayload: any = {};
+
+            const originalStaffMember = currentStaffList.find(s => s.id === staffId);
+            if (!originalStaffMember) {
+                errors.push(`Consistency error: Could not find original staff data for ID ${staffId} during batch update.`);
+                return;
+            }
+
+            if (update.joinDate !== undefined && update.joinDate !== originalStaffMember.joinDate) {
+                 updatePayload.joinDate = Timestamp.fromDate(new Date(update.joinDate!));
+            }
+            if (update.role !== undefined && update.role !== originalStaffMember.role) {
+                 updatePayload.role = update.role;
+            }
+            if (update.rank !== undefined && update.rank !== originalStaffMember.rank) {
+                 updatePayload.rank = update.rank;
+            }
+            
+            const existingHistory = originalStaffMember.serviceHistory || [];
+            const newHistoryEntries = update.serviceHistoryToAdd.map(entry => ({
+                ...entry,
+                id: entry.id || crypto.randomUUID(),
+                effectiveDate: Timestamp.fromDate(new Date(entry.effectiveDate)),
+                endDate: entry.endDate ? Timestamp.fromDate(new Date(entry.endDate)) : null,
+            }));
+
+            if (newHistoryEntries.length > 0) {
+              const existingEntryIdentifiers = new Set(existingHistory.map(eh => `${eh.type}-${eh.item}-${format(new Date(eh.effectiveDate), 'yyyy-MM-dd')}`));
+              const uniqueNewEntries = newHistoryEntries.filter(ne => !existingEntryIdentifiers.has(`${ne.type}-${ne.item}-${format(new Date(ne.effectiveDate.toDate()), 'yyyy-MM-dd')}`));
+              
+              if (uniqueNewEntries.length > 0) {
+                updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries);
+              }
+            }
+            
+            if(Object.keys(updatePayload).length > 0 ) {
+                 batch.update(staffDocRef, updatePayload);
+                 staffProfilesUpdatedCount++;
+            }
+        });
+
+        if (trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0) {
+            await batch.commit();
+        }
+
+        let toastTitle = "Import Processing Complete";
+        let toastVariant: "default" | "destructive" = "default";
+        let toastDescription = "";
+
+        if (trainingLogsImportedCount > 0) toastDescription += `${trainingLogsImportedCount} training log(s) staged. `;
+        if (staffProfilesUpdatedCount > 0) toastDescription += `${staffProfilesUpdatedCount} staff profile(s) updated. `;
+        
+        if (errors.length > 0) {
+            toastTitle = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "Import Partially Successful" : "Import Failed";
+            toastVariant = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "default" : "destructive";
+            const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? `\n...and ${errors.length - 5} more errors.` : "");
+            toastDescription += `\nErrors (${errors.length}):\n${errorMessages}`;
+        }
+        if (skippedRecordsLog.length > 0) {
+            if (errors.length === 0 && trainingLogsImportedCount === 0 && staffProfilesUpdatedCount === 0) toastTitle = "Import Information";
+            const skippedMessages = skippedRecordsLog.slice(0, 5).join("\n") + (skippedRecordsLog.length > 5 ? `\n...and ${skippedRecordsLog.length - 5} more skipped records.` : "");
+            toastDescription += `\nSkipped Records (${skippedRecordsLog.length}):\n${skippedMessages}`;
+        }
+
+        if (toastDescription.trim() === "" && allRows.length <= 1) {
+            toastTitle = "Import Information";
+            toastDescription = "CSV file has no data rows to import.";
+        } else if (toastDescription.trim() === "") {
+            toastTitle = "Import Information";
+            toastDescription = "No new records or staff updates processed from the CSV.";
+        }
+        
+        toast({
+            variant: toastVariant,
+            title: toastTitle,
+            description: (<ScrollArea className="max-h-60 w-full"><pre className="whitespace-pre-wrap text-xs">{toastDescription.trim()}</pre></ScrollArea>),
+            duration: errors.length > 0 || skippedRecordsLog.length > 0 ? 20000 : 8000,
+        });
+
+
+        if (trainingLogsImportedCount > 0) queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        if (staffProfilesUpdatedCount > 0) queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+
+      } catch (error: any) {
+        console.error("Error during CSV import processing:", error);
+        toast({ variant: "destructive", title: "Import Error", description: `An unexpected error occurred: ${error.message}` });
+      } finally {
+        if (accomplishmentCsvInputRef.current) {
+          accomplishmentCsvInputRef.current.value = "";
+        }
+        setIsImportingAccomplishments(false);
+      }
+    };
+    reader.onerror = () => {
+      toast({ variant: "destructive", title: "Import Error", description: "Failed to read the file."});
+      if (accomplishmentCsvInputRef.current) {
+        accomplishmentCsvInputRef.current.value = "";
+      }
+      setIsImportingAccomplishments(false);
+    };
+    reader.readAsText(file);
+  };
+
 
   const calculateSingleStaffCompliance = (staffMember: StaffMember, memberLogs: TrainingLog[]): { criteriaChecks: ComplianceCriterionCheck[], overallStatus: StaffComplianceReport["complianceStatusText"] } => {
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
@@ -591,7 +1070,7 @@ export default function StaffPage() {
     let overallStatus: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
     if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
       overallStatus = "Compliant";
-    } else if (metCount >= 3) { // Assuming 3 is a threshold for "Partially Compliant"
+    } else if (metCount >= 3) { 
       overallStatus = "Partially Compliant";
     }
     return { criteriaChecks, overallStatus };
@@ -619,7 +1098,7 @@ export default function StaffPage() {
 
     const checkPageBreak = async (neededHeight: number = lineSpacing) => {
         if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
-            addPageNumbers(doc, footerHeight, margin); // Add page numbers before new page
+            addPageNumbers(doc, footerHeight, margin); 
             doc.addPage();
             await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
             yPos = margin + headerHeight + 5;
@@ -649,14 +1128,12 @@ export default function StaffPage() {
       yPos += valueLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
     };
 
-    // --- Main Title ---
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
     await checkPageBreak(sectionSpacing + 18);
     doc.text(`Staff Profile: ${staffMember.rank} ${staffMember.firstName} ${staffMember.lastName}`, margin, yPos);
     yPos += sectionSpacing;
 
-    // --- Basic Info ---
     await addSectionTitle("Basic Information");
     await addDetailLine("Service Number", staffMember.serviceNumber);
     const oicLevel = calculateOICLevel(staffTrainingLogs);
@@ -667,7 +1144,6 @@ export default function StaffPage() {
     await addDetailLine("Squadron", staffMember.squadron);
     yPos += sectionSpacing * 0.5;
 
-    // --- Contact Details ---
     await addSectionTitle("Contact Details");
     await addDetailLine("Email", staffMember.email);
     await addDetailLine("Phone", staffMember.phone);
@@ -675,7 +1151,6 @@ export default function StaffPage() {
     await addDetailLine("Join Date", staffMember.joinDate ? format(new Date(staffMember.joinDate), "PPP") : "N/A");
     yPos += sectionSpacing * 0.5;
 
-    // --- Compliance Status ---
     await addSectionTitle("Compliance Status");
     const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, staffTrainingLogs);
     await addDetailLine("Overall Status", overallStatus);
@@ -697,7 +1172,6 @@ export default function StaffPage() {
     }
     yPos += sectionSpacing * 0.5;
 
-    // --- Service History ---
     await addSectionTitle("Service History");
     if (staffMember.serviceHistory && staffMember.serviceHistory.length > 0) {
         for (const entry of staffMember.serviceHistory.sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime())) {
@@ -715,7 +1189,6 @@ export default function StaffPage() {
     }
     yPos += sectionSpacing * 0.5;
 
-    // --- Training Records ---
     await addSectionTitle("Training Records");
     if (staffTrainingLogs && staffTrainingLogs.length > 0) {
         for (const log of staffTrainingLogs) {
@@ -732,7 +1205,6 @@ export default function StaffPage() {
     }
     yPos += sectionSpacing * 0.5;
     
-    // --- Placeholder Sections ---
     const placeholderSections = ["Meetings Attended", "Professional Development Plans", "Discipline Actions Involvement", "Safety Audits Involvement"];
     for (const sectionTitle of placeholderSections) {
         await addSectionTitle(sectionTitle);
@@ -755,19 +1227,24 @@ export default function StaffPage() {
               <UsersIconLucide className="h-8 w-8 text-primary hidden sm:block" />
               <div>
                 <CardTitle className="text-2xl">Staff Management</CardTitle>
-                <CardDescription>Manage staff profiles, qualifications, and assignments.</CardDescription>
+                <CardDescription>Manage staff profiles, qualifications, and assignments. Import staff data or accomplishments.</CardDescription>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addStaffMutation.isPending || isImportingCsv}>
-                 {(addStaffMutation.isPending && !isImportingCsv) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
+                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
+                 {(addStaffMutation.isPending && !isImportingStaffCsv) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
                  Add New Staff
                 </Button>
-                <Button onClick={() => fileInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isImportingCsv || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending}>
-                   {isImportingCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
-                 Import CSV
+                <Button onClick={() => staffCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isImportingStaffCsv || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingAccomplishments}>
+                   {isImportingStaffCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
+                 Import Staff CSV
                 </Button>
-                <input type="file" ref={fileInputRef} onChange={handleCsvImport} accept=".csv" style={{ display: 'none' }} />
+                 <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoading || isImportingAccomplishments || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv}>
+                   {isImportingAccomplishments || isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GraduationCap className="mr-2 h-5 w-5" />}
+                    Import Accomplishments
+                </Button>
+                <input type="file" ref={staffCsvInputRef} onChange={handleStaffCsvImport} accept=".csv" style={{ display: 'none' }} />
+                <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
             </div>
           </div>
         </CardHeader>
@@ -851,18 +1328,18 @@ export default function StaffPage() {
                             <TableCell className="text-right">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                  <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
                                     <span className="sr-only">Open menu</span>
                                     <MoreHorizontal className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                  <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
                                     <Info className="mr-2 h-4 w-4" />
                                     View Details
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}>
+                                  <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Edit
                                   </DropdownMenuItem>
@@ -870,7 +1347,7 @@ export default function StaffPage() {
                                   <DropdownMenuItem
                                     onClick={() => setStaffToDelete(staff)}
                                     className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                    disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingCsv}
+                                    disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
                                   >
                                     <Trash2 className="mr-2 h-4 w-4" />
                                     Delete
@@ -915,9 +1392,40 @@ export default function StaffPage() {
             <li>Other headers (e.g., MemberType, IsPrimary, Active, ContactEmail1, ContactName, etc.) will be ignored.</li>
           </ul>
           If a record with a matching `MemberUID` is found, it will be updated. Otherwise, a new record will be created.
-          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates/creations skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones. Service History is not updated by this CSV import; use the "Import Accomplishments" CSV on the Training Overview page for that.
+          MemberUID and EmailAddress must be unique among existing and newly imported/updated staff (updates/creations skip if new email conflicts). Join Date is not part of this import; it will be preserved for existing records and unassigned for new ones. Service History is not updated by this CSV import; use the "Import Accomplishments" CSV for that.
         </AlertDescription>
       </Alert>
+      
+      <Alert className="mt-4">
+        <GraduationCap className="h-4 w-4" />
+        <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
+        <AlertDescription>
+          To bulk import training, positions, or ranks, upload a CSV file. The header row is required.
+          The system expects the following headers:
+          <code className="block whitespace-pre-wrap bg-muted p-2 rounded-md my-2 text-xs">Unit_1,Surname,EffectiveDate,EndDate,ChangeType,StatusName,Details,Comment</code>
+          <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
+            <li><code>Unit_1</code>: Populates 'Squadron' for new training log entries.</li>
+            <li><code>Surname</code>: (Text, Required) Expected format: "LastName FirstName Rank MemberUID". Rank must be valid. MemberUID (Service Number) is used to match an existing staff profile. If no profile found, the row is skipped.</li>
+            <li><code>EffectiveDate</code>: (Date, Required) Completion/effective date. Formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YY, D-MMM-YY.</li>
+            <li><code>EndDate</code>: (Date, Optional) End date for positions. Same formats as EffectiveDate.</li>
+            <li><code>ChangeType</code>: (Text, Required) Determines how the row is processed:
+                <ul className="list-['-_'] pl-5">
+                    <li>"Enrolment": Updates the matched Staff Member's 'Join Date' with `EffectiveDate`.</li>
+                    <li>"Position": Adds an entry to the Staff Member's 'Service History'. `Details` field is used as position title. If `StatusName` is "Current" and position differs from current staff role, updates staff role. `Comment` is used for notes.</li>
+                    <li>"Rank": Adds an entry to Staff Member's 'Service History'. `Details` (e.g., "Actual - Flight Lieutenant (AAFC)") is parsed for the rank. If `StatusName` is "Current" and rank differs, updates staff rank. `Comment` is used for notes.</li>
+                    <li>Other values (e.g., "Accomplishment"): Creates a new Training Log entry. `Details` is Course Name & Qualification. `Comment` is Achievement Details.</li>
+                </ul>
+            </li>
+            <li><code>StatusName</code>: (Text) If "Current" for Position/Rank, may update staff profile. If "Historical", record is still processed for service history.</li>
+            <li><code>Details</code>: (Text, Required) Content depends on `ChangeType` (Position Title, Full Rank Name, or Course Name/Qualification).</li>
+            <li><code>Comment</code>: (Text) Populates 'notes' for service history entries or 'achievementDetails' for training logs.</li>
+          </ul>
+           <p className="mt-2 text-xs">
+            <strong>Important:</strong> Staff profiles must exist for each `MemberUID` for any processing to occur. The "Surname" field must be parsable for UID, Rank, and Name.
+          </p>
+        </AlertDescription>
+      </Alert>
+
 
       <Dialog open={isFormOpen} onOpenChange={(isOpen) => {
         if (!isOpen) closeForm(); else setIsFormOpen(true);
@@ -1092,7 +1600,6 @@ export default function StaffPage() {
                             </AccordionContent>
                           </AccordionItem>
 
-                          {/* Placeholder Accordion Items */}
                           <AccordionItem value="meetings">
                             <AccordionTrigger>
                               <div className="flex items-center gap-2">
@@ -1145,19 +1652,19 @@ export default function StaffPage() {
                         handleEdit(viewingStaffMember);
                       }
                     }}
-                    disabled={updateStaffMutation.isPending || isImportingCsv}
+                    disabled={updateStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
                     >
                         <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
                     </Button>
                     <Button
                         variant="default"
                         onClick={() => viewingStaffMember && handleExportFullProfilePdf(viewingStaffMember, viewedStaffTrainingLogs)}
-                        disabled={isLoadingViewedStaffLogs || updateStaffMutation.isPending || isImportingCsv}
+                        disabled={isLoadingViewedStaffLogs || updateStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
                     >
                         {isLoadingViewedStaffLogs && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Full Profile (PDF)
                     </Button>
-                    <Button onClick={closeViewDialog} disabled={updateStaffMutation.isPending || isImportingCsv}>Close</Button>
+                    <Button onClick={closeViewDialog} disabled={updateStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>Close</Button>
                 </DialogFooter>
             </DialogContent>
          </Dialog>
@@ -1174,13 +1681,13 @@ export default function StaffPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setStaffToDelete(null)} disabled={deleteStaffMutation.isPending || isImportingCsv}>
+              <AlertDialogCancel onClick={() => setStaffToDelete(null)} disabled={deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-                disabled={deleteStaffMutation.isPending || isImportingCsv}
+                disabled={deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
               >
                 {deleteStaffMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Delete

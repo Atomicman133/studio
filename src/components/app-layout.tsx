@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Briefcase,
   FileText,
-  GraduationCap,
+  // GraduationCap, // Removed
   Gavel,
   ShieldCheck,
   Settings,
@@ -14,12 +14,12 @@ import {
   LogOut, 
   LayoutDashboard,
   Plane,
-  FileSearch, // Used for new Reports icon
+  FileSearch, 
   ClipboardList, 
   UserCircle,
   Sun,
   Moon,
-  BarChart3, // New icon for Compliance
+  BarChart3, 
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation"; 
@@ -61,7 +61,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/meetings", label: "Meeting Records", icon: FileText },
-  { href: "/training", label: "Training Overview", icon: GraduationCap },
+  // { href: "/training", label: "Training Overview", icon: GraduationCap }, // Removed
   {
     href: "/pdps",
     label: "Prof. Development",
