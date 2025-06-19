@@ -17,10 +17,11 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { format, isValid, startOfDay, addYears, isBefore, addDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import jsPDF from 'jspdf';
-import 'jspdf-autotable'; // Import for autoTable plugin
+// Removed static imports:
+// import jsPDF from 'jspdf';
+// import 'jspdf-autotable'; // Import for autoTable plugin
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
-import { Badge } from "@/components/ui/badge"; // Added Badge import
+import { Badge } from "@/components/ui/badge";
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
@@ -219,6 +220,9 @@ export default function ReportsPage() {
         return;
     }
 
+    const { default: jsPDF } = await import('jspdf');
+    await import('jspdf-autotable'); // For side effects to extend jsPDF prototype
+
     const doc = new jsPDF();
     resetLetterheadCache();
     const margin = 15;
@@ -246,7 +250,7 @@ export default function ReportsPage() {
     doc.setFontSize(16);
     doc.setFont(undefined, "bold");
     let reportTitle = "Report";
-    let reportSubtitle = `Squadron: ${selectedSquadron}`;
+    // let reportSubtitle = `Squadron: ${selectedSquadron}`; // Not used in current title formatting
     if (selectedReportType === "oicLevelByUnit") {
         reportTitle = `OIC Level Report for ${selectedSquadron}`;
     } else if (selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey) {
@@ -262,7 +266,7 @@ export default function ReportsPage() {
     yPos += sectionSpacing;
 
     const tableHeaders: string[] = Object.keys(reportData[0]).filter(key => key !== 'staffId' && key !== 'squadron');
-    const columnWidths = tableHeaders.map(header => doc.getTextWidth(header) + 8); // Add padding
+    // const columnWidths = tableHeaders.map(header => doc.getTextWidth(header) + 8); // Not directly used by autoTable in simple mode
     
     const tableData = reportData.map(item => {
         const row: any = {};
@@ -273,15 +277,15 @@ export default function ReportsPage() {
         return Object.values(row);
     });
 
-    (doc as any).autoTable({ // Using any for autoTable until types are set up
+    (doc as any).autoTable({ // Using any for autoTable
         startY: yPos,
         head: [tableHeaders.map(h => h.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()))], // Format headers
         body: tableData,
         theme: 'striped',
         headStyles: { fillColor: [0, 48, 143], textColor: 255 }, // Primary color for header
-        margin: { top: yPos + sectionSpacing },
+        margin: { top: yPos + sectionSpacing }, // This might be redundant if startY is already accounting for it
         didDrawPage: (data: any) => {
-             yPos = data.cursor.y + sectionSpacing; // Update yPos after table draw
+             // yPos = data.cursor.y + sectionSpacing; // autoTable manages yPos internally on new pages
         },
         willDrawCell: (data: any) => {
             if (data.section === 'body' && data.column.dataKey === (tableHeaders.length -1) ) { // Assuming last column is 'Details' or similar
@@ -455,4 +459,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-
