@@ -18,7 +18,9 @@ import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firesto
 import { format, isValid, startOfDay, addYears, isBefore, addDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from 'jspdf';
+import 'jspdf-autotable'; // Import for autoTable plugin
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { Badge } from "@/components/ui/badge"; // Added Badge import
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
@@ -453,3 +455,4 @@ export default function ReportsPage() {
     </div>
   );
 }
+
