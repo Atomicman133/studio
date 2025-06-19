@@ -5,7 +5,7 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2, CalendarClock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2, CalendarClock, Download } from "lucide-react";
 import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate, parseISO, startOfDay } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
@@ -23,6 +23,18 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp, where } from 'firebase/firestore';
 import { useAuth } from "@/contexts/auth-context";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+
 
 // --- Fetch Training Logs ---
 async function fetchTrainingLogs(): Promise<TrainingLog[]> {
@@ -233,6 +245,12 @@ export default function DashboardPage() {
   const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
   const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
 
+  // State for compliance detail dialog
+  const [isComplianceDetailOpen, setIsComplianceDetailOpen] = React.useState(false);
+  const [selectedComplianceSegmentData, setSelectedComplianceSegmentData] = React.useState<StaffComplianceReport[]>([]);
+  const [selectedComplianceSegmentTitle, setSelectedComplianceSegmentTitle] = React.useState<string>("");
+
+
   React.useEffect(() => {
     if (!authLoading && !user) {
       router.replace("/auth");
@@ -367,11 +385,90 @@ export default function DashboardPage() {
 
   const pieData = complianceData
     ? [
-        { name: 'Compliant', value: complianceData.compliant, fill: chartConfig.compliant.color },
-        { name: 'Partially Compliant', value: complianceData.partiallyCompliant, fill: chartConfig.partiallyCompliant.color },
-        { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: chartConfig.nonCompliant.color },
+        { name: 'Compliant', value: complianceData.compliant, fill: chartConfig.compliant.color, statusText: 'Compliant' as StaffComplianceReport["complianceStatusText"] },
+        { name: 'Partially Compliant', value: complianceData.partiallyCompliant, fill: chartConfig.partiallyCompliant.color, statusText: 'Partially Compliant' as StaffComplianceReport["complianceStatusText"] },
+        { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: chartConfig.nonCompliant.color, statusText: 'Not Compliant' as StaffComplianceReport["complianceStatusText"] },
       ].filter(item => item.value > 0)
     : [];
+
+  const handlePieSegmentClick = (segmentName: StaffComplianceReport["complianceStatusText"]) => {
+    const filteredData = processedReports.filter(report => report.complianceStatusText === segmentName);
+    setSelectedComplianceSegmentData(filteredData);
+    setSelectedComplianceSegmentTitle(`${segmentName} Staff Members (${filteredData.length})`);
+    setIsComplianceDetailOpen(true);
+  };
+  
+  const handleExportComplianceSegmentPdf = async () => {
+    if (selectedComplianceSegmentData.length === 0) return;
+
+    const { default: jsPDF } = await import('jspdf');
+    await import('jspdf-autotable'); // For side effects
+
+    const doc = new jsPDF();
+    resetLetterheadCache();
+    const filename = `${selectedComplianceSegmentTitle.replace(/\s+/g, '_')}_${format(new Date(), "yyyy-MM-dd")}.pdf`;
+    const margin = 15;
+    let yPos = margin;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    let headerHeight = 0;
+    let footerHeight = 0;
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, "/AAFCLetterhead-Header.png", "/AAFCLetterhead-Footer.png", margin);
+    headerHeight = hh;
+    footerHeight = fh;
+    yPos = margin + headerHeight + 5;
+
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text(selectedComplianceSegmentTitle, pageWidth / 2, yPos, { align: 'center' });
+    yPos += sectionSpacing * 1.5;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Generated on: ${format(new Date(), "PPP")}`, pageWidth / 2, yPos, { align: 'center' });
+    yPos += sectionSpacing;
+    
+    const tableHeaders: string[] = ["Rank", "Name", "Squadron", "Service No."];
+    const tableBody: (string | null)[][] = [];
+
+    const showNonCompliantItems = selectedComplianceSegmentTitle.toLowerCase().includes("partially") || selectedComplianceSegmentTitle.toLowerCase().includes("non-compliant");
+    if (showNonCompliantItems) {
+      tableHeaders.push("Non-Compliant Items");
+    }
+
+    selectedComplianceSegmentData.forEach(staff => {
+      const row = [
+        staff.staffMemberRank,
+        staff.staffMemberName,
+        staff.squadron,
+        staff.staffServiceNumberActual || "N/A"
+      ];
+      if (showNonCompliantItems) {
+        const nonCompliant = staff.criteriaChecks
+          .filter(c => !c.isMet)
+          .map(c => c.name)
+          .join(", ") || "None";
+        row.push(nonCompliant);
+      }
+      tableBody.push(row);
+    });
+
+    (doc as any).autoTable({
+      startY: yPos,
+      head: [tableHeaders],
+      body: tableBody,
+      theme: 'striped',
+      headStyles: { fillColor: [0, 48, 143], textColor: 255 }, // Primary color
+      didDrawPage: (data: any) => {
+         // yPos = data.cursor.y + sectionSpacing; // update yPos for content after table
+      },
+    });
+    
+    addPageNumbers(doc, footerHeight, margin);
+    doc.save(filename);
+  };
+
 
   const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits || isLoadingScheduledMeetings;
   const hasAnyError = errorStaff || errorLogs || errorAudits || errorVisits || errorScheduledMeetings;
@@ -491,6 +588,11 @@ export default function DashboardPage() {
                         innerRadius={50}
                         strokeWidth={2}
                         labelLine={false}
+                        onClick={(segmentData) => {
+                          if (segmentData && segmentData.statusText) {
+                            handlePieSegmentClick(segmentData.statusText);
+                          }
+                        }}
                       >
                         {pieData.map((entry) => (
                           <Cell key={entry.name} fill={entry.fill as string} />
@@ -618,6 +720,60 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Compliance Detail Dialog */}
+      <Dialog open={isComplianceDetailOpen} onOpenChange={setIsComplianceDetailOpen}>
+        <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{selectedComplianceSegmentTitle}</DialogTitle>
+            <DialogDescription>
+              List of staff members in the selected compliance category.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] border rounded-md">
+            {selectedComplianceSegmentData.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rank</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Squadron</TableHead>
+                    <TableHead>Service No.</TableHead>
+                    {(selectedComplianceSegmentTitle.includes("Partially Compliant") || selectedComplianceSegmentTitle.includes("Non-Compliant")) && (
+                       <TableHead>Non-Compliant Items</TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedComplianceSegmentData.map((staff) => (
+                    <TableRow key={staff.staffMemberId}>
+                      <TableCell>{staff.staffMemberRank}</TableCell>
+                      <TableCell>{staff.staffMemberName}</TableCell>
+                      <TableCell>{staff.squadron}</TableCell>
+                      <TableCell>{staff.staffServiceNumberActual || "N/A"}</TableCell>
+                       {(selectedComplianceSegmentTitle.includes("Partially Compliant") || selectedComplianceSegmentTitle.includes("Non-Compliant")) && (
+                        <TableCell>
+                          {staff.criteriaChecks.filter(c => !c.isMet).map(c => c.name).join(", ") || "None"}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="p-4 text-center text-muted-foreground">No staff members in this category.</p>
+            )}
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsComplianceDetailOpen(false)}>Close</Button>
+            <Button onClick={handleExportComplianceSegmentPdf} disabled={selectedComplianceSegmentData.length === 0}>
+              <Download className="mr-2 h-4 w-4" /> Download as PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
+
