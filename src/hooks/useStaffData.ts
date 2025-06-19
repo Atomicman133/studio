@@ -1,5 +1,5 @@
 
-"use client"; 
+"use client";
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -18,19 +18,21 @@ import { db } from '@/lib/firebase/config';
 import type { StaffMember, ServiceHistoryEntry } from '@/app/staff/staff-schema';
 import { staffMemberSchema, RANKS, STAFF_QUERY_KEY } from '@/app/staff/staff-schema';
 import { useAuth } from '@/contexts/auth-context';
+import { z } from 'zod'; // Import Zod
 
 const convertServiceHistoryTimestampsForDisplay = (historyEntry: any): ServiceHistoryEntry => {
   return {
     ...historyEntry,
     id: historyEntry.id || crypto.randomUUID(), // Ensure ID
-    effectiveDate: historyEntry.effectiveDate instanceof Timestamp ? historyEntry.effectiveDate.toDate() : historyEntry.effectiveDate,
-    endDate: historyEntry.endDate instanceof Timestamp ? historyEntry.endDate.toDate() : historyEntry.endDate,
+    effectiveDate: historyEntry.effectiveDate instanceof Timestamp ? historyEntry.effectiveDate.toDate() : new Date(historyEntry.effectiveDate),
+    endDate: historyEntry.endDate instanceof Timestamp ? historyEntry.endDate.toDate() : (historyEntry.endDate ? new Date(historyEntry.endDate) : null),
   };
 };
 
 const convertServiceHistoryTimestampsForFirestore = (historyEntry: ServiceHistoryEntry): any => {
   return {
     ...historyEntry,
+    id: historyEntry.id || crypto.randomUUID(),
     effectiveDate: historyEntry.effectiveDate ? Timestamp.fromDate(new Date(historyEntry.effectiveDate)) : null,
     endDate: historyEntry.endDate ? Timestamp.fromDate(new Date(historyEntry.endDate)) : null,
   };
@@ -38,12 +40,15 @@ const convertServiceHistoryTimestampsForFirestore = (historyEntry: ServiceHistor
 
 
 const convertTimestamps = (data: any): StaffMember => {
-  let joinDateToParse = data.joinDate;
+  let joinDateToParse: Date | null = null;
   if (data.joinDate instanceof Timestamp) {
     joinDateToParse = data.joinDate.toDate();
-  } else if (data.joinDate === undefined) {
-    joinDateToParse = null;
+  } else if (data.joinDate && typeof data.joinDate === 'string') {
+    joinDateToParse = new Date(data.joinDate);
+  } else if (data.joinDate instanceof Date) {
+    joinDateToParse = data.joinDate;
   }
+
 
   const serviceHistoryForDisplay = (data.serviceHistory || []).map(convertServiceHistoryTimestampsForDisplay);
 
@@ -58,7 +63,7 @@ const convertTimestamps = (data: any): StaffMember => {
 
 async function fetchStaff(): Promise<StaffMember[]> {
     const staffCollectionRef = collection(db, 'staff');
-    const q = query(staffCollectionRef, orderBy('squadron'), orderBy('lastName')); 
+    const q = query(staffCollectionRef, orderBy('squadron'), orderBy('lastName'));
     const querySnapshot = await getDocs(q);
     const staffList = querySnapshot.docs.map(doc => ({
       id: doc.id,
@@ -92,7 +97,7 @@ export function useStaff() {
     queryKey: [STAFF_QUERY_KEY],
     queryFn: fetchStaff,
     enabled: !!user && !authLoading && !!user.email && user.email.endsWith('@airforcecadets.gov.au'),
-    staleTime: 1000 * 60 * 5, 
+    staleTime: 1000 * 60 * 5,
   });
 }
 
@@ -103,7 +108,7 @@ async function addStaff(newStaffData: Omit<StaffMember, 'id'>): Promise<string> 
 
   const dataToSave = {
     ...validatedData,
-    joinDate: validatedData.joinDate ? Timestamp.fromDate(validatedData.joinDate) : null, 
+    joinDate: validatedData.joinDate ? Timestamp.fromDate(validatedData.joinDate) : null,
     serviceHistory: serviceHistoryForFirestore,
   };
   const docRef = await addDoc(staffCollectionRef, dataToSave);
@@ -124,18 +129,48 @@ async function updateStaff(updatedStaff: StaffMember): Promise<void> {
   if (!updatedStaff.id) {
     throw new Error("Staff member ID is required for update.");
   }
-  const validatedData = staffMemberSchema.parse(updatedStaff);
+
+  let validatedData: StaffMember;
+  try {
+    // Defensively ensure dates are Date objects or null before parsing
+    const dataToParse = {
+        ...updatedStaff,
+        joinDate: updatedStaff.joinDate ? new Date(updatedStaff.joinDate) : null,
+        serviceHistory: (updatedStaff.serviceHistory || []).map(entry => ({
+            ...entry,
+            id: entry.id || crypto.randomUUID(),
+            effectiveDate: new Date(entry.effectiveDate),
+            endDate: entry.endDate ? new Date(entry.endDate) : null,
+        })),
+    };
+    validatedData = staffMemberSchema.parse(dataToParse);
+  } catch (e: any) {
+    if (e instanceof z.ZodError) {
+        console.error("Zod validation failed during staff update. Issues:", JSON.stringify(e.issues, null, 2));
+        // Log the data that failed validation for easier debugging
+        console.error("Data that failed Zod validation:", JSON.stringify(updatedStaff, (key, value) =>
+            // Custom replacer to handle Date objects for logging, Zod might have already stringified them if they were invalid from form
+            value instanceof Date ? value.toISOString() : (value === undefined ? 'UNDEFINED' : value)
+        , 2));
+        const issueMessages = e.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+        throw new Error(`Validation Error: ${issueMessages}`);
+    }
+    console.error("Non-Zod error during pre-validation or parsing in updateStaff:", e);
+    throw new Error("An unexpected error occurred during data validation.");
+  }
+
   const staffDocRef = doc(db, 'staff', validatedData.id as string);
-  const { id, ...dataToUpdate } = validatedData; 
+  const { id, ...dataToUpdate } = validatedData;
   const serviceHistoryForFirestore = (dataToUpdate.serviceHistory || []).map(convertServiceHistoryTimestampsForFirestore);
 
   const dataToSave = {
     ...dataToUpdate,
-    joinDate: dataToUpdate.joinDate ? Timestamp.fromDate(dataToUpdate.joinDate) : null, 
+    joinDate: dataToUpdate.joinDate ? Timestamp.fromDate(dataToUpdate.joinDate) : null,
     serviceHistory: serviceHistoryForFirestore,
   };
   await updateDoc(staffDocRef, dataToSave);
 }
+
 
 export function useUpdateStaff() {
   const queryClient = useQueryClient();
