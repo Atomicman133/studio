@@ -20,7 +20,7 @@ export const RANKS = [
 ] as const;
 
 export const serviceHistoryEntrySchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().uuid().optional(), // IDs for these are generated as UUIDs
   type: z.enum(["Rank", "Position"]),
   item: z.string().describe("Abbreviated rank or position title"),
   effectiveDate: z.date({ required_error: "Effective date is required for service history entry" }),
@@ -30,7 +30,7 @@ export const serviceHistoryEntrySchema = z.object({
 export type ServiceHistoryEntry = z.infer<typeof serviceHistoryEntrySchema>;
 
 export const staffMemberSchema = z.object({
-  id: z.string().uuid().optional(), // Will be generated on creation
+  id: z.string().optional(), // Changed from z.string().uuid().optional()
   serviceNumber: z.string().min(1, "Service number is required"),
   rank: z.enum(RANKS, { required_error: "Rank is required" }),
   firstName: z.string().min(1, "First name is required"),
