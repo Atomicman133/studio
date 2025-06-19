@@ -70,13 +70,15 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
         'dysat',
         'youth mental health - awareness - completed',
         'defence youth protection awareness course - completed online',
-        'defence youth safety level 3 - leader - completed online'
+        'defence youth safety level 3 - leader - completed online',
+        'whs annual awareness - level 2' // Added this new keyword
       ]) || matchesKeywords(log.qualificationAchieved, [
         'defence youth safety',
         'dysat',
         'youth mental health - awareness - completed',
         'defence youth protection awareness course - completed online',
-        'defence youth safety level 3 - leader - completed online'
+        'defence youth safety level 3 - leader - completed online',
+        'whs annual awareness - level 2' // Added this new keyword
       ])
   },
 ] as const;
