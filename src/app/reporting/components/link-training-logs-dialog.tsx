@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -18,12 +19,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs, query, writeBatch, doc, Timestamp, orderBy, limit } from "firebase/firestore";
 import type { TrainingLog } from "@/app/training/training-schema";
-import { convertLogTimestamps, TRAINING_LOGS_QUERY_KEY } from "@/app/training/page";
+import { convertLogTimestamps, TRAINING_LOGS_QUERY_KEY } from "@/app/training/training-schema"; // Updated import
 import type { StaffMember } from "@/app/staff/staff-schema";
 import type { StaffComplianceReport } from "../reporting-schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import { STAFF_QUERY_KEY } from "@/app/staff/staff-schema"; // Import from staff-schema
+import { STAFF_QUERY_KEY, RANKS } from "@/app/staff/staff-schema"; // Import RANKS from staff-schema
 
 const UNLINKED_TRAINING_LOGS_QUERY_KEY_PREFIX = "unlinkedTrainingLogsForStaff";
 

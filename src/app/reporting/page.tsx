@@ -36,7 +36,7 @@ import jsPDF from 'jspdf';
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
-import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps as convertTrainingLogTimestampsForPage } from "../training/page";
+import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps as convertTrainingLogTimestampsForPage } from "../training/training-schema";
 
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
@@ -934,6 +934,3 @@ export default function CompliancePage() {
     </div>
   );
 }
-
-
-    
