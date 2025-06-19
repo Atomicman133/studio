@@ -1,7 +1,8 @@
+
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle, Loader2, AlertTriangle, Mail } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, GraduationCap, ListChecks, BarChartHorizontalBig, UserCog, Trophy, Edit3, Info, UploadCloud, Download, Archive, Paperclip, AlertCircle, Loader2, AlertTriangle, Mail, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -59,6 +60,12 @@ import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, writeBatch, arrayUnion } from 'firebase/firestore';
 import { convertFileToDataUrl, addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 import jsPDF from 'jspdf';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 
 export const TRAINING_LOGS_QUERY_KEY = 'trainingLogs';
@@ -211,6 +218,7 @@ type StaffMemberLogGroup = {
   rank: typeof RANKS[number];
   staffName: string;
   logs: TrainingLog[];
+  serviceNumber?: string;
 };
 
 type SquadronGroup = {
@@ -368,11 +376,12 @@ export default function TrainingPage() {
 
     const processedSquadrons: SquadronGroup[] = Object.entries(logsBySquadron)
       .map(([squadronName, squadronLogs]) => {
-        const staffGroupsInSquadron: Record<string, { rank: typeof RANKS[number]; staffName: string; logs: TrainingLog[] }> = {};
+        const staffGroupsInSquadron: Record<string, { rank: typeof RANKS[number]; staffName: string; logs: TrainingLog[], serviceNumber?: string }> = {};
         squadronLogs.forEach(log => {
-          const staffKey = `${log.rank} ${log.staffName}`;
+          // Use service number as primary key for grouping if available, otherwise fallback to rank+name
+          const staffKey = log.serviceNumber ? `SN:${log.serviceNumber}` : `${log.rank} ${log.staffName}`;
           if (!staffGroupsInSquadron[staffKey]) {
-            staffGroupsInSquadron[staffKey] = { rank: log.rank, staffName: log.staffName, logs: [] };
+            staffGroupsInSquadron[staffKey] = { rank: log.rank, staffName: log.staffName, logs: [], serviceNumber: log.serviceNumber };
           }
           staffGroupsInSquadron[staffKey].logs.push(log);
         });
@@ -380,7 +389,7 @@ export default function TrainingPage() {
         const staffMembers = Object.values(staffGroupsInSquadron)
           .map(staffGroup => ({
             ...staffGroup,
-            identifier: `${staffGroup.rank} ${staffGroup.staffName}`,
+            identifier: staffGroup.serviceNumber ? `SN:${staffGroup.serviceNumber}` : `${staffGroup.rank} ${staffGroup.staffName}`,
             logs: staffGroup.logs.sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime()),
           }))
           .sort((a, b) => {
@@ -622,7 +631,7 @@ export default function TrainingPage() {
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
     await checkPageBreak(lineSpacing);
-    const memberServiceNumber = staffMemberGroup.logs[0]?.serviceNumber;
+    const memberServiceNumber = staffMemberGroup.serviceNumber || staffMemberGroup.logs[0]?.serviceNumber;
     if(memberServiceNumber) await checkPageBreak(lineSpacing); doc.text(`Service Number: ${memberServiceNumber}`, margin, yPos); yPos += lineSpacing;
     await checkPageBreak(lineSpacing);
     doc.text(`Associated with Squadron(s): ${Array.from(new Set(staffMemberGroup.logs.map(l => l.squadron))).join(', ')}`, margin, yPos);
@@ -1123,26 +1132,30 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
           <CardHeader className="bg-muted/20 dark:bg-muted/10 border-b rounded-t-lg">
             <CardTitle className="text-2xl">Squadron: {squadronGroup.squadronName}</CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 px-0 sm:px-0">
+          <CardContent className="pt-4 px-2 sm:px-4">
             {squadronGroup.staffMembers.length === 0 ? (
               <p className="text-muted-foreground text-center py-6">No training records for this squadron.</p>
             ) : (
-              <div className="space-y-6 py-6">
+              <Accordion type="multiple" className="w-full space-y-4">
                 {squadronGroup.staffMembers.map((staffMemberGroup) => (
-                  <Card key={staffMemberGroup.identifier} className="shadow-md">
-                    <CardHeader className="border-b bg-background">
-                      <div className="flex justify-between items-center flex-wrap gap-2">
+                  <AccordionItem value={staffMemberGroup.identifier} key={staffMemberGroup.identifier} className="border rounded-md shadow-sm bg-card">
+                    <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                      <div className="flex justify-between items-center w-full">
                         <div>
-                          <CardTitle className="text-xl">{staffMemberGroup.rank} {staffMemberGroup.staffName}</CardTitle>
-                          <CardDescription>{staffMemberGroup.logs.length} training record(s)</CardDescription>
+                          <h3 className="text-lg font-medium">{staffMemberGroup.rank} {staffMemberGroup.staffName}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {staffMemberGroup.serviceNumber ? `SN: ${staffMemberGroup.serviceNumber} | ` : ''}
+                            {staffMemberGroup.logs.length} record(s)
+                          </p>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => handleExportAllTrainingRecordsForMember(staffMemberGroup)} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments}>
-                          <Download className="mr-2 h-4 w-4" /> Export All (PDF)
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleExportAllTrainingRecordsForMember(staffMemberGroup);}} disabled={deleteLogMutation.isPending || updateLogMutation.isPending || isImportingAccomplishments} className="ml-auto mr-2">
+                          <Download className="mr-1.5 h-3.5 w-3.5" /> Export All
                         </Button>
+                        {/* Chevron is part of AccordionTrigger by default */}
                       </div>
-                    </CardHeader>
-                    <CardContent className="pt-4">
-                       <ScrollArea className="h-[200px] w-full border rounded-md"> {/* Reduced height */}
+                    </AccordionTrigger>
+                    <AccordionContent className="px-4 pb-4 pt-0">
+                       <ScrollArea className="h-[250px] w-full border rounded-md mt-2"> {/* Fixed height ScrollArea */}
                         <Table>
                           <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                             <TableRow>
@@ -1209,10 +1222,10 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
                           </TableBody>
                         </Table>
                       </ScrollArea>
-                    </CardContent>
-                  </Card>
+                    </AccordionContent>
+                  </AccordionItem>
                 ))}
-              </div>
+              </Accordion>
             )}
           </CardContent>
         </Card>
@@ -1429,3 +1442,5 @@ function parseCompositeSurnameField(surnameFieldInput: string): { lastName: stri
     </div>
   );
 }
+
+    
