@@ -12,8 +12,22 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.1.8",
+    version: "0.1.9",
     date: "Current",
+    title: "UI Fixes & Stability Improvements",
+    sections: [
+      {
+        title: "Bug Fixes",
+        items: [
+          "Fixed the alignment of the regional compliance pie charts on the 'RXO / RXI' dashboard to ensure they are visually centered and consistent.",
+          "Resolved a scrolling issue in the Staff Management details dialog, making both the 'Service History' and 'Training Records' sections independently scrollable.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.1.8",
+    date: "Previous Update",
     title: "Accomplishment Import Bug Fix",
     sections: [
       {
