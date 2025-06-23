@@ -112,18 +112,18 @@ export default function RxoRxiPage() {
 
         allProcessedReports.forEach(report => {
             const region = SQUADRON_REGION_MAP[report.squadron] || 'Headquarters';
-            if (regionalData[region]) {
-                regionalData[region].reports.push(report);
+            if (dataByRegion[region]) {
+                dataByRegion[region].reports.push(report);
             }
         });
         
-        for (const region in regionalData) {
-            regionalData[region].summary.compliant = regionalData[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
-            regionalData[region].summary.partiallyCompliant = regionalData[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-            regionalData[region].summary.nonCompliant = regionalData[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
+        for (const region in dataByRegion) {
+            dataByRegion[region].summary.compliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
+            dataByRegion[region].summary.partiallyCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+            dataByRegion[region].summary.nonCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
         }
 
-        return regionalData;
+        return dataByRegion;
     }, [allProcessedReports]);
 
     const handlePieSegmentClick = (region: string, statusText: StaffComplianceReport["complianceStatusText"]) => {
