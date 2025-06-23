@@ -99,13 +99,10 @@ export default function RxoRxiPage() {
             }
         });
         
-        for (const region of REGIONS) {
-            const currentRegionData = dataByRegion[region];
-            if (currentRegionData) {
-                currentRegionData.summary.compliant = currentRegionData.reports.filter(r => r.complianceStatusText === "Compliant").length;
-                currentRegionData.summary.partiallyCompliant = currentRegionData.reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-                currentRegionData.summary.nonCompliant = currentRegionData.reports.filter(r => r.complianceStatusText === "Not Compliant").length;
-            }
+        for (const region in dataByRegion) {
+            dataByRegion[region].summary.compliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
+            dataByRegion[region].summary.partiallyCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+            dataByRegion[region].summary.nonCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
         }
 
         return dataByRegion;
@@ -219,9 +216,9 @@ export default function RxoRxiPage() {
                                 <CardTitle className="text-xl">{region}</CardTitle>
                                 <CardDescription>{totalStaff} Staff Member(s)</CardDescription>
                             </CardHeader>
-                            <CardContent className="pt-4 flex-grow flex flex-col justify-end">
+                            <CardContent className="pt-4 flex-grow flex flex-col justify-center items-center">
                                 {totalStaff > 0 ? (
-                                    <ChartContainer config={chartConfig} className="mx-auto aspect-square h-[200px]">
+                                    <ChartContainer config={chartConfig} className="aspect-square h-[200px]">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
                                                 <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
@@ -231,8 +228,8 @@ export default function RxoRxiPage() {
                                                     nameKey="name"
                                                     cx="50%"
                                                     cy="50%"
-                                                    outerRadius={70}
-                                                    innerRadius={50}
+                                                    outerRadius={80}
+                                                    innerRadius={60}
                                                     strokeWidth={2}
                                                     labelLine={false}
                                                     onClick={(segmentData) => handlePieSegmentClick(region, segmentData.statusText)}
