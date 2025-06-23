@@ -747,7 +747,7 @@ export default function StaffPage() {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const skippedRecordsLog: string[] = [];
-      const BATCH_SIZE = 490; // Firestore batch write limit is 500
+      const BATCH_SIZE = 490;
       try {
         const text = e.target?.result as string;
         if (!text) {
@@ -756,6 +756,7 @@ export default function StaffPage() {
           return;
         }
 
+        const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
         const allOperations: { type: 'log' | 'staffUpdate', payload: any }[] = [];
         const errors: string[] = [];
         
@@ -795,7 +796,6 @@ export default function StaffPage() {
           }
 
           // Step 1: Process all rows and prepare operations without writing to DB yet
-          const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
           for (let i = 1; i < allRows.length; i++) {
               const values = allRows[i];
               if (values.every(val => val.trim() === "")) continue;
@@ -962,18 +962,27 @@ export default function StaffPage() {
             toastDescription += `\n\nErrors (${errors.length}):\n${errorMessages}`;
         }
         if (skippedRecordsLog.length > 0) {
-            const skippedMessages = skippedRecordsLog.slice(0, 5).join("\n") + (skippedRecordsLog.length > 5 ? `\n...and ${skippedRecordsLog.length - 5} more skipped.` : "");
+            if (errors.length === 0 && allOperations.length === 0) toastTitle = "Import Information";
+            const skippedMessages = skippedRecordsLog.slice(0, 5).join("\n") + (skippedRecordsLog.length > 5 ? `\n...and ${skippedRecordsLog.length - 5} more skipped records.` : "");
             toastDescription += `\n\nSkipped Records (${skippedRecordsLog.length}):\n${skippedMessages}`;
+        }
+        
+        if (toastDescription.trim() === "" && allRows.length <= 1) {
+            toastTitle = "Import Information";
+            toastDescription = "CSV file has no data rows to import.";
+        } else if (toastDescription.trim() === "") {
+            toastTitle = "Import Information";
+            toastDescription = "No new records or staff updates processed from the CSV.";
         }
         
         toast({
             variant: toastVariant, title: toastTitle,
             description: (<ScrollArea className="max-h-60 w-full"><pre className="whitespace-pre-wrap text-xs">{toastDescription.trim()}</pre></ScrollArea>),
-            duration: 20000,
+            duration: errors.length > 0 || skippedRecordsLog.length > 0 ? 20000 : 8000,
         });
 
-        queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+        if (allOperations.some(op => op.type === 'log')) queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        if (allOperations.some(op => op.type === 'staffUpdate')) queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
 
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
