@@ -37,6 +37,7 @@ import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
 import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps as convertTrainingLogTimestampsForPage } from "../training/training-schema";
+import { processComplianceReports } from "@/lib/compliance-processing";
 
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
@@ -53,162 +54,17 @@ async function fetchLocalTrainingLogs(): Promise<TrainingLog[]> {
   })) as TrainingLog[];
 }
 
-const processComplianceReports = (
-  staffList: StaffMember[],
-  trainingLogs: TrainingLog[]
-): StaffComplianceReport[] => {
-  console.log("[ComplianceDebug] processComplianceReports called. Staff:", staffList.length, ", Logs:", trainingLogs ? trainingLogs.length : 0);
-  if (trainingLogs && trainingLogs.length > 0 && staffList.length > 0) {
-     console.log("[ComplianceDebug] Sample training logs received:", trainingLogs.slice(0, 3).map(l => ({name: l.staffName, sn: l.serviceNumber, course: l.courseName, rank: l.rank })));
-     if (staffList[0]) {
-        console.log("[ComplianceDebug] Sample staff list item:", {name: `${staffList[0].firstName} ${staffList[0].lastName}`, rank: staffList[0].rank, sn: staffList[0].serviceNumber});
-     }
+function isConfidentMatchForAutoLink(log: TrainingLog, staff: StaffMember): boolean {
+  if (!log.staffName || !log.rank || !staff.firstName || !staff.lastName || !staff.rank) {
+    return false;
   }
-
-  return staffList.map((staff) => {
-    const staffServiceNumberActual = staff.serviceNumber;
-
-    if (!staffServiceNumberActual) {
-        console.warn(`[ComplianceDebug] Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id || 'NO_ID'}) is missing a service number. Compliance check will be incomplete.`);
-    }
-
-    const memberLogs = trainingLogs ? trainingLogs.filter(log => {
-      // Primary match on serviceNumber if both exist and are not empty
-      if (staff.serviceNumber && staff.serviceNumber.trim() !== "" && log.serviceNumber && log.serviceNumber.trim() !== "") {
-        return staff.serviceNumber.trim() === log.serviceNumber.trim();
-      }
-      // Fallback: if log has no SN, or staff has no SN, try to match by name and rank (case-insensitive)
-      // This fallback should ideally be minimized by ensuring good data quality (SNs on logs)
-      if (log.staffName && log.rank) {
-        const logNameUpper = log.staffName.toUpperCase().trim();
-        const staffFullNameUpper = `${staff.firstName} ${staff.lastName}`.toUpperCase().trim();
-        const staffLastNameFirstNameUpper = `${staff.lastName}, ${staff.firstName}`.toUpperCase().trim();
-        const nameMatch = logNameUpper === staffFullNameUpper || logNameUpper === staffLastNameFirstNameUpper;
-        const rankMatch = log.rank === staff.rank;
-        
-        if (nameMatch && rankMatch) {
-          // console.log(`[ComplianceDebug] Fallback match for ${staff.firstName} ${staff.lastName} with log ${log.id} by name/rank.`);
-          return true;
-        }
-      }
-      return false;
-    }) : [];
-
-    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumberActual || 'None'})`);
-    if (staffServiceNumberActual) {
-      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumberActual}.`);
-      if (memberLogs.length > 0) {
-        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber, logName: l.staffName })));
-      }
-    } else {
-      console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Name/Rank matching found ${memberLogs.length} logs.`);
-    }
-
-
-    const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      // console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
-      const relevantLogs = memberLogs
-        .filter(log => {
-            const isRelevant = criterion.identifier(log);
-            return isRelevant;
-        })
-        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
-
-      // console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
-
-      let isMet = false;
-      let details = "Missing";
-      let selectedLog: TrainingLog | undefined = undefined;
-
-      if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0];
-        // console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
-        const completionDate = startOfDay(new Date(selectedLog.completionDate));
-
-        if (!isValidDate(completionDate)) {
-          details = "Invalid completion date in record.";
-           // console.log(`[ComplianceDebug]       Invalid completion date for log ID ${selectedLog.id}: ${selectedLog.completionDate}`);
-        } else {
-          const today = startOfDay(new Date());
-
-          if (criterion.yearsToExpire) {
-            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            isMet = isBefore(today, expiryDate); // Valid if today is *before* the calculated expiry date
-
-            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy'); // Last full day of validity
-            const expiredOnDateText = format(expiryDate, 'dd/MM/yy');
-
-            if (isMet) {
-              details = `Completed: ${format(completionDate, 'dd/MM/yy')}. Valid until: ${validUntilDate}.`;
-            } else {
-              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yy')}. Expired on: ${expiredOnDateText}.`;
-            }
-          } else {
-            isMet = true;
-            details = `Completed: ${format(completionDate, 'dd/MM/yy')}`;
-          }
-        }
-      } else {
-        // console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
-      }
-      // console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
-      return {
-        key: criterion.key,
-        name: criterion.name,
-        isMet,
-        details,
-        relevantLog: selectedLog,
-      };
-    });
-
-    const metCount = criteriaChecks.filter(c => c.isMet).length;
-    let complianceStatusText: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
-    let complianceStatusVariant: StaffComplianceReport["complianceStatusVariant"] = "destructive";
-
-    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
-      complianceStatusText = "Compliant";
-      complianceStatusVariant = "default";
-    } else if (metCount >= 3) { // Assuming 3 or more but not all is "Partially Compliant"
-      complianceStatusText = "Partially Compliant";
-      complianceStatusVariant = "secondary";
-    }
-    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
-
-    return {
-      staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staffServiceNumberActual || 'NO_SN'}`,
-      staffMemberName: `${staff.firstName} ${staff.lastName}`,
-      staffMemberRank: staff.rank,
-      squadron: staff.squadron || "N/A",
-      isCompliant: complianceStatusText === "Compliant",
-      criteriaChecks,
-      email: staff.email,
-      staffServiceNumberActual: staffServiceNumberActual,
-      complianceStatusText,
-      complianceStatusVariant,
-    };
-  })
-  .sort((a,b) => {
-    const squadronCompare = (a.squadron || "ZZZ").localeCompare(b.squadron || "ZZZ");
-    if (squadronCompare !== 0) {
-        return squadronCompare;
-    }
-
-    const rankOrder = RANKS;
-    const rankAIndex = rankOrder.indexOf(a.staffMemberRank as typeof RANKS[number]);
-    const rankBIndex = rankOrder.indexOf(b.staffMemberRank as typeof RANKS[number]);
-
-    const effectiveRankAIndex = rankAIndex === -1 ? Infinity : rankAIndex;
-    const effectiveRankBIndex = rankBIndex === -1 ? Infinity : rankBIndex;
-
-    if (effectiveRankAIndex !== effectiveRankBIndex) {
-        return effectiveRankAIndex - effectiveRankBIndex;
-    }
-
-    const lastNameCompare = a.staffMemberName.split(' ').pop()!.localeCompare(b.staffMemberName.split(' ').pop()!);
-    if (lastNameCompare !== 0) return lastNameCompare;
-    return a.staffMemberName.split(' ')[0].localeCompare(b.staffMemberName.split(' ')[0]);
-  });
-};
+  const logNameUpper = log.staffName.toUpperCase().trim();
+  const staffFullNameUpper = `${staff.firstName} ${staff.lastName}`.toUpperCase().trim();
+  const staffLastNameFirstNameUpper = `${staff.lastName}, ${staff.firstName}`.toUpperCase().trim();
+  const nameMatch = logNameUpper === staffFullNameUpper || logNameUpper === staffLastNameFirstNameUpper;
+  const rankMatch = log.rank === staff.rank;
+  return nameMatch && rankMatch;
+}
 
 
 export default function CompliancePage() {
