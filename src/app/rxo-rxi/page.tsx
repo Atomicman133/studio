@@ -214,14 +214,14 @@ export default function RxoRxiPage() {
                     ].filter(item => item.value > 0);
 
                     return (
-                        <Card key={region} className="shadow-lg flex flex-col">
+                        <Card key={region} className="shadow-lg">
                             <CardHeader className="text-center">
                                 <CardTitle className="text-xl">{region}</CardTitle>
                                 <CardDescription>{totalStaff} Staff Member(s)</CardDescription>
                             </CardHeader>
-                            <CardContent className="flex-grow flex items-center justify-center">
+                            <CardContent className="pt-4">
                                 {totalStaff > 0 ? (
-                                    <ChartContainer config={chartConfig} className="mx-auto aspect-square w-full max-w-[250px]">
+                                    <ChartContainer config={chartConfig} className="mx-auto aspect-square h-[200px]">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
                                                 <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
@@ -231,8 +231,8 @@ export default function RxoRxiPage() {
                                                     nameKey="name"
                                                     cx="50%"
                                                     cy="50%"
-                                                    outerRadius={80}
-                                                    innerRadius={60}
+                                                    outerRadius={70}
+                                                    innerRadius={50}
                                                     strokeWidth={2}
                                                     labelLine={false}
                                                     onClick={(segmentData) => handlePieSegmentClick(region, segmentData.statusText)}
@@ -246,7 +246,7 @@ export default function RxoRxiPage() {
                                         </ResponsiveContainer>
                                     </ChartContainer>
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground">
+                                    <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
                                         <UserCheck className="h-10 w-10 mb-2" />
                                         <p>No staff assigned.</p>
                                     </div>
