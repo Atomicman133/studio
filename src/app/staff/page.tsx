@@ -1510,7 +1510,7 @@ export default function StaffPage() {
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                              <ScrollArea className="max-h-[300px] border rounded-md">
+                              <div className="overflow-y-auto max-h-[300px] border rounded-md">
                                 {(viewingStaffMember.serviceHistory || []).length === 0 ? (
                                   <p className="text-sm text-muted-foreground p-4 text-center">No service history recorded.</p>
                                 ) : (
@@ -1537,7 +1537,7 @@ export default function StaffPage() {
                                     </TableBody>
                                   </Table>
                                 )}
-                              </ScrollArea>
+                              </div>
                             </AccordionContent>
                           </AccordionItem>
                           <AccordionItem value="training">
@@ -1547,7 +1547,7 @@ export default function StaffPage() {
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                              <ScrollArea className="max-h-[300px] border rounded-md">
+                              <div className="overflow-y-auto max-h-[300px] border rounded-md">
                                 {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
                                 {errorViewedStaffLogs && <p className="text-sm text-destructive p-4">Error loading training records: {errorViewedStaffLogs.message}</p>}
                                 {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
@@ -1573,7 +1573,7 @@ export default function StaffPage() {
                                     </TableBody>
                                   </Table>
                                 )}
-                              </ScrollArea>
+                              </div>
                             </AccordionContent>
                           </AccordionItem>
 
@@ -1677,3 +1677,4 @@ export default function StaffPage() {
     </div>
   );
 }
+
