@@ -75,10 +75,11 @@ const navItems: NavItem[] = [
     label: "RXO / RXI",
     icon: ClipboardList,
     subItems: [
+      { href: "/rxo-rxi", label: "Regional Dashboard", icon: ClipboardList },
       { href: "/pdps", label: "Prof. Development", icon: Briefcase },
       { href: "/discipline", label: "Discipline Actions", icon: Gavel },
       { href: "/audits", label: "Safety Audits", icon: ShieldCheck },
-      { href: "/squadron-visits", label: "Squadron Visits", icon: ClipboardList },
+      { href: "/squadron-visits", label: "Squadron Visits", icon: Plane },
     ],
   },
   { href: "/reporting", label: "Compliance", icon: BarChart3 }, 
@@ -195,6 +196,10 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
   }
 
   const isCollapsed = sidebarState === "collapsed";
+  
+  const checkActive = (href: string) => {
+    return href === "/" ? pathname === href : pathname.startsWith(href);
+  };
 
 
   return (
@@ -216,34 +221,29 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
                 {item.subItems && !isCollapsed ? (
                   <Collapsible className="group">
                     <CollapsibleTrigger asChild>
-                      <Link href={item.href} className="w-full">
-                        <SidebarMenuButton
-                            className="w-full justify-between"
-                            isActive={pathname.startsWith(item.href) || item.subItems.some(sub => pathname.startsWith(sub.href))}
-                          >
-                          <div className="flex items-center gap-3">
-                            <item.icon className="h-5 w-5 shrink-0" />
-                            <span className={cn("truncate", isCollapsed && "hidden")}>{item.label}</span>
-                          </div>
-                          {!isCollapsed && <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />}
-                        </SidebarMenuButton>
-                      </Link>
+                      <SidebarMenuButton
+                          className="w-full justify-between"
+                          isActive={item.subItems.some(sub => checkActive(sub.href))}
+                        >
+                        <div className="flex items-center gap-3">
+                          <item.icon className="h-5 w-5 shrink-0" />
+                          <span className={cn("truncate", isCollapsed && "hidden")}>{item.label}</span>
+                        </div>
+                        {!isCollapsed && <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />}
+                      </SidebarMenuButton>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub className={cn(isCollapsed && "hidden")}>
-                        {item.subItems.map((subItem) => {
-                           const isSubActive = pathname.startsWith(subItem.href);
-                           return (
-                            <SidebarMenuSubItem key={subItem.label}>
-                              <Link href={subItem.href} passHref legacyBehavior>
-                                <SidebarMenuSubButton isActive={isSubActive}>
-                                  <subItem.icon />
-                                  <span>{subItem.label}</span>
-                                </SidebarMenuSubButton>
-                              </Link>
-                            </SidebarMenuSubItem>
-                           );
-                        })}
+                        {item.subItems.map((subItem) => (
+                          <SidebarMenuSubItem key={subItem.label}>
+                            <Link href={subItem.href} passHref legacyBehavior>
+                              <SidebarMenuSubButton isActive={checkActive(subItem.href)}>
+                                <subItem.icon />
+                                <span>{subItem.label}</span>
+                              </SidebarMenuSubButton>
+                            </Link>
+                          </SidebarMenuSubItem>
+                         ))}
                       </SidebarMenuSub>
                     </CollapsibleContent>
                   </Collapsible>
@@ -251,7 +251,7 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
                   <Link href={item.href} className="w-full">
                     <SidebarMenuButton
                       className="w-full justify-start"
-                      isActive={pathname === "/" ? pathname === item.href : pathname.startsWith(item.href)}
+                      isActive={checkActive(item.href)}
                       tooltip={isCollapsed ? item.label : undefined}
                     >
                       <item.icon className="h-5 w-5 shrink-0" />
@@ -287,34 +287,29 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
                         {item.subItems ? (
                         <Collapsible>
                             <CollapsibleTrigger asChild>
-                            <Link href={item.href} className="w-full">
-                                <SidebarMenuButton
-                                    className="w-full justify-between"
-                                    isActive={pathname.startsWith(item.href) || item.subItems.some(sub => pathname.startsWith(sub.href))}
-                                >
-                                <div className="flex items-center gap-3">
-                                    <item.icon className="h-5 w-5 shrink-0" />
-                                    <span className="truncate">{item.label}</span>
-                                </div>
-                                <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                                </SidebarMenuButton>
-                            </Link>
+                              <SidebarMenuButton
+                                  className="w-full justify-between"
+                                  isActive={item.subItems.some(sub => checkActive(sub.href))}
+                              >
+                              <div className="flex items-center gap-3">
+                                  <item.icon className="h-5 w-5 shrink-0" />
+                                  <span className="truncate">{item.label}</span>
+                              </div>
+                              <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                              </SidebarMenuButton>
                             </CollapsibleTrigger>
                             <CollapsibleContent>
                             <SidebarMenuSub>
-                                {item.subItems.map((subItem) => {
-                                const isSubActive = pathname.startsWith(subItem.href);
-                                return (
-                                    <SidebarMenuSubItem key={subItem.label}>
+                                {item.subItems.map((subItem) => (
+                                  <SidebarMenuSubItem key={subItem.label}>
                                     <Link href={subItem.href} passHref legacyBehavior>
-                                        <SidebarMenuSubButton isActive={isSubActive}>
+                                        <SidebarMenuSubButton isActive={checkActive(subItem.href)}>
                                         <subItem.icon />
                                         <span>{subItem.label}</span>
                                         </SidebarMenuSubButton>
                                     </Link>
-                                    </SidebarMenuSubItem>
-                                );
-                                })}
+                                  </SidebarMenuSubItem>
+                                ))}
                             </SidebarMenuSub>
                             </CollapsibleContent>
                         </Collapsible>
@@ -322,7 +317,7 @@ function AppLayoutInternal({ children }: { children: React.ReactNode }) {
                         <Link href={item.href} className="w-full">
                             <SidebarMenuButton
                             className="w-full justify-start"
-                            isActive={pathname === "/" ? pathname === item.href : pathname.startsWith(item.href)}
+                            isActive={checkActive(item.href)}
                             >
                             <item.icon className="h-5 w-5 shrink-0" />
                             <span className="truncate">{item.label}</span>
