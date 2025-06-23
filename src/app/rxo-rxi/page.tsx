@@ -30,38 +30,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, getRegionForSquadron } from '@/lib/utils';
 import { processComplianceReports } from "@/lib/compliance-processing";
 
 const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
 const RENDER_ORDER = ['Headquarters', 'North', 'South', 'East', 'West'];
-
-function getRegionForSquadron(squadronName: string): string {
-    if (!squadronName) return 'Headquarters';
-
-    const sqnLower = squadronName.toLowerCase();
-
-    // North
-    if (['704', '711', '721', '723'].some(num => sqnLower.includes(num))) {
-        return 'North';
-    }
-    // South
-    if (['702', '705', '713', '714'].some(num => sqnLower.includes(num))) {
-        return 'South';
-    }
-    // East
-    if (['701', '712', '709', '715'].some(num => sqnLower.includes(num))) {
-        return 'East';
-    }
-    // West
-    if (['703', '707', '708', '710'].some(num => sqnLower.includes(num))) {
-        return 'West';
-    }
-    
-    // Headquarters is the default for anything else, including "7 Wing"
-    return 'Headquarters';
-}
-
 
 async function fetchAllTrainingLogs(): Promise<TrainingLog[]> {
     const collectionRef = collection(db, 'trainingLogs');

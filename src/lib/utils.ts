@@ -149,7 +149,6 @@ export function resetLetterheadCache() {
   footerImageDimensions = null;
 }
 
-// Moved from staff/page.tsx
 export function calculateOICLevel(logs: TrainingLog[]): number | null {
   let maxLevel = null;
   const oicPattern = /\b(?:Activity\s+)?OIC Level\s*(\d+)\b/i;
@@ -171,4 +170,30 @@ export function calculateOICLevel(logs: TrainingLog[]): number | null {
     }
   }
   return maxLevel;
+}
+
+export function getRegionForSquadron(squadronName?: string | null): string {
+    if (!squadronName) return 'Headquarters';
+
+    const sqnLower = squadronName.toLowerCase();
+
+    // North
+    if (['704', '711', '721', '723'].some(num => sqnLower.includes(num))) {
+        return 'North';
+    }
+    // South
+    if (['702', '705', '713', '714'].some(num => sqnLower.includes(num))) {
+        return 'South';
+    }
+    // East
+    if (['701', '712', '709', '715'].some(num => sqnLower.includes(num))) {
+        return 'East';
+    }
+    // West
+    if (['703', '707', '708', '710'].some(num => sqnLower.includes(num))) {
+        return 'West';
+    }
+    
+    // Headquarters is the default for anything else, including "7 Wing"
+    return 'Headquarters';
 }

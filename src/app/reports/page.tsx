@@ -5,26 +5,24 @@ import * as React from "react";
 import { BarChart3, CheckCircle2, Download, FileSearch, FileSpreadsheet, Loader2, XCircle, AlertTriangle, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useStaff } from "@/hooks/useStaffData";
 import type { StaffMember } from "../staff/staff-schema";
 import type { TrainingLog } from "../training/training-schema";
 import { COMPLIANCE_CRITERIA_CONFIG, type ComplianceCriterionCheck } from "../reporting/reporting-schema";
-import { calculateOICLevel } from "@/lib/utils"; // Moved utility
+import { calculateOICLevel, getRegionForSquadron } from "@/lib/utils"; // Moved utility
 import { useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { format, isValid, startOfDay, addYears, isBefore, addDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-// Removed static imports:
-// import jsPDF from 'jspdf';
-// import 'jspdf-autotable'; // Import for autoTable plugin
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 import { Badge } from "@/components/ui/badge";
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
+const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
 
 type ReportType = "oicLevelByUnit" | "specificComplianceByUnit";
 
@@ -48,7 +46,6 @@ interface SpecificComplianceReportItem {
 
 type ReportData = OICLevelReportItem[] | SpecificComplianceReportItem[];
 
-// Fetch training logs (similar to what's in training/page.tsx or reporting/page.tsx)
 async function fetchAllTrainingLogs(): Promise<TrainingLog[]> {
   const logsCollectionRef = collection(db, 'trainingLogs');
   const q = query(logsCollectionRef, orderBy('completionDate', 'desc'));
@@ -74,7 +71,7 @@ export default function ReportsPage() {
   });
   const { toast } = useToast();
 
-  const [selectedSquadron, setSelectedSquadron] = React.useState<string | null>(null);
+  const [selectedUnitOrRegion, setSelectedUnitOrRegion] = React.useState<string | null>(null);
   const [selectedReportType, setSelectedReportType] = React.useState<ReportType | null>(null);
   const [selectedComplianceItemKey, setSelectedComplianceItemKey] = React.useState<string | null>(null);
   const [reportData, setReportData] = React.useState<ReportData | null>(null);
@@ -87,8 +84,8 @@ export default function ReportsPage() {
   }, [staffList]);
 
   const handleRunReport = () => {
-    if (!selectedSquadron || !selectedReportType) {
-      toast({ variant: "destructive", title: "Missing Selection", description: "Please select a squadron and a report type." });
+    if (!selectedUnitOrRegion || !selectedReportType) {
+      toast({ variant: "destructive", title: "Missing Selection", description: "Please select a region/squadron and a report type." });
       return;
     }
     if (selectedReportType === "specificComplianceByUnit" && !selectedComplianceItemKey) {
@@ -97,17 +94,21 @@ export default function ReportsPage() {
     }
 
     setIsGeneratingReport(true);
-    setReportData(null); // Clear previous report
+    setReportData(null);
 
-    const staffInSquadron = staffList.filter(staff => staff.squadron === selectedSquadron);
-    if (staffInSquadron.length === 0) {
-      toast({ title: "No Staff", description: `No staff members found for squadron: ${selectedSquadron}.` });
+    const isRegionSelected = REGIONS.includes(selectedUnitOrRegion);
+    const staffInScope = isRegionSelected
+      ? staffList.filter(staff => getRegionForSquadron(staff.squadron) === selectedUnitOrRegion)
+      : staffList.filter(staff => staff.squadron === selectedUnitOrRegion);
+    
+    if (staffInScope.length === 0) {
+      toast({ title: "No Staff", description: `No staff members found for ${selectedUnitOrRegion}.` });
       setIsGeneratingReport(false);
       return;
     }
 
     if (selectedReportType === "oicLevelByUnit") {
-      const oicReport: OICLevelReportItem[] = staffInSquadron.map(staff => {
+      const oicReport: OICLevelReportItem[] = staffInScope.map(staff => {
         const memberLogs = trainingLogs?.filter(log => log.serviceNumber === staff.serviceNumber) || [];
         return {
           staffId: staff.id || staff.serviceNumber,
@@ -126,7 +127,7 @@ export default function ReportsPage() {
         return;
       }
 
-      const complianceReport: SpecificComplianceReportItem[] = staffInSquadron.map(staff => {
+      const complianceReport: SpecificComplianceReportItem[] = staffInScope.map(staff => {
         const memberLogs = trainingLogs?.filter(log => log.serviceNumber === staff.serviceNumber) || [];
         const relevantLogs = memberLogs
           .filter(log => criterionConfig.identifier(log))
@@ -200,12 +201,12 @@ export default function ReportsPage() {
 
   const handleExportCsv = () => {
     let filename = "report.csv";
-    if (selectedReportType === "oicLevelByUnit" && selectedSquadron) {
-      filename = `oic_level_report_${selectedSquadron.replace(/\s+/g, '_')}.csv`;
-    } else if (selectedReportType === "specificComplianceByUnit" && selectedSquadron && selectedComplianceItemKey) {
+    if (selectedReportType === "oicLevelByUnit" && selectedUnitOrRegion) {
+      filename = `oic_level_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
+    } else if (selectedReportType === "specificComplianceByUnit" && selectedUnitOrRegion && selectedComplianceItemKey) {
       const complianceItem = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey);
       const itemName = complianceItem ? complianceItem.name.replace(/\s+/g, '_') : "compliance_item";
-      filename = `${itemName}_report_${selectedSquadron.replace(/\s+/g, '_')}.csv`;
+      filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
     }
     generateCsv(reportData, filename);
   };
@@ -215,13 +216,13 @@ export default function ReportsPage() {
         toast({variant: "destructive", title: "No Data", description: "No data to export for PDF."});
         return;
     }
-    if (!selectedSquadron || !selectedReportType) {
+    if (!selectedUnitOrRegion || !selectedReportType) {
         toast({variant: "destructive", title: "Report Context Missing", description: "Cannot determine report context for PDF export."});
         return;
     }
 
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable'); // For side effects to extend jsPDF prototype
+    await import('jspdf-autotable');
 
     const doc = new jsPDF();
     resetLetterheadCache();
@@ -239,7 +240,7 @@ export default function ReportsPage() {
     yPos = margin + headerHeight + 5;
 
     const checkPageBreak = async (neededHeight: number = lineSpacing) => {
-        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight - 10) { // Buffer for page numbers
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight - 10) {
             addPageNumbers(doc, footerHeight, margin);
             doc.addPage();
             await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
@@ -250,12 +251,11 @@ export default function ReportsPage() {
     doc.setFontSize(16);
     doc.setFont(undefined, "bold");
     let reportTitle = "Report";
-    // let reportSubtitle = `Squadron: ${selectedSquadron}`; // Not used in current title formatting
     if (selectedReportType === "oicLevelByUnit") {
-        reportTitle = `OIC Level Report for ${selectedSquadron}`;
+        reportTitle = `OIC Level Report for ${selectedUnitOrRegion}`;
     } else if (selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey) {
         const item = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey);
-        reportTitle = `${item ? item.name : 'Compliance'} Report for ${selectedSquadron}`;
+        reportTitle = `${item ? item.name : 'Compliance'} Report for ${selectedUnitOrRegion}`;
     }
     await checkPageBreak(sectionSpacing);
     doc.text(reportTitle, pageWidth / 2, yPos, { align: 'center' });
@@ -265,8 +265,7 @@ export default function ReportsPage() {
     doc.text(`Generated on: ${format(new Date(), "PPP")}`, pageWidth / 2, yPos, { align: 'center' });
     yPos += sectionSpacing;
 
-    const tableHeaders: string[] = Object.keys(reportData[0]).filter(key => key !== 'staffId' && key !== 'squadron');
-    // const columnWidths = tableHeaders.map(header => doc.getTextWidth(header) + 8); // Not directly used by autoTable in simple mode
+    const tableHeaders: string[] = Object.keys(reportData[0]).filter(key => key !== 'staffId');
     
     const tableData = reportData.map(item => {
         const row: any = {};
@@ -277,38 +276,36 @@ export default function ReportsPage() {
         return Object.values(row);
     });
 
-    (doc as any).autoTable({ // Using any for autoTable
+    (doc as any).autoTable({
         startY: yPos,
         head: [tableHeaders.map(h => h.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()))], // Format headers
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [0, 48, 143], textColor: 255 }, // Primary color for header
-        margin: { top: yPos + sectionSpacing }, // This might be redundant if startY is already accounting for it
-        didDrawPage: (data: any) => {
-             // yPos = data.cursor.y + sectionSpacing; // autoTable manages yPos internally on new pages
-        },
+        headStyles: { fillColor: [0, 48, 143], textColor: 255 },
+        margin: { top: yPos + sectionSpacing },
+        didDrawPage: (data: any) => {},
         willDrawCell: (data: any) => {
-            if (data.section === 'body' && data.column.dataKey === (tableHeaders.length -1) ) { // Assuming last column is 'Details' or similar
+            if (data.section === 'body' && data.column.dataKey === (tableHeaders.length -1) ) {
                 if (typeof data.cell.raw === 'string' && data.cell.raw.toLowerCase().includes("out of date")) {
-                    doc.setTextColor(255,0,0); // Red for out of date
+                    doc.setTextColor(255,0,0);
                 } else if (typeof data.cell.raw === 'string' && data.cell.raw.toLowerCase().includes("missing")) {
-                     doc.setTextColor(200,100,0); // Orange for missing
+                     doc.setTextColor(200,100,0);
                 }
             }
         },
         didDrawCell: (data: any) => {
-            doc.setTextColor(0,0,0); // Reset text color
+            doc.setTextColor(0,0,0);
         }
     });
     
     addPageNumbers(doc, footerHeight, margin);
-    let filename = `report_${selectedSquadron.replace(/\s+/g, '_')}.pdf`;
+    let filename = `report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
      if (selectedReportType === "oicLevelByUnit") {
-      filename = `oic_level_report_${selectedSquadron.replace(/\s+/g, '_')}.pdf`;
+      filename = `oic_level_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     } else if (selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey) {
       const complianceItem = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey);
       const itemName = complianceItem ? complianceItem.name.replace(/\s+/g, '_') : "compliance_item";
-      filename = `${itemName}_report_${selectedSquadron.replace(/\s+/g, '_')}.pdf`;
+      filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     }
     doc.save(filename);
   };
@@ -331,13 +328,21 @@ export default function ReportsPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
             <div className="space-y-1">
-              <label htmlFor="squadron-select" className="text-sm font-medium">Squadron</label>
-              <Select onValueChange={setSelectedSquadron} value={selectedSquadron || ""} disabled={isLoadingAny}>
-                <SelectTrigger id="squadron-select" aria-label="Select Squadron">
-                  <SelectValue placeholder="Select Squadron" />
+              <label htmlFor="unit-region-select" className="text-sm font-medium">Region / Squadron</label>
+              <Select onValueChange={setSelectedUnitOrRegion} value={selectedUnitOrRegion || ""} disabled={isLoadingAny}>
+                <SelectTrigger id="unit-region-select" aria-label="Select Region or Squadron">
+                  <SelectValue placeholder="Select Region or Squadron" />
                 </SelectTrigger>
                 <SelectContent>
-                  {uniqueSquadrons.map(sqn => <SelectItem key={sqn} value={sqn}>{sqn}</SelectItem>)}
+                  <SelectGroup>
+                    <SelectLabel>Regions</SelectLabel>
+                    {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                  </SelectGroup>
+                  <SelectSeparator />
+                  <SelectGroup>
+                     <SelectLabel>Squadrons</SelectLabel>
+                     {uniqueSquadrons.map(sqn => <SelectItem key={sqn} value={sqn}>{sqn}</SelectItem>)}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
@@ -369,7 +374,7 @@ export default function ReportsPage() {
               </div>
             )}
           </div>
-          <Button onClick={handleRunReport} disabled={isLoadingAny || !selectedSquadron || !selectedReportType || (selectedReportType === 'specificComplianceByUnit' && !selectedComplianceItemKey)} className="mt-4 w-full md:w-auto">
+          <Button onClick={handleRunReport} disabled={isLoadingAny || !selectedUnitOrRegion || !selectedReportType || (selectedReportType === 'specificComplianceByUnit' && !selectedComplianceItemKey)} className="mt-4 w-full md:w-auto">
             {isGeneratingReport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Filter className="mr-2 h-4 w-4" />}
             Run Report
           </Button>
@@ -395,9 +400,9 @@ export default function ReportsPage() {
           <CardHeader>
             <CardTitle className="text-xl">Report Results</CardTitle>
             <CardDescription>
-              {selectedReportType === "oicLevelByUnit" ? `OIC Levels for ${selectedSquadron}` :
+              {selectedReportType === "oicLevelByUnit" ? `OIC Levels for ${selectedUnitOrRegion}` :
                selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey ?
-               `${COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey)?.name || 'Compliance Item'} Status for ${selectedSquadron}` :
+               `${COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey)?.name || 'Compliance Item'} Status for ${selectedUnitOrRegion}` :
                "Generated Report"}
             </CardDescription>
           </CardHeader>
@@ -410,6 +415,7 @@ export default function ReportsPage() {
                   <TableRow>
                     <TableHead>Rank</TableHead>
                     <TableHead>Name</TableHead>
+                    <TableHead>Squadron</TableHead>
                     {selectedReportType === "oicLevelByUnit" && <TableHead>OIC Level</TableHead>}
                     {selectedReportType === "specificComplianceByUnit" && (
                       <>
@@ -425,6 +431,7 @@ export default function ReportsPage() {
                     <TableRow key={item.staffId}>
                       <TableCell>{item.rank}</TableCell>
                       <TableCell>{item.staffName}</TableCell>
+                      <TableCell>{(item as any).squadron}</TableCell>
                       {selectedReportType === "oicLevelByUnit" && (
                         <TableCell>{(item as OICLevelReportItem).oicLevel ?? "N/A"}</TableCell>
                       )}
