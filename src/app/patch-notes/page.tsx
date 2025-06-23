@@ -14,7 +14,7 @@ const patchNotesData = [
   {
     version: "0.1.6",
     date: "Current",
-    title: "New 'RXO / RXI' Regional Dashboard",
+    title: "Regional (RXO/RXI) Dashboards & Reporting",
     sections: [
       {
         title: "New 'RXO / RXI' Module (/rxo-rxi)",
@@ -29,10 +29,16 @@ const patchNotesData = [
        {
         title: "Navigation & Code Refinements",
         items: [
-          "Added 'RXO / RXI' to the main sidebar navigation.",
-          "Centralized the main compliance processing logic into a new utility file (`src/lib/compliance-processing.ts`) to be shared between the main dashboard and the new regional dashboard.",
+          "Restructured the main sidebar: 'Prof. Development', 'Discipline Actions', 'Safety Audits', and 'Squadron Visits' are now grouped as a submenu under 'RXO / RXI'.",
+          "Centralized the `getRegionForSquadron` logic into a shared utility file (`src/lib/utils.ts`) for consistent use across the application.",
         ],
       },
+      {
+        title: "Reporting Enhancements",
+        items: [
+            "Updated the 'Reports' page to allow generating reports by entire region (North, South, East, West, HQ) in addition to individual squadrons.",
+        ]
+      }
     ],
   },
   {
