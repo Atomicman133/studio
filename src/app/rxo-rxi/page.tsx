@@ -31,29 +31,37 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
-import { processComplianceReports } from "@/lib/compliance-processing"; // Assuming you'll create this file
+import { processComplianceReports } from "@/lib/compliance-processing";
 
-const SQUADRON_REGION_MAP: Record<string, string> = {
-    '704 Squadron - Madeley': 'North',
-    '711 Squadron - Geraldton': 'North',
-    '721 Squadron - Madeley': 'North',
-    '723 Squadron - Geraldton': 'North',
-    '702 Squadron - Cannington': 'South',
-    '705 Squadron - Albany': 'South',
-    '713 Squadron - Cannington': 'South',
-    '714 Squadron - Karrakatta': 'South',
-    '701 Squadron - Bullsbrook': 'East',
-    '712 Squadron - Guildford': 'East',
-    '709 Squadron - Kalgoorlie': 'East',
-    '715 Squadron - Guildford': 'East',
-    '703 Squadron - Fremantle': 'West',
-    '707 Squadron - Mandurah': 'West',
-    '708 Squadron - Rockingham': 'West',
-    '710 Squadron - Bunbury': 'West',
-    '7 Wing - Headquarters': 'Headquarters',
-};
 const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
-const RENDER_ORDER = ['Headquarters', 'North', 'South', 'East', 'West']; // New constant for ordered rendering
+const RENDER_ORDER = ['Headquarters', 'North', 'South', 'East', 'West'];
+
+function getRegionForSquadron(squadronName: string): string {
+    if (!squadronName) return 'Headquarters';
+
+    const sqnLower = squadronName.toLowerCase();
+
+    // North
+    if (['704', '711', '721', '723'].some(num => sqnLower.includes(num))) {
+        return 'North';
+    }
+    // South
+    if (['702', '705', '713', '714'].some(num => sqnLower.includes(num))) {
+        return 'South';
+    }
+    // East
+    if (['701', '712', '709', '715'].some(num => sqnLower.includes(num))) {
+        return 'East';
+    }
+    // West
+    if (['703', '707', '708', '710'].some(num => sqnLower.includes(num))) {
+        return 'West';
+    }
+    
+    // Headquarters is the default for anything else, including "7 Wing"
+    return 'Headquarters';
+}
+
 
 async function fetchAllTrainingLogs(): Promise<TrainingLog[]> {
     const collectionRef = collection(db, 'trainingLogs');
@@ -112,16 +120,18 @@ export default function RxoRxiPage() {
         }, {} as Record<string, { staff: StaffMember[], reports: StaffComplianceReport[], summary: { compliant: number, partiallyCompliant: number, nonCompliant: number } }>);
 
         allProcessedReports.forEach(report => {
-            const region = SQUADRON_REGION_MAP[report.squadron] || 'Headquarters';
+            const region = getRegionForSquadron(report.squadron);
             if (dataByRegion[region]) {
                 dataByRegion[region].reports.push(report);
             }
         });
         
-        for (const region in dataByRegion) {
-            dataByRegion[region].summary.compliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
-            dataByRegion[region].summary.partiallyCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-            dataByRegion[region].summary.nonCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
+        for (const region of REGIONS) {
+            if (dataByRegion[region]) {
+                dataByRegion[region].summary.compliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
+                dataByRegion[region].summary.partiallyCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+                dataByRegion[region].summary.nonCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
+            }
         }
 
         return dataByRegion;
