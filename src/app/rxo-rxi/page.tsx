@@ -100,10 +100,11 @@ export default function RxoRxiPage() {
         });
         
         for (const region of REGIONS) {
-            if (dataByRegion[region]) {
-                dataByRegion[region].summary.compliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
-                dataByRegion[region].summary.partiallyCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-                dataByRegion[region].summary.nonCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
+            const currentRegionData = dataByRegion[region];
+            if (currentRegionData) {
+                currentRegionData.summary.compliant = currentRegionData.reports.filter(r => r.complianceStatusText === "Compliant").length;
+                currentRegionData.summary.partiallyCompliant = currentRegionData.reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+                currentRegionData.summary.nonCompliant = currentRegionData.reports.filter(r => r.complianceStatusText === "Not Compliant").length;
             }
         }
 
@@ -230,8 +231,10 @@ export default function RxoRxiPage() {
                                                     nameKey="name"
                                                     cx="50%"
                                                     cy="50%"
+                                                    outerRadius={80}
                                                     innerRadius={60}
                                                     strokeWidth={2}
+                                                    labelLine={false}
                                                     onClick={(segmentData) => handlePieSegmentClick(region, segmentData.statusText)}
                                                 >
                                                     {pieData.map((entry) => (
