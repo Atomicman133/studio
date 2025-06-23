@@ -53,6 +53,7 @@ const SQUADRON_REGION_MAP: Record<string, string> = {
     '7 Wing - Headquarters': 'Headquarters',
 };
 const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
+const RENDER_ORDER = ['Headquarters', 'North', 'South', 'East', 'West']; // New constant for ordered rendering
 
 async function fetchAllTrainingLogs(): Promise<TrainingLog[]> {
     const collectionRef = collection(db, 'trainingLogs');
@@ -218,8 +219,8 @@ export default function RxoRxiPage() {
                 </CardHeader>
             </Card>
 
-            <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
-                {REGIONS.map(region => {
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                {RENDER_ORDER.map(region => {
                     const data = regionalData[region];
                     const totalStaff = data.reports.length;
                     const pieData = [
@@ -229,14 +230,14 @@ export default function RxoRxiPage() {
                     ].filter(item => item.value > 0);
 
                     return (
-                        <Card key={region} className="shadow-lg">
-                            <CardHeader>
-                                <CardTitle className="text-xl">{region} Region</CardTitle>
+                        <Card key={region} className="shadow-lg flex flex-col">
+                            <CardHeader className="text-center">
+                                <CardTitle className="text-xl">{region}</CardTitle>
                                 <CardDescription>{totalStaff} Staff Member(s)</CardDescription>
                             </CardHeader>
-                            <CardContent>
+                            <CardContent className="flex-grow flex items-center justify-center">
                                 {totalStaff > 0 ? (
-                                    <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[250px]">
+                                    <ChartContainer config={chartConfig} className="mx-auto aspect-square w-full max-w-[250px]">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
                                                 <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
@@ -261,7 +262,7 @@ export default function RxoRxiPage() {
                                 ) : (
                                     <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground">
                                         <UserCheck className="h-10 w-10 mb-2" />
-                                        <p>No staff assigned to this region.</p>
+                                        <p>No staff assigned.</p>
                                     </div>
                                 )}
                             </CardContent>
