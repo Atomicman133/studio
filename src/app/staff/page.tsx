@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -746,6 +747,7 @@ export default function StaffPage() {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const skippedRecordsLog: string[] = [];
+      const BATCH_SIZE = 490; // Firestore batch write limit is 500
       try {
         const text = e.target?.result as string;
         if (!text) {
@@ -754,9 +756,10 @@ export default function StaffPage() {
           return;
         }
 
-        const logsToAdd: Omit<TrainingLog, 'id'>[] = [];
-        const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
+        const allOperations: { type: 'log' | 'staffUpdate', payload: any }[] = [];
         const errors: string[] = [];
+        
+        toast({ title: "Import Started", description: "Parsing CSV file..." });
 
         const allRows = robustCsvParser(text);
 
@@ -781,9 +784,8 @@ export default function StaffPage() {
           });
 
           if (!allRequiredHeadersPresent) {
-               toast({
-                  variant: "destructive",
-                  title: "CSV Import Failed: Header Mismatch",
+              toast({
+                  variant: "destructive", title: "CSV Import Failed: Header Mismatch",
                   description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{errors.join("\n")}</pre></ScrollArea> ),
                   duration: 15000,
               });
@@ -792,224 +794,186 @@ export default function StaffPage() {
               return;
           }
 
+          // Step 1: Process all rows and prepare operations without writing to DB yet
+          const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
           for (let i = 1; i < allRows.length; i++) {
               const values = allRows[i];
               if (values.every(val => val.trim() === "")) continue;
-
               if (values.length !== header.length) {
-                  errors.push(`Row ${i + 1}: Incorrect number of columns. Expected ${header.length}, got ${values.length}. Line: "${allRows[i].join(",").substring(0,100)}..."`);
+                  errors.push(`Row ${i + 1}: Incorrect columns. Expected ${header.length}, got ${values.length}. Line: "${allRows[i].join(",").substring(0,100)}..."`);
                   continue;
               }
 
               const csvRowData: Record<string, string> = {};
-               expectedHeaders.forEach(eh => {
-                   const index = headerIndices[eh];
-                   if (index !== undefined && index < values.length) {
-                       csvRowData[eh] = values[index];
-                   } else {
-                       csvRowData[eh] = "";
-                   }
+              expectedHeaders.forEach(eh => {
+                const index = headerIndices[eh];
+                csvRowData[eh] = (index !== undefined && index < values.length) ? values[index] : "";
               });
 
               const surnameField = csvRowData["Surname"];
               if (!surnameField) {
-                  errors.push(`Row ${i + 1}: Missing "Surname" field content.`);
-                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Missing "Surname" field.`);
+                  errors.push(`Row ${i + 1}: Missing "Surname" field.`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Missing "Surname".`);
                   continue;
               }
 
               const parsedNameRankUid = parseCompositeSurnameField(surnameField);
-
               if (!parsedNameRankUid.memberUID) {
-                  errors.push(`Row ${i + 1}: Could not parse MemberUID from Surname field: "${surnameField}".`);
-                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Could not parse MemberUID from "${surnameField}".`);
+                  errors.push(`Row ${i + 1}: Could not parse MemberUID from "${surnameField}".`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - No MemberUID in "${surnameField}".`);
                   continue;
               }
 
               const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
-
               if (!matchedStaffFromMap) {
-                  const skipMsg = `Row ${i + 1}: Staff member with MemberUID "${parsedNameRankUid.memberUID}" (from "${surnameField}") not found. Please ensure a staff profile exists.`;
-                  skippedRecordsLog.push(skipMsg);
+                  skippedRecordsLog.push(`Row ${i + 1}: Staff with MemberUID "${parsedNameRankUid.memberUID}" not found.`);
                   continue;
               }
 
-              const details = csvRowData["Details"]?.trim();
               const effectiveDateStr = csvRowData["EffectiveDate"];
-              const endDateStr = csvRowData["EndDate"]?.trim();
-              const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
-              const statusName = csvRowData["StatusName"]?.trim().toLowerCase();
-              const comment = csvRowData["Comment"]?.trim();
-
               if (!effectiveDateStr) {
-                  errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing "EffectiveDate".`);
-                  skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Missing "EffectiveDate".`);
+                  errors.push(`Row ${i + 1}: Missing "EffectiveDate".`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Missing "EffectiveDate".`);
                   continue;
               }
-
               const effectiveDate = parseDateForAccomplishment(effectiveDateStr);
               if (!effectiveDate) {
-                  errors.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid "EffectiveDate" format for "${effectiveDateStr}".`);
-                  skippedRecordsLog.push(`Row ${i + 1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Invalid "EffectiveDate" ("${effectiveDateStr}").`);
+                  errors.push(`Row ${i + 1}: Invalid "EffectiveDate" format: "${effectiveDateStr}".`);
+                  skippedRecordsLog.push(`Row ${i + 1}: Skipped - Invalid "EffectiveDate".`);
                   continue;
               }
+              
+              const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
+              const details = csvRowData["Details"]?.trim();
 
               const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...JSON.parse(JSON.stringify(matchedStaffFromMap)) };
 
               if (changeType === "enrolment") {
-                staffUpdateData.joinDate = effectiveDate;
-              } else if (changeType === "position") {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Position change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change missing 'Details'.`); continue; }
-                const positionEndDate = endDateStr ? parseDateForAccomplishment(endDateStr) : null;
-                if (endDateStr && !positionEndDate) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Invalid 'EndDate' for Position: "${endDateStr}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Position change invalid 'EndDate' ("${endDateStr}").`); continue; }
-
-                staffUpdateData.serviceHistoryToAdd.push({
-                    id: crypto.randomUUID(), type: "Position", item: details,
-                    effectiveDate: effectiveDate, endDate: positionEndDate, notes: comment
-                });
-                if (statusName === "current" && details !== staffUpdateData.role) {
-                    staffUpdateData.role = details;
-                }
-              } else if (changeType === "rank") {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): 'Details' field required for Rank change type.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change missing 'Details'.`); continue; }
-                const parsedRank = parseFullRankNameToAbbreviation(details);
-                if (!parsedRank) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Could not parse rank from Details: "${details}".`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Rank change invalid rank in 'Details' ("${details}").`); continue; }
-
-                staffUpdateData.serviceHistoryToAdd.push({
-                    id: crypto.randomUUID(), type: "Rank", item: parsedRank,
-                    effectiveDate: effectiveDate, notes: comment
-                });
-                if (statusName === "current" && parsedRank !== staffUpdateData.rank) {
-                    staffUpdateData.rank = parsedRank;
-                }
+                 staffUpdateData.joinDate = effectiveDate;
+              } else if (changeType === "position" || changeType === "rank") {
+                  if (!details) {
+                      skippedRecordsLog.push(`Row ${i+1}: Skipped - '${changeType}' change missing 'Details'.`); continue;
+                  }
+                  if (changeType === "position") {
+                      const endDateStr = csvRowData["EndDate"]?.trim();
+                      const positionEndDate = endDateStr ? parseDateForAccomplishment(endDateStr) : null;
+                      staffUpdateData.serviceHistoryToAdd.push({ id: crypto.randomUUID(), type: "Position", item: details, effectiveDate: effectiveDate, endDate: positionEndDate, notes: csvRowData["Comment"]?.trim() });
+                      if (csvRowData["StatusName"]?.trim().toLowerCase() === "current") staffUpdateData.role = details;
+                  } else { // rank
+                      const parsedRank = parseFullRankNameToAbbreviation(details);
+                      if (!parsedRank) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Rank change invalid rank in 'Details' ("${details}").`); continue; }
+                      staffUpdateData.serviceHistoryToAdd.push({ id: crypto.randomUUID(), type: "Rank", item: parsedRank, effectiveDate: effectiveDate, notes: csvRowData["Comment"]?.trim() });
+                      if (csvRowData["StatusName"]?.trim().toLowerCase() === "current") staffUpdateData.rank = parsedRank;
+                  }
               } else {
-                if (!details) { errors.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Missing 'Details' for accomplishment/training log.`); skippedRecordsLog.push(`Row ${i+1} (UID: ${matchedStaffFromMap.serviceNumber}): Skipped - Accomplishment missing 'Details'.`); continue; }
-                const newLog: Omit<TrainingLog, 'id' | 'certificateFileName' | 'certificateDataUrl'> = {
-                  rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
-                  staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
-                  squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
-                  currentRole: matchedStaffFromMap.role || "N/A",
-                  courseName: details,
-                  completionDate: effectiveDate,
-                  qualificationAchieved: details, // Assuming Details field contains qualification for accomplishments
-                  instructorQualification: "",
-                  achievementDetails: comment || "",
-                  serviceNumber: matchedStaffFromMap.serviceNumber,
-                };
-                logsToAdd.push(newLog as Omit<TrainingLog, 'id'>);
+                  if (!details) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Accomplishment missing 'Details'.`); continue; }
+                  allOperations.push({ type: 'log', payload: {
+                      rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
+                      staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
+                      squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
+                      currentRole: matchedStaffFromMap.role || "N/A",
+                      courseName: details,
+                      completionDate: effectiveDate,
+                      qualificationAchieved: details,
+                      instructorQualification: "",
+                      achievementDetails: csvRowData["Comment"]?.trim() || "",
+                      serviceNumber: matchedStaffFromMap.serviceNumber,
+                  }});
               }
               staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
         }
 
-        const batch = writeBatch(db);
-        let trainingLogsImportedCount = 0;
-        let staffProfilesUpdatedCount = 0;
-
-        for (const log of logsToAdd) {
-           try {
-               const collectionRef = collection(db, 'trainingLogs');
-               const { id, ...logDataForFirestore } = log; 
-                const dataToSave: any = {
-                    ...logDataForFirestore,
-                    completionDate: Timestamp.fromDate(log.completionDate),
-                };
-                Object.keys(dataToSave).forEach(key => {
-                    if (dataToSave[key as keyof typeof dataToSave] === null || dataToSave[key as keyof typeof dataToSave] === undefined) {
-                        delete dataToSave[key as keyof typeof dataToSave];
-                    }
-                });
-               batch.set(doc(collectionRef), dataToSave);
-               trainingLogsImportedCount++;
-           } catch (err: any) {
-               errors.push(`Failed to stage training log "${log.courseName}" for ${log.staffName}: ${err.message}`);
-           }
-        }
-
         staffUpdates.forEach((update, staffId) => {
-            const staffDocRef = doc(db, "staff", staffId);
-            const updatePayload: any = {};
-
-            const originalStaffMember = currentStaffList.find(s => s.id === staffId);
-            if (!originalStaffMember) {
-                errors.push(`Consistency error: Could not find original staff data for ID ${staffId} during batch update.`);
-                return;
-            }
-
-            if (update.joinDate !== undefined && update.joinDate !== originalStaffMember.joinDate) {
-                 updatePayload.joinDate = Timestamp.fromDate(new Date(update.joinDate!));
-            }
-            if (update.role !== undefined && update.role !== originalStaffMember.role) {
-                 updatePayload.role = update.role;
-            }
-            if (update.rank !== undefined && update.rank !== originalStaffMember.rank) {
-                 updatePayload.rank = update.rank;
-            }
-            
-            const existingHistory = originalStaffMember.serviceHistory || [];
-            const newHistoryEntries = update.serviceHistoryToAdd.map(entry => ({
-                ...entry,
-                id: entry.id || crypto.randomUUID(),
-                effectiveDate: Timestamp.fromDate(new Date(entry.effectiveDate)),
-                endDate: entry.endDate ? Timestamp.fromDate(new Date(entry.endDate)) : null,
-            }));
-
-            if (newHistoryEntries.length > 0) {
-              const existingEntryIdentifiers = new Set(existingHistory.map(eh => `${eh.type}-${eh.item}-${format(new Date(eh.effectiveDate), 'yyyy-MM-dd')}`));
-              const uniqueNewEntries = newHistoryEntries.filter(ne => !existingEntryIdentifiers.has(`${ne.type}-${ne.item}-${format(new Date(ne.effectiveDate.toDate()), 'yyyy-MM-dd')}`));
-              
-              if (uniqueNewEntries.length > 0) {
-                updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries);
-              }
-            }
-            
-            if(Object.keys(updatePayload).length > 0 ) {
-                 batch.update(staffDocRef, updatePayload);
-                 staffProfilesUpdatedCount++;
-            }
+            allOperations.push({ type: 'staffUpdate', payload: { staffId, update } });
         });
 
-        if (trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0) {
+        if (errors.length === 0 && allOperations.length === 0) {
+            toast({ title: "Import Information", description: "No new training logs or staff updates found to process in the CSV." });
+            setIsImportingAccomplishments(false);
+            if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
+            return;
+        }
+        
+        // Step 2: Commit operations in batches
+        toast({ title: "Processing...", description: `Preparing to write ${allOperations.length} operations to the database...` });
+        
+        const totalBatches = Math.ceil(allOperations.length / BATCH_SIZE);
+        for (let i = 0; i < totalBatches; i++) {
+            const batch = writeBatch(db);
+            const batchStart = i * BATCH_SIZE;
+            const batchEnd = batchStart + BATCH_SIZE;
+            const currentBatchOps = allOperations.slice(batchStart, batchEnd);
+            
+            toast({ title: `Writing Batch ${i + 1} of ${totalBatches}`, description: `Processing ${currentBatchOps.length} operations...` });
+
+            for (const op of currentBatchOps) {
+                if (op.type === 'log') {
+                    const logRef = doc(collection(db, 'trainingLogs'));
+                    const logData = { ...op.payload, completionDate: Timestamp.fromDate(op.payload.completionDate) };
+                    batch.set(logRef, logData);
+                } else if (op.type === 'staffUpdate') {
+                    const { staffId, update } = op.payload;
+                    const staffDocRef = doc(db, "staff", staffId);
+                    const updatePayload: any = {};
+                    const originalStaffMember = currentStaffList.find(s => s.id === staffId);
+                    
+                    if (!originalStaffMember) continue;
+
+                    if (update.joinDate && new Date(update.joinDate).getTime() !== (originalStaffMember.joinDate ? new Date(originalStaffMember.joinDate).getTime() : null)) {
+                        updatePayload.joinDate = Timestamp.fromDate(new Date(update.joinDate));
+                    }
+                    if (update.role && update.role !== originalStaffMember.role) {
+                        updatePayload.role = update.role;
+                    }
+                    if (update.rank && update.rank !== originalStaffMember.rank) {
+                        updatePayload.rank = update.rank;
+    
+                    }
+                    
+                    const existingHistoryIdentifiers = new Set((originalStaffMember.serviceHistory || []).map(eh => `${eh.type}-${eh.item}-${format(new Date(eh.effectiveDate), 'yyyy-MM-dd')}`));
+                    const uniqueNewEntries = update.serviceHistoryToAdd.filter((ne: ServiceHistoryEntry) => !existingHistoryIdentifiers.has(`${ne.type}-${ne.item}-${format(new Date(ne.effectiveDate), 'yyyy-MM-dd')}`));
+
+                    if (uniqueNewEntries.length > 0) {
+                        updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries.map(entry => ({
+                            ...entry,
+                            effectiveDate: Timestamp.fromDate(new Date(entry.effectiveDate)),
+                            endDate: entry.endDate ? Timestamp.fromDate(new Date(entry.endDate)) : null
+                        })));
+                    }
+
+                    if (Object.keys(updatePayload).length > 0) {
+                        batch.update(staffDocRef, updatePayload);
+                    }
+                }
+            }
             await batch.commit();
         }
-
-        let toastTitle = "Import Processing Complete";
+        
+        // Final Summary Toast
+        let toastTitle = "Import Successful";
         let toastVariant: "default" | "destructive" = "default";
-        let toastDescription = "";
-
-        if (trainingLogsImportedCount > 0) toastDescription += `${trainingLogsImportedCount} training log(s) staged. `;
-        if (staffProfilesUpdatedCount > 0) toastDescription += `${staffProfilesUpdatedCount} staff profile(s) updated. `;
+        let toastDescription = `${allOperations.length} operations processed successfully.`;
         
         if (errors.length > 0) {
-            toastTitle = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "Import Partially Successful" : "Import Failed";
-            toastVariant = trainingLogsImportedCount > 0 || staffProfilesUpdatedCount > 0 ? "default" : "destructive";
+            toastTitle = "Import Partially Successful";
+            toastVariant = "default";
             const errorMessages = errors.slice(0, 5).join("\n") + (errors.length > 5 ? `\n...and ${errors.length - 5} more errors.` : "");
-            toastDescription += `\nErrors (${errors.length}):\n${errorMessages}`;
+            toastDescription += `\n\nErrors (${errors.length}):\n${errorMessages}`;
         }
         if (skippedRecordsLog.length > 0) {
-            if (errors.length === 0 && trainingLogsImportedCount === 0 && staffProfilesUpdatedCount === 0) toastTitle = "Import Information";
-            const skippedMessages = skippedRecordsLog.slice(0, 5).join("\n") + (skippedRecordsLog.length > 5 ? `\n...and ${skippedRecordsLog.length - 5} more skipped records.` : "");
-            toastDescription += `\nSkipped Records (${skippedRecordsLog.length}):\n${skippedMessages}`;
-        }
-
-        if (toastDescription.trim() === "" && allRows.length <= 1) {
-            toastTitle = "Import Information";
-            toastDescription = "CSV file has no data rows to import.";
-        } else if (toastDescription.trim() === "") {
-            toastTitle = "Import Information";
-            toastDescription = "No new records or staff updates processed from the CSV.";
+            const skippedMessages = skippedRecordsLog.slice(0, 5).join("\n") + (skippedRecordsLog.length > 5 ? `\n...and ${skippedRecordsLog.length - 5} more skipped.` : "");
+            toastDescription += `\n\nSkipped Records (${skippedRecordsLog.length}):\n${skippedMessages}`;
         }
         
         toast({
-            variant: toastVariant,
-            title: toastTitle,
+            variant: toastVariant, title: toastTitle,
             description: (<ScrollArea className="max-h-60 w-full"><pre className="whitespace-pre-wrap text-xs">{toastDescription.trim()}</pre></ScrollArea>),
-            duration: errors.length > 0 || skippedRecordsLog.length > 0 ? 20000 : 8000,
+            duration: 20000,
         });
 
-
-        if (trainingLogsImportedCount > 0) queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-        if (staffProfilesUpdatedCount > 0) queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+        queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
 
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
