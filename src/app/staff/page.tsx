@@ -104,6 +104,7 @@ const FULL_RANK_TO_ABBREVIATION_MAP: Record<string, typeof RANKS[number]> = {
   "SQUADRON LEADER (AAFC)": "SQNLDR(AAFC)",
   "WING COMMANDER (AAFC)": "WGCDR(AAFC)",
   "GROUP CAPTAIN (AAFC)": "GPCAPT(AAFC)",
+  "CIVILIAN": "CIV",
   "CIVILIAN INSTRUCTOR": "CIV",
   "REGIONAL WARRANT OFFICER": "WOFF(AAFC)",
   "DIRECTOR GENERAL CADETS - AIR FORCE": "GPCAPT(AAFC)",
@@ -756,7 +757,7 @@ export default function StaffPage() {
           return;
         }
 
-        const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
+        
         const allOperations: { type: 'log' | 'staffUpdate', payload: any }[] = [];
         const errors: string[] = [];
         
@@ -783,6 +784,8 @@ export default function StaffPage() {
               allRequiredHeadersPresent = false;
             }
           });
+          
+          const staffUpdates = new Map<string, Partial<StaffMember> & { serviceHistoryToAdd: ServiceHistoryEntry[] }>();
 
           if (!allRequiredHeadersPresent) {
               toast({
@@ -882,11 +885,11 @@ export default function StaffPage() {
               }
               staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
+        
+            staffUpdates.forEach((update, staffId) => {
+                allOperations.push({ type: 'staffUpdate', payload: { staffId, update } });
+            });
         }
-
-        staffUpdates.forEach((update, staffId) => {
-            allOperations.push({ type: 'staffUpdate', payload: { staffId, update } });
-        });
 
         if (errors.length === 0 && allOperations.length === 0) {
             toast({ title: "Import Information", description: "No new training logs or staff updates found to process in the CSV." });

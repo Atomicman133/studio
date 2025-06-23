@@ -12,8 +12,44 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.1.6",
+    version: "0.1.8",
     date: "Current",
+    title: "Accomplishment Import Bug Fix",
+    sections: [
+      {
+        title: "CSV Import Fix",
+        items: [
+          "Fixed a bug in the accomplishment CSV import where rank changes to 'Actual - Civilian' were incorrectly being rejected as invalid.",
+          "The rank parser now correctly recognizes 'Actual - Civilian' and maps it to the 'CIV' rank, ensuring these records are processed successfully.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.1.7",
+    date: "Previous Update",
+    title: "Accomplishment Import & Stability Fix",
+    sections: [
+      {
+        title: "Large CSV Import Handling",
+        items: [
+          "Reworked the accomplishment CSV import process to handle large datasets (e.g., 12,000+ records) without crashing.",
+          "The import now processes records in batches of 490 operations to comply with Firestore's transaction limits.",
+          "Added more detailed toast notifications to show the progress of large imports.",
+        ],
+      },
+      {
+        title: "Bug Fixes",
+        items: [
+           "Fixed a server startup crash caused by a component naming conflict in `src/app/training/components/training-log-form.tsx`.",
+           "Resolved a Javascript error (`staffUpdates is not defined`) that occurred during the accomplishment CSV import.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.1.6",
+    date: "Previous Update",
     title: "Regional (RXO/RXI) Dashboards & Reporting",
     sections: [
       {
@@ -31,12 +67,20 @@ const patchNotesData = [
         items: [
           "Restructured the main sidebar: 'Prof. Development', 'Discipline Actions', 'Safety Audits', and 'Squadron Visits' are now grouped as a submenu under 'RXO / RXI'.",
           "Centralized the `getRegionForSquadron` logic into a shared utility file (`src/lib/utils.ts`) for consistent use across the application.",
+          "Fixed a bug where the 'RXO / RXI' menu item was both a link and a trigger, causing instability. It now correctly functions only as a trigger for its submenu."
         ],
       },
       {
         title: "Reporting Enhancements",
         items: [
             "Updated the 'Reports' page to allow generating reports by entire region (North, South, East, West, HQ) in addition to individual squadrons.",
+        ]
+      },
+      {
+        title: "Bug Fixes",
+        items: [
+          "Fixed an issue where staff were incorrectly assigned to the 'Headquarters' region due to strict squadron name matching. The logic now correctly identifies squadron numbers.",
+          "Resolved a runtime error (`Cannot access 'regionalData' before initialization`) on the RXO/RXI page."
         ]
       }
     ],
