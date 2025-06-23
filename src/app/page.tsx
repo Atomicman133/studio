@@ -5,15 +5,17 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, PieChart as PieChartIcon, ListTodo, UserCheck, Loader2, CalendarClock, Download } from "lucide-react";
-import { addYears, isBefore, differenceInDays, format, addDays, isAfter, isValid as isValidDate, parseISO, startOfDay } from "date-fns";
+import { AlertTriangle, UserCheck, Loader2, CalendarClock, Download } from "lucide-react";
+import { format, addDays } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
 import type { TrainingLog } from "./training/training-schema";
-import { COMPLIANCE_CRITERIA_CONFIG, type StaffComplianceReport, type ComplianceCriterionCheck } from "./reporting/reporting-schema";
-import type { ScheduledMeeting } from "./meetings/meeting-schema"; // For scheduled meetings
+import { type StaffComplianceReport } from "./reporting/reporting-schema";
+import type { ScheduledMeeting } from "./meetings/meeting-schema";
 import type { SafetyAudit } from "./audits/audit-schema";
-import type { SquadronVisit, VisitActionItem } from "./squadron-visits/squadron-visit-schema";
+import type { SquadronVisit } from "./squadron-visits/squadron-visit-schema";
+import { processComplianceReports, getExpiringAccomplishments, getUpcomingActionItems } from "@/lib/compliance-processing";
+
 
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
@@ -108,97 +110,6 @@ async function fetchDashboardScheduledMeetings(): Promise<ScheduledMeeting[]> {
   }) as ScheduledMeeting[];
 }
 
-
-const processComplianceReportsForDashboard = (
-  staffList: StaffMember[],
-  trainingLogs: TrainingLog[]
-): StaffComplianceReport[] => {
-  return staffList.map((staff) => {
-    if (!staff.serviceNumber) {
-      console.warn(`Dashboard: Staff member ${staff.firstName} ${staff.lastName} (Rank: ${staff.rank}, ID: ${staff.id}) is missing a service number. Compliance check will be incomplete.`);
-    }
-    const memberLogs = trainingLogs.filter(log =>
-        log.serviceNumber && staff.serviceNumber && log.serviceNumber === staff.serviceNumber
-    );
-
-    const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      const relevantLogs = memberLogs
-        .filter(log => criterion.identifier(log))
-        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
-
-      let isMet = false;
-      let details = "Missing";
-      let selectedLog: TrainingLog | undefined = undefined;
-
-      if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0];
-        const completionDate = startOfDay(new Date(selectedLog.completionDate));
-        if (!isValidDate(completionDate)) {
-          details = "Invalid completion date in record.";
-        } else {
-          const today = startOfDay(new Date());
-
-          if (criterion.yearsToExpire) {
-            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            isMet = isBefore(today, expiryDate);
-            if (isMet) {
-              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(addDays(expiryDate, -1), 'dd/MM/yyyy')}.`;
-            } else {
-              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
-            }
-          } else {
-            isMet = true;
-            details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
-          }
-        }
-      }
-      return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
-    });
-    
-    const metCount = criteriaChecks.filter(c => c.isMet).length;
-    let complianceStatusText: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
-    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
-      complianceStatusText = "Compliant";
-    } else if (metCount >= 3) {
-      complianceStatusText = "Partially Compliant";
-    }
-
-    return {
-      staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staff.serviceNumber || 'NO_SN'}`,
-      staffMemberName: `${staff.firstName} ${staff.lastName}`,
-      staffMemberRank: staff.rank,
-      squadron: staff.squadron || "N/A",
-      isCompliant: complianceStatusText === "Compliant", // Based on new status text
-      criteriaChecks,
-      email: staff.email,
-      staffServiceNumberActual: staff.serviceNumber,
-      complianceStatusText, // Storing the detailed status text
-      complianceStatusVariant: // This will be set in the ReportingPage based on status text
-        complianceStatusText === "Compliant" ? "default" :
-        complianceStatusText === "Partially Compliant" ? "secondary" : "destructive",
-    };
-  });
-};
-
-interface ExpiringAccomplishment {
-  staffName: string;
-  staffRank: string;
-  courseName: string;
-  squadron: string;
-  expiryDate: Date;
-  daysLeft: number;
-}
-
-interface UpcomingActionItem {
-  id: string;
-  description: string;
-  responsible: string;
-  dueDate: Date;
-  source: string;
-  sourceId: string;
-  daysLeft: number;
-}
-
 const chartConfig = {
   compliant: { label: "Compliant", color: "hsl(var(--chart-1))" },
   partiallyCompliant: { label: "Partially Compliant", color: "hsl(var(--chart-2))" },
@@ -236,16 +147,7 @@ export default function DashboardPage() {
     queryFn: fetchDashboardScheduledMeetings,
     enabled: commonEnabledCondition,
   });
-
-  const [complianceData, setComplianceData] = React.useState<{
-    compliant: number;
-    partiallyCompliant: number;
-    nonCompliant: number;
-  } | null>(null);
-  const [expiringAccomplishments, setExpiringAccomplishments] = React.useState<ExpiringAccomplishment[]>([]);
-  const [upcomingActionItems, setUpcomingActionItems] = React.useState<UpcomingActionItem[]>([]);
-
-  // State for compliance detail dialog
+  
   const [isComplianceDetailOpen, setIsComplianceDetailOpen] = React.useState(false);
   const [selectedComplianceSegmentData, setSelectedComplianceSegmentData] = React.useState<StaffComplianceReport[]>([]);
   const [selectedComplianceSegmentTitle, setSelectedComplianceSegmentTitle] = React.useState<string>("");
@@ -258,130 +160,39 @@ export default function DashboardPage() {
   }, [user, authLoading, router]);
 
   const processedReports = React.useMemo(() => {
-    if (staffList && staffList.length > 0 && trainingLogs && trainingLogs.length > 0) {
-      return processComplianceReportsForDashboard(staffList, trainingLogs);
+    if (staffList.length > 0 && trainingLogs.length > 0) {
+      return processComplianceReports(staffList, trainingLogs);
     }
     return [];
   }, [staffList, trainingLogs]);
 
-  React.useEffect(() => {
+  const complianceData = React.useMemo(() => {
     if (processedReports.length > 0) {
-      const compliantCount = processedReports.filter(r => r.complianceStatusText === "Compliant").length;
-      const partiallyCompliantCount = processedReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-      const nonCompliantCount = processedReports.filter(r => r.complianceStatusText === "Not Compliant").length;
-
-      setComplianceData(prevData => {
-        if (
-          prevData &&
-          prevData.compliant === compliantCount &&
-          prevData.partiallyCompliant === partiallyCompliantCount &&
-          prevData.nonCompliant === nonCompliantCount
-        ) {
-          return prevData;
-        }
-        return { compliant: compliantCount, partiallyCompliant: partiallyCompliantCount, nonCompliant: nonCompliantCount };
-      });
-    } else if (staffList.length > 0) {
-        setComplianceData(prevData => {
-             if (prevData && prevData.compliant === 0 && prevData.partiallyCompliant === 0 && prevData.nonCompliant === staffList.length) return prevData;
-             return { compliant: 0, partiallyCompliant: 0, nonCompliant: staffList.length};
-        });
-    } else {
-      setComplianceData(null); 
+      const compliant = processedReports.filter(r => r.complianceStatusText === "Compliant").length;
+      const partiallyCompliant = processedReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+      const nonCompliant = processedReports.filter(r => r.complianceStatusText === "Not Compliant").length;
+      return { compliant, partiallyCompliant, nonCompliant };
     }
+     if (staffList.length > 0) {
+        return { compliant: 0, partiallyCompliant: 0, nonCompliant: staffList.length };
+     }
+    return null;
   }, [processedReports, staffList]);
 
-
-  const calculatedExpiringAccomplishments = React.useMemo(() => {
-    if (!staffList || !trainingLogs) return [];
-    const today = new Date();
-    const thirtyDaysFromNow = addDays(today, 30);
-    const expiring: ExpiringAccomplishment[] = [];
-    trainingLogs.forEach(log => {
-      COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
-        if (criterion.identifier(log) && criterion.yearsToExpire) {
-          const completionDate = new Date(log.completionDate);
-          if (!isValidDate(completionDate)) return;
-          const expiryDate = addYears(completionDate, criterion.yearsToExpire);
-          if (isAfter(expiryDate, today) && isBefore(expiryDate, thirtyDaysFromNow)) {
-            const staffMember = staffList.find(s => s.serviceNumber === log.serviceNumber);
-            expiring.push({
-              staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
-              staffRank: staffMember ? staffMember.rank : log.rank,
-              squadron: staffMember ? staffMember.squadron || "N/A" : log.squadron,
-              courseName: `${criterion.name} (${log.courseName})`,
-              expiryDate: expiryDate,
-              daysLeft: differenceInDays(expiryDate, today)
-            });
-          }
-        }
-      });
-    });
-    return expiring.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5);
+  const expiringAccomplishments = React.useMemo(() => {
+    if (staffList.length > 0 && trainingLogs.length > 0) {
+        return getExpiringAccomplishments(staffList, trainingLogs, 30);
+    }
+    return [];
   }, [staffList, trainingLogs]);
 
-  React.useEffect(() => {
-    setExpiringAccomplishments(prev => {
-        if (JSON.stringify(prev) === JSON.stringify(calculatedExpiringAccomplishments)) return prev;
-        return calculatedExpiringAccomplishments;
-    });
-  }, [calculatedExpiringAccomplishments]);
-
-
-  const calculatedUpcomingActionItems = React.useMemo(() => {
-    if (!audits || !visits) return [];
-    const today = new Date();
-    const fourteenDaysFromNow = addDays(today, 14);
-    const actions: UpcomingActionItem[] = [];
-
-    audits.forEach(audit => {
-      audit.findings?.forEach(finding => {
-        if (finding.dueDate && (finding.status === "Open" || finding.status === "In Progress")) {
-          const dueDate = new Date(finding.dueDate);
-          if (!isValidDate(dueDate)) return;
-          if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
-            actions.push({
-              id: finding.id || crypto.randomUUID(),
-              description: finding.description,
-              responsible: finding.assignedTo || "Unassigned",
-              dueDate: dueDate,
-              source: `Audit: ${audit.auditTitle}`,
-              sourceId: audit.id || crypto.randomUUID(),
-              daysLeft: differenceInDays(dueDate, today)
-            });
-          }
-        }
-      });
-    });
-
-    visits.forEach(visit => {
-      visit.actionItems?.forEach(item => {
-        if (item.dueDate && (item.status === "Open" || item.status === "In Progress")) {
-          const dueDate = new Date(item.dueDate);
-          if (!isValidDate(dueDate)) return;
-          if (isAfter(dueDate, today) && isBefore(dueDate, fourteenDaysFromNow)) {
-            actions.push({
-              id: item.id || crypto.randomUUID(),
-              description: item.description,
-              responsible: item.responsible,
-              dueDate: dueDate,
-              source: `Visit: ${visit.squadronName}`,
-              sourceId: visit.id || crypto.randomUUID(),
-              daysLeft: differenceInDays(dueDate, today)
-            });
-          }
-        }
-      });
-    });
-    return actions.sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 5);
+  const upcomingActionItems = React.useMemo(() => {
+    if(audits.length > 0 || visits.length > 0) {
+        return getUpcomingActionItems(audits, visits, 14);
+    }
+    return [];
   }, [audits, visits]);
 
-  React.useEffect(() => {
-    setUpcomingActionItems(prev => {
-        if (JSON.stringify(prev) === JSON.stringify(calculatedUpcomingActionItems)) return prev;
-        return calculatedUpcomingActionItems;
-    });
-  }, [calculatedUpcomingActionItems]);
 
   const pieData = complianceData
     ? [
@@ -402,14 +213,13 @@ export default function DashboardPage() {
     if (selectedComplianceSegmentData.length === 0) return;
 
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable'); // For side effects
+    await import('jspdf-autotable'); 
 
     const doc = new jsPDF();
     resetLetterheadCache();
     const filename = `${selectedComplianceSegmentTitle.replace(/\s+/g, '_')}_${format(new Date(), "yyyy-MM-dd")}.pdf`;
     const margin = 15;
     let yPos = margin;
-    const lineSpacing = 7;
     const sectionSpacing = 10;
     let headerHeight = 0;
     let footerHeight = 0;
@@ -430,14 +240,12 @@ export default function DashboardPage() {
     yPos += sectionSpacing;
     
     const tableHeaders: string[] = ["Rank", "Name", "Squadron", "Service No."];
-    const tableBody: (string | null)[][] = [];
-
     const showNonCompliantItems = selectedComplianceSegmentTitle.toLowerCase().includes("partially") || selectedComplianceSegmentTitle.toLowerCase().includes("non-compliant");
     if (showNonCompliantItems) {
       tableHeaders.push("Non-Compliant Items");
     }
 
-    selectedComplianceSegmentData.forEach(staff => {
+    const tableBody = selectedComplianceSegmentData.map(staff => {
       const row = [
         staff.staffMemberRank,
         staff.staffMemberName,
@@ -445,13 +253,9 @@ export default function DashboardPage() {
         staff.staffServiceNumberActual || "N/A"
       ];
       if (showNonCompliantItems) {
-        const nonCompliant = staff.criteriaChecks
-          .filter(c => !c.isMet)
-          .map(c => c.name)
-          .join(", ") || "None";
-        row.push(nonCompliant);
+        row.push(staff.criteriaChecks.filter(c => !c.isMet).map(c => c.name).join(", ") || "None");
       }
-      tableBody.push(row);
+      return row;
     });
 
     (doc as any).autoTable({
@@ -459,10 +263,7 @@ export default function DashboardPage() {
       head: [tableHeaders],
       body: tableBody,
       theme: 'striped',
-      headStyles: { fillColor: [0, 48, 143], textColor: 255 }, // Primary color
-      didDrawPage: (data: any) => {
-         // yPos = data.cursor.y + sectionSpacing; // update yPos for content after table
-      },
+      headStyles: { fillColor: [0, 48, 143] },
     });
     
     addPageNumbers(doc, footerHeight, margin);
@@ -653,7 +454,7 @@ export default function DashboardPage() {
         <Card className="shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-lg font-medium">Upcoming Action Items (Next 14 Days)</CardTitle>
-            <ListTodo className="h-5 w-5 text-muted-foreground" />
+            <AlertTriangle className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {upcomingActionItems.length > 0 ? (
@@ -721,7 +522,6 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Compliance Detail Dialog */}
       <Dialog open={isComplianceDetailOpen} onOpenChange={setIsComplianceDetailOpen}>
         <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl">
           <DialogHeader>
@@ -776,4 +576,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

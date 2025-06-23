@@ -20,7 +20,7 @@ import {
   Sun,
   Moon,
   BarChart3, 
-  Newspaper, // Added Newspaper icon
+  Newspaper,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation"; 
@@ -74,7 +74,8 @@ const navItems: NavItem[] = [
   { href: "/reporting", label: "Compliance", icon: BarChart3 }, 
   { href: "/reports", label: "Reports", icon: FileSearch },
   { href: "/staff", label: "Staff Management", icon: Users },
-  { href: "/patch-notes", label: "Patch Notes", icon: Newspaper }, // Added Patch Notes link
+  { href: "/rxo-rxi", label: "RXO / RXI", icon: ClipboardList },
+  { href: "/patch-notes", label: "Patch Notes", icon: Newspaper },
 ];
 
 function ThemeToggle() {

@@ -12,9 +12,33 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.1.4",
+    version: "0.1.6",
     date: "Current",
-    title: "Patch Notes Page & Export Functionality",
+    title: "New 'RXO / RXI' Regional Dashboard",
+    sections: [
+      {
+        title: "New 'RXO / RXI' Module (/rxo-rxi)",
+        items: [
+          "Created a new dashboard page designed for regional staff (RXO/RXI).",
+          "Displays staff compliance breakdowns for each defined region: North, South, East, West, and Headquarters.",
+          "Each region has its own interactive pie chart showing Compliant, Partially Compliant, and Non-Compliant staff numbers.",
+          "Clicking a segment of a regional chart opens a dialog with the detailed records for those staff members.",
+          "The dialog allows for exporting the filtered regional compliance list to a PDF.",
+        ],
+      },
+       {
+        title: "Navigation & Code Refinements",
+        items: [
+          "Added 'RXO / RXI' to the main sidebar navigation.",
+          "Centralized the main compliance processing logic into a new utility file (`src/lib/compliance-processing.ts`) to be shared between the main dashboard and the new regional dashboard.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.1.5",
+    date: "Previous Update",
+    title: "Version History & Cross-Origin Fix",
     sections: [
       {
         title: "New 'Patch Notes' Module (/patch-notes)",
@@ -27,7 +51,7 @@ const patchNotesData = [
       {
         title: "Configuration Fix",
         items: [
-          "Updated Next.js configuration (next.config.ts) to include necessary `allowedDevOrigins` to resolve cross-origin request errors in the Firebase Studio development environment.",
+          "Updated Next.js configuration (`next.config.ts`) to include necessary `allowedDevOrigins` to resolve cross-origin request errors in the Firebase Studio development environment.",
         ],
       },
     ],
@@ -35,7 +59,7 @@ const patchNotesData = [
   {
     version: "0.1.3",
     date: "Previous Update",
-    title: "Dashboard Interactivity, New Reports Module, Staff Module Enhancements",
+    title: "Dashboard Interactivity & Reports Module",
     sections: [
       {
         title: "Dashboard Enhancements",
@@ -54,22 +78,11 @@ const patchNotesData = [
         ],
       },
       {
-        title: "Staff Management Enhancements & Training Module Refactor",
+        title: "Staff Management & Training Module Refactor",
         items: [
           "'Training Overview' Page Removed: Functionality merged or moved to improve performance and reduce redundancy.",
           "'Import Accomplishments' Moved to Staff Management: Centralized CSV import for training records, positions, and ranks.",
           "Navigation Updated: Removed 'Training Overview' link from sidebar.",
-        ],
-      },
-      {
-        title: "Bug Fixes & Technical Improvements",
-        items: [
-          "Resolved 'Module not found' for `jspdf-autotable` by adding it as a dependency.",
-          "Corrected export/import paths for `TRAINING_LOGS_QUERY_KEY` and `convertLogTimestamps` (now in `training-schema.ts`).",
-          "Addressed server startup issues by using dynamic imports for client-heavy PDF libraries on the Reports page.",
-          "Ensured old `/training` path leads to a minimal placeholder.",
-          "Fixed 'Badge is not defined' runtime error on Reports page.",
-          "Moved `calculateOICLevel` utility to `lib/utils.ts`.",
         ],
       },
     ],
@@ -80,9 +93,9 @@ const patchNotesData = [
     title: "Compliance Logic Update",
     sections: [
       {
-        title: "Compliance Logic Update",
+        title: "Enhanced Youth Safety Compliance",
         items: [
-          "Enhanced Youth Safety Compliance: 'WHS Annual Awareness - Level 2' (completed within 12 months) now recognized as valid for the 'Defence Youth Safety Annual Awareness Training' requirement.",
+           "'WHS Annual Awareness - Level 2' (completed within 12 months) now recognized as valid for the 'Defence Youth Safety Annual Awareness Training' requirement.",
         ],
       },
     ],
@@ -93,7 +106,7 @@ const patchNotesData = [
     title: "Process Improvement",
     sections: [
       {
-        title: "Process Improvement",
+        title: "Versioning Practice Established",
         items: [
           "Established practice of incrementing app version in `package.json` with each significant update.",
         ],
