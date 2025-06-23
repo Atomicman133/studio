@@ -214,12 +214,12 @@ export default function RxoRxiPage() {
                     ].filter(item => item.value > 0);
 
                     return (
-                        <Card key={region} className="shadow-lg">
+                        <Card key={region} className="shadow-lg flex flex-col">
                             <CardHeader className="text-center">
                                 <CardTitle className="text-xl">{region}</CardTitle>
                                 <CardDescription>{totalStaff} Staff Member(s)</CardDescription>
                             </CardHeader>
-                            <CardContent className="pt-4">
+                            <CardContent className="pt-4 flex-grow flex flex-col justify-end">
                                 {totalStaff > 0 ? (
                                     <ChartContainer config={chartConfig} className="mx-auto aspect-square h-[200px]">
                                         <ResponsiveContainer width="100%" height="100%">
