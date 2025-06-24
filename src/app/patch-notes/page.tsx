@@ -12,8 +12,30 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.1.9",
+    version: "0.2.0",
     date: "Current",
+    title: "Search Functionality & Stability Fixes",
+    sections: [
+      {
+        title: "New Features",
+        items: [
+          "Added search functionality to the 'Staff Management' page, allowing users to filter staff by name, rank, service number, squadron, or role.",
+          "Added search functionality to the 'Compliance' page to quickly find and review a specific staff member's compliance status.",
+        ],
+      },
+      {
+        title: "Bug Fixes & Stability",
+        items: [
+          "Fixed multiple critical server startup failures caused by subtle type errors and typos in UI components (`Alert`, `Menubar`).",
+          "Resolved a hydration error caused by invalid HTML nesting in the `Alert` component.",
+          "Fixed a runtime crash on the Staff Management page caused by a missing icon import (`FileSearch`).",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.1.9",
+    date: "Previous Update",
     title: "UI Fixes & Stability Improvements",
     sections: [
       {
