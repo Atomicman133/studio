@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3 } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -38,6 +38,7 @@ import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/
 import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
 import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps as convertTrainingLogTimestampsForPage } from "../training/training-schema";
 import { processComplianceReports } from "@/lib/compliance-processing";
+import { Input } from "@/components/ui/input";
 
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
@@ -81,6 +82,7 @@ export default function CompliancePage() {
   const [isLinkDialogOpen, setIsLinkDialogOpen] = React.useState(false);
   const [selectedStaffForLinking, setSelectedStaffForLinking] = React.useState<StaffComplianceReport | null>(null);
   const [isBulkLinking, setIsBulkLinking] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState("");
 
   React.useEffect(() => {
     console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
@@ -92,6 +94,16 @@ export default function CompliancePage() {
       setComplianceReports([]);
     }
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
+
+  const filteredComplianceReports = React.useMemo(() => {
+    if (!searchQuery) return complianceReports;
+    const lowercasedQuery = searchQuery.toLowerCase();
+    return complianceReports.filter(report =>
+      report.staffMemberName.toLowerCase().includes(lowercasedQuery) ||
+      (report.staffServiceNumberActual && report.staffServiceNumberActual.includes(lowercasedQuery)) ||
+      report.squadron.toLowerCase().includes(lowercasedQuery)
+    );
+  }, [complianceReports, searchQuery]);
 
 
   const toggleCollapsible = (staffMemberId: string) => {
@@ -597,14 +609,25 @@ export default function CompliancePage() {
                 </CardDescription>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                 <Button onClick={handleBulkAutoLink} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isBulkLinking || isLoadingAny}>
+            <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        type="search"
+                        placeholder="Search staff..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-8 w-full"
+                        disabled={isLoadingAny}
+                    />
+                </div>
+                 <Button onClick={handleBulkAutoLink} size="lg" variant="outline" className="w-full sm:w-auto shrink-0" disabled={isBulkLinking || isLoadingAny}>
                     {isBulkLinking ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" />}
                     Bulk Auto-Link Logs
                 </Button>
-                <Button onClick={handleExportFullComplianceSummaryPdf} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isBulkLinking || isLoadingAny}>
+                <Button onClick={handleExportFullComplianceSummaryPdf} size="lg" variant="outline" className="w-full sm:w-auto shrink-0" disabled={isBulkLinking || isLoadingAny}>
                   <Download className="mr-2 h-5 w-5" />
-                  Export Full Summary (PDF)
+                  Export Full Summary
                 </Button>
             </div>
           </div>
@@ -624,21 +647,21 @@ export default function CompliancePage() {
               {errorLogs && <p className="text-destructive mb-1 text-sm">Training log error: {errorLogs.message}</p>}
             </div>
           )}
-          {!isLoadingAny && !errorAny && complianceReports.length === 0 && staffList.length === 0 && (
+          {!isLoadingAny && !errorAny && complianceReports.length === 0 && (
              <div className="flex flex-col items-center justify-center py-12 text-center px-6">
               <UserCheck className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Data Available</h3>
+              <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Data Found</h3>
               <p className="text-muted-foreground">Add staff members in the Staff Management section.</p>
             </div>
           )}
-           {!isLoadingAny && !errorAny && complianceReports.length === 0 && staffList.length > 0 && (
+           {!isLoadingAny && !errorAny && filteredComplianceReports.length === 0 && (
              <div className="flex flex-col items-center justify-center py-12 text-center px-6">
-              <UserCheck className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Compliance Data Processed</h3>
-              <p className="text-muted-foreground">Ensure training logs are available or check data processing logic.</p>
-            </div>
-          )}
-          {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
+                <FileSearch className="h-16 w-16 text-muted-foreground mb-4" />
+                <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Results Found</h3>
+                <p className="text-muted-foreground">Your search for &quot;{searchQuery}&quot; did not match any compliance reports.</p>
+             </div>
+           )}
+          {!isLoadingAny && !errorAny && filteredComplianceReports.length > 0 && (
             <ScrollArea className="h-[calc(100vh-300px)] border rounded-md">
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
@@ -651,7 +674,7 @@ export default function CompliancePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {complianceReports.map((report) => (
+                  {filteredComplianceReports.map((report) => (
                     <React.Fragment key={report.staffMemberId}>
                        {/* Trigger Row */}
                       <TableRow
@@ -726,7 +749,7 @@ export default function CompliancePage() {
         </CardContent>
         {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
-            Displaying compliance reports for {complianceReports.length} staff member(s).
+            {searchQuery ? `Showing ${filteredComplianceReports.length} of ${complianceReports.length} total reports.` : `Displaying compliance reports for ${complianceReports.length} staff member(s).`}
           </CardFooter>
         )}
       </Card>

@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -73,6 +73,7 @@ import { collection, getDocs, query, where, orderBy, Timestamp, writeBatch, doc,
 import jsPDF from 'jspdf';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, calculateOICLevel } from '@/lib/utils'; 
 import { COMPLIANCE_CRITERIA_CONFIG, type ComplianceCriterionCheck, type StaffComplianceReport } from "@/app/reporting/reporting-schema";
+import { Input } from "@/components/ui/input";
 
 
 import type { TrainingLog } from "../training/training-schema";
@@ -315,6 +316,7 @@ export default function StaffPage() {
   const [isImportingStaffCsv, setIsImportingStaffCsv] = React.useState(false); // Renamed
   const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false); // New state
   const [openSquadrons, setOpenSquadrons] = React.useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = React.useState("");
 
   const toggleSquadron = (squadronName: string) => {
     setOpenSquadrons(prev => ({ ...prev, [squadronName]: !(prev[squadronName] ?? true) }));
@@ -351,10 +353,24 @@ export default function StaffPage() {
     staleTime: 1000 * 60 * 2,
   });
 
-  const staffGroups = React.useMemo(() => {
+  const filteredStaffList = React.useMemo(() => {
     if (!staffList) return [];
+    if (!searchQuery) return staffList;
+
+    const lowercasedQuery = searchQuery.toLowerCase();
+    return staffList.filter(staff =>
+        `${staff.rank} ${staff.firstName} ${staff.lastName}`.toLowerCase().includes(lowercasedQuery) ||
+        staff.serviceNumber.includes(lowercasedQuery) ||
+        staff.squadron?.toLowerCase().includes(lowercasedQuery) ||
+        staff.role?.toLowerCase().includes(lowercasedQuery)
+    );
+  }, [staffList, searchQuery]);
+
+
+  const staffGroups = React.useMemo(() => {
+    if (!filteredStaffList) return [];
     const groups: Record<string, StaffMember[]> = {};
-    staffList.forEach(staff => {
+    filteredStaffList.forEach(staff => {
       const sqn = staff.squadron || "Unassigned";
       if (!groups[sqn]) {
         groups[sqn] = [];
@@ -384,7 +400,7 @@ export default function StaffPage() {
         staffMembers
       }))
       .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
-  }, [staffList]);
+  }, [filteredStaffList]);
 
   const handleAddStaff = async (data: Omit<StaffMember, 'id'>) => {
     try {
@@ -1200,25 +1216,38 @@ export default function StaffPage() {
       <Card className="shadow-lg">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="flex items-center gap-3">
-              <UsersIconLucide className="h-8 w-8 text-primary hidden sm:block" />
-              <div>
-                <CardTitle className="text-2xl">Staff Management</CardTitle>
-                <CardDescription>Manage staff profiles, qualifications, and assignments. Import staff data or accomplishments.</CardDescription>
+            <div className="flex-1">
+              <div className="flex items-center gap-3">
+                <UsersIconLucide className="h-8 w-8 text-primary hidden sm:block" />
+                <div>
+                  <CardTitle className="text-2xl">Staff Management</CardTitle>
+                  <CardDescription>Manage profiles, qualifications, and assignments. Import staff or accomplishments.</CardDescription>
+                </div>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto" disabled={addStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
+            <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        type="search"
+                        placeholder="Search staff..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-8 w-full"
+                        disabled={isLoading}
+                    />
+                </div>
+                 <Button onClick={openFormForNew} size="lg" className="w-full sm:w-auto shrink-0" disabled={addStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
                  {(addStaffMutation.isPending && !isImportingStaffCsv) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-5 w-5" />}
-                 Add New Staff
+                 Add Staff
                 </Button>
-                <Button onClick={() => staffCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isImportingStaffCsv || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingAccomplishments}>
+                <Button onClick={() => staffCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto shrink-0" disabled={isImportingStaffCsv || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingAccomplishments}>
                    {isImportingStaffCsv ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-5 w-5" />}
-                 Import Staff CSV
+                 Import Staff
                 </Button>
-                 <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto" disabled={isLoading || isImportingAccomplishments || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv}>
+                 <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto shrink-0" disabled={isLoading || isImportingAccomplishments || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv}>
                    {isImportingAccomplishments || isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GraduationCap className="mr-2 h-5 w-5" />}
-                    Import Accomplishments
+                    Import Accomp.
                 </Button>
                 <input type="file" ref={staffCsvInputRef} onChange={handleStaffCsvImport} accept=".csv" style={{ display: 'none' }} />
                 <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
@@ -1246,7 +1275,17 @@ export default function StaffPage() {
         </Card>
       )}
 
-      {!isLoading && !error && staffGroups.length === 0 && staffList.length === 0 && (
+      {!isLoading && !error && staffList.length > 0 && filteredStaffList.length === 0 && (
+        <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <FileSearch className="h-16 w-16 text-muted-foreground mb-4" />
+                <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Found</h3>
+                <p className="text-muted-foreground">Your search for &quot;{searchQuery}&quot; did not match any staff members.</p>
+            </CardContent>
+        </Card>
+      )}
+
+      {!isLoading && !error && staffList.length === 0 && (
         <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
@@ -1256,10 +1295,11 @@ export default function StaffPage() {
         </Card>
       )}
 
-      {!isLoading && !error && staffGroups.map(group => (
+
+      {!isLoading && !error && filteredStaffList.length > 0 && staffGroups.map(group => (
         <Card key={group.squadronName} className="shadow-xl mb-8">
           <Collapsible
-            open={openSquadrons[group.squadronName] ?? true}
+            open={openSquadrons[group.squadronName] ?? (searchQuery.length > 0 ? true : (openSquadrons[group.squadronName] ?? true))}
             onOpenChange={() => toggleSquadron(group.squadronName)}
             className="w-full"
           >
@@ -1280,7 +1320,7 @@ export default function StaffPage() {
                 {group.staffMembers.length === 0 ? (
                   <p className="text-muted-foreground text-center p-6">No staff members in this squadron.</p>
                 ) : (
-                  <ScrollArea className="h-[400px] w-full border">
+                  <div className="overflow-y-auto max-h-[400px]">
                     <Table>
                       <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                         <TableRow>
@@ -1336,7 +1376,7 @@ export default function StaffPage() {
                         ))}
                       </TableBody>
                     </Table>
-                  </ScrollArea>
+                  </div>
                 )}
               </CardContent>
             </CollapsibleContent>
@@ -1348,6 +1388,7 @@ export default function StaffPage() {
         <Card>
           <CardFooter className="text-xs text-muted-foreground pt-4 justify-center">
               Total staff members: {staffList.length} across {staffGroups.length} squadron(s).
+              {searchQuery && ` (${filteredStaffList.length} matching search)`}
           </CardFooter>
         </Card>
       )}
