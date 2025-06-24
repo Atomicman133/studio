@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet, Search } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet, Search, FileSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -1718,4 +1718,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
