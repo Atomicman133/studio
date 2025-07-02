@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3, Search } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3, Search, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,6 +39,16 @@ import { LinkTrainingLogsDialog } from "./components/link-training-logs-dialog";
 import { TRAINING_LOGS_QUERY_KEY, convertLogTimestamps as convertTrainingLogTimestampsForPage } from "../training/training-schema";
 import { processComplianceReports } from "@/lib/compliance-processing";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
@@ -83,6 +93,11 @@ export default function CompliancePage() {
   const [selectedStaffForLinking, setSelectedStaffForLinking] = React.useState<StaffComplianceReport | null>(null);
   const [isBulkLinking, setIsBulkLinking] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
+
+  // State for email content dialog
+  const [isEmailContentDialogOpen, setIsEmailContentDialogOpen] = React.useState(false);
+  const [emailContent, setEmailContent] = React.useState<{ to: string, subject: string; body: string } | null>(null);
+
 
   React.useEffect(() => {
     console.log("[ComplianceDebug] useEffect triggered. isLoadingStaff:", isLoadingStaff, "isLoadingLogs:", isLoadingLogs, "staffList length:", staffList.length, "trainingLogs length:", trainingLogs ? trainingLogs.length : 0);
@@ -421,7 +436,7 @@ export default function CompliancePage() {
 
   const handleEmailComplianceReport = async (report: StaffComplianceReport) => {
     if (report.complianceStatusText === "Compliant") {
-      toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email sent.` });
+      toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email needed.` });
       return;
     }
     if (!report.email) {
@@ -430,59 +445,30 @@ export default function CompliancePage() {
     }
 
     try {
+      // 1. Generate and download the PDF
       const pdfDoc = await generateComplianceReportPdf(report);
       const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
-      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
+      pdfDoc.save(pdfFileName);
+      toast({
+        title: "PDF Downloaded",
+        description: `Compliance report "${pdfFileName}" has been downloaded.`,
+      });
 
+      // 2. Prepare email content
       const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
         .map(c => `  - ${c.name}: ${c.details}`)
         .join("\n");
 
-      const emailTo = report.email;
       const subject = `Action Required: Compliance Update for ${report.staffMemberRank} ${report.staffMemberName}`;
-      const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The following items require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+      const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The attached report details the following items which require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
-      const boundary = `----=_Part_Boundary_001_${Date.now().toString(36)}`;
-      let emlContent = `From: Squadron Manager <noreply@squadronmanager.app>\r\n`;
-      emlContent += `To: ${emailTo}\r\n`;
-      emlContent += `Subject: ${subject}\r\n`;
-      emlContent += `MIME-Version: 1.0\r\n`;
-      emlContent += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
-      emlContent += `--${boundary}\r\n`;
-      emlContent += `Content-Type: text/plain; charset="UTF-8"\r\n`;
-      emlContent += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
-      emlContent += `${body}\r\n\r\n`;
-      emlContent += `--${boundary}\r\n`;
-      emlContent += `Content-Type: application/pdf; name="${pdfFileName}"\r\n`;
-      emlContent += `Content-Transfer-Encoding: base64\r\n`;
-      emlContent += `Content-Disposition: attachment; filename="${pdfFileName}"\r\n\r\n`;
-      emlContent += `${pdfBase64}\r\n\r\n`;
-      emlContent += `--${boundary}--`;
+      // 3. Set state to open the dialog
+      setEmailContent({ to: report.email, subject, body });
+      setIsEmailContentDialogOpen(true);
 
-      const emlFileName = `Compliance_Email_for_${report.staffMemberName.replace(/\s+/g, '_')}.eml`;
-      const dataUri = `data:message/rfc822;charset=utf-8,${encodeURIComponent(emlContent)}`;
-
-      const link = document.createElement('a');
-      link.href = dataUri;
-      link.download = emlFileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      toast({
-        title: "Email File Generated",
-        description: (
-          <>
-            An .eml file &quot;{emlFileName}&quot; has been downloaded.
-            <br />
-            Please open it with your email client to send the pre-composed email with the PDF report attached.
-          </>
-        ),
-        duration: 10000,
-      });
     } catch (error) {
-      console.error("Error generating or downloading email file:", error);
-      toast({ variant: "destructive", title: "Email Generation Error", description: "Could not prepare the email file."});
+      console.error("Error preparing compliance email content:", error);
+      toast({ variant: "destructive", title: "Error", description: "Could not prepare the email content." });
     }
   };
 
@@ -809,6 +795,39 @@ export default function CompliancePage() {
             toast({ title: "Logs Linked", description: "Compliance data will refresh."});
           }}
         />
+      )}
+
+      {emailContent && (
+        <Dialog open={isEmailContentDialogOpen} onOpenChange={setIsEmailContentDialogOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Suggested Email Content</DialogTitle>
+              <DialogDescription>
+                The compliance PDF has been downloaded. You can use the content below to send an email to {emailContent.to}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-1">
+                <Label htmlFor="email-subject">Subject</Label>
+                <Input id="email-subject" readOnly value={emailContent.subject} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="email-body">Body</Label>
+                <Textarea id="email-body" readOnly value={emailContent.body} className="h-64 min-h-[200px] whitespace-pre-wrap" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEmailContentDialogOpen(false)}>Close</Button>
+              <Button onClick={() => {
+                const fullEmailText = `Subject: ${emailContent.subject}\n\n${emailContent.body}`;
+                navigator.clipboard.writeText(fullEmailText);
+                toast({ title: "Copied to Clipboard", description: "Email subject and body have been copied." });
+              }}>
+                <Copy className="mr-2 h-4 w-4" /> Copy Content
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
