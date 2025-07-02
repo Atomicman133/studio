@@ -152,13 +152,19 @@ export function resetLetterheadCache() {
 export function calculateOICLevel(logs: TrainingLog[]): number | null {
   let maxLevel = null;
   const oicPattern = /\b(?:Activity\s+)?OIC Level\s*(\d+)\b/i;
+  const historicalPattern = /historical/i;
 
   for (const log of logs) {
     const sourcesToSearch = [log.courseName, log.qualificationAchieved];
     for (const source of sourcesToSearch) {
       if (source) {
+        // If the source string contains "Historical", skip this source
+        if (historicalPattern.test(source)) {
+          continue;
+        }
+
         const match = source.match(oicPattern);
-        if (match && match[1]) { 
+        if (match && match[1]) {
           const level = parseInt(match[1], 10);
           if (!isNaN(level)) {
             if (maxLevel === null || level > maxLevel) {
