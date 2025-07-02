@@ -153,16 +153,20 @@ export function calculateOICLevel(logs: TrainingLog[]): number | null {
   let maxLevel = null;
   const oicPattern = /\b(?:Activity\s+)?OIC Level\s*(\d+)\b/i;
   const historicalPattern = /historical/i;
+  const heldInC1Pattern = /held in c1/i;
 
   for (const log of logs) {
+    // Combine all relevant text fields for exclusion checks
+    const allLogText = [log.courseName, log.qualificationAchieved, log.achievementDetails].join(' ').toLowerCase();
+
+    // Skip this entire log if "Historical" or "Held in C1" is found anywhere
+    if (historicalPattern.test(allLogText) || heldInC1Pattern.test(allLogText)) {
+      continue;
+    }
+
     const sourcesToSearch = [log.courseName, log.qualificationAchieved];
     for (const source of sourcesToSearch) {
       if (source) {
-        // If the source string contains "Historical", skip this source
-        if (historicalPattern.test(source)) {
-          continue;
-        }
-
         const match = source.match(oicPattern);
         if (match && match[1]) {
           const level = parseInt(match[1], 10);
@@ -177,6 +181,7 @@ export function calculateOICLevel(logs: TrainingLog[]): number | null {
   }
   return maxLevel;
 }
+
 
 export function getRegionForSquadron(squadronName?: string | null): string {
     if (!squadronName) return 'Headquarters';
