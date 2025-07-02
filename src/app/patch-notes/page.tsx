@@ -12,8 +12,24 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.0",
+    version: "0.2.1",
     date: "Current",
+    title: "Improved Compliance Reporting Workflow",
+    sections: [
+      {
+        title: "Feature Enhancement",
+        items: [
+          "The 'Email Compliance Report' button in the 'Compliance' section has been updated.",
+          "Instead of downloading a `.eml` file, the feature now downloads the staff member's PDF compliance report directly.",
+          "After the download, a dialog box appears displaying the suggested email recipient, subject, and body, with a button to copy the content to the clipboard.",
+          "This provides a more universal workflow that is not dependent on a user's local email client configuration.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.0",
+    date: "Previous Update",
     title: "Search Functionality & Stability Fixes",
     sections: [
       {
