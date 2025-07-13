@@ -315,9 +315,9 @@ const StaffDetailsContent = ({
   } = useQuery<TrainingLog[], Error>({
     queryKey: [`${STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMember.id}`],
     queryFn: () => fetchTrainingLogsForStaff(staffMember),
-    enabled: !!staffMember,
+    enabled: !!staffMember?.id,
   });
-  const toast = useToast();
+  const { toast } = useToast();
 
   const oicLevel = React.useMemo(() => {
     if (isLoadingLogs || !trainingLogs || trainingLogs.length === 0) return null;
