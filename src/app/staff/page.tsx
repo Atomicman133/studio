@@ -645,7 +645,7 @@ export default function StaffPage() {
             squadron: squadron,
             address: address,
             joinDate: existingStaffMember?.joinDate || null,
-            status: existingStaffMember?.status || 'Active',
+            status: existingStaffMember?.status || "Active",
           };
 
           if (existingStaffMember) {
@@ -1736,3 +1736,4 @@ export default function StaffPage() {
     </div>
   );
 }
+
