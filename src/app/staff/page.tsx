@@ -298,7 +298,7 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   return { rank, firstName: null, lastName: namePart };
 }
 
-// *** NEW COMPONENT FOR DIALOG CONTENT, moved outside the main component ***
+// *** RESTORED COMPONENT FOR DIALOG CONTENT, moved outside the main component ***
 const StaffDetailsContent = ({
   staffMember,
   onEdit,
@@ -308,15 +308,12 @@ const StaffDetailsContent = ({
   onEdit: (staff: StaffMember) => void;
   isMutationPending: boolean;
 }) => {
-  const {
-    data: trainingLogs = [],
-    isLoading: isLoadingLogs,
-    error: errorLogs,
-  } = useQuery<TrainingLog[], Error>({
-    queryKey: [`${STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMember.id}`],
-    queryFn: () => fetchTrainingLogsForStaff(staffMember),
-    enabled: !!staffMember?.id,
+  const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
+      queryKey: [`${STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMember.id}`],
+      queryFn: () => fetchTrainingLogsForStaff(staffMember),
+      enabled: !!staffMember?.id,
   });
+
   const { toast } = useToast();
 
   const oicLevel = React.useMemo(() => {
