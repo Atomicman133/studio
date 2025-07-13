@@ -157,7 +157,7 @@ export function calculateOICLevel(logs: TrainingLog[]): number | null {
 
   for (const log of logs) {
     // Combine all relevant text fields for exclusion checks
-    const allLogText = [log.courseName, log.qualificationAchieved, log.achievementDetails].join(' ').toLowerCase();
+    const allLogText = [log.courseName, log.qualificationAchieved, log.achievementDetails].filter(Boolean).join(' ').toLowerCase();
 
     // Skip this entire log if "Historical" or "Held in C1" is found anywhere
     if (historicalPattern.test(allLogText) || heldInC1Pattern.test(allLogText)) {
