@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "cleanup:staff-duplicates": "node --experimental-modules ./scripts/cleanupStaffDuplicates.mjs"
+    "cleanup:staff-duplicates": "node --experimental-modules ./src/scripts/cleanupStaffDuplicates.mjs",
+    "cleanup:accomplishment-duplicates": "node --experimental-modules ./src/scripts/cleanupAccomplishmentDuplicates.mjs"
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.6.2",
