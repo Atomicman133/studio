@@ -253,7 +253,7 @@ const robustCsvParser = (csvText: string): string[][] => {
 
 
 async function fetchTrainingLogsForStaff(staffMember: StaffMember | null): Promise<TrainingLog[]> {
-  if (!staffMember || !staffMember.serviceNumber) return []; 
+  if (!staffMember || !staffMember.id) return []; 
   const logsCollectionRef = collection(db, 'trainingLogs');
   const q = query(
     logsCollectionRef,
@@ -298,7 +298,7 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   return { rank, firstName: null, lastName: namePart };
 }
 
-// *** RESTORED COMPONENT FOR DIALOG CONTENT, moved outside the main component ***
+// *** THIS COMPONENT IS NOW DEFINED OUTSIDE StaffPage TO ENSURE A STABLE LIFECYCLE ***
 const StaffDetailsContent = ({
   staffMember,
   onEdit,
@@ -309,6 +309,7 @@ const StaffDetailsContent = ({
   isMutationPending: boolean;
 }) => {
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
+      // The key now includes the staff member's ID to ensure it refetches for each user.
       queryKey: [`${STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMember.id}`],
       queryFn: () => fetchTrainingLogsForStaff(staffMember),
       enabled: !!staffMember?.id,
@@ -439,6 +440,7 @@ const StaffDetailsContent = ({
 
     await addSectionTitle("Basic Information");
     await addDetailLine("Service Number", staffMember.serviceNumber);
+    // Use the locally calculated OIC level for export
     if (oicLevel !== null) {
       await addDetailLine("OIC Level", oicLevel.toString());
     }
@@ -454,6 +456,7 @@ const StaffDetailsContent = ({
     yPos += sectionSpacing * 0.5;
 
     await addSectionTitle("Compliance Status");
+    // Use the correctly fetched logs for this calculation
     const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, trainingLogs);
     await addDetailLine("Overall Status", overallStatus);
     if (overallStatus !== "Compliant") {
