@@ -319,7 +319,10 @@ const StaffDetailsContent = ({
   });
   const toast = useToast();
 
-  const oicLevel = !isLoadingLogs ? calculateOICLevel(trainingLogs) : null;
+  const oicLevel = React.useMemo(() => {
+    if (isLoadingLogs || trainingLogs.length === 0) return null;
+    return calculateOICLevel(trainingLogs);
+  }, [trainingLogs, isLoadingLogs]);
   
   const calculateSingleStaffCompliance = (staffMember: StaffMember, memberLogs: TrainingLog[]): { criteriaChecks: ComplianceCriterionCheck[], overallStatus: StaffComplianceReport["complianceStatusText"] } => {
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
@@ -394,7 +397,6 @@ const StaffDetailsContent = ({
         }
     };
     
-    // Add UAL/Pending Discharge watermark if applicable
     const staffStatus = staffMember.status || 'Active';
     if (staffStatus === 'UAL' || staffStatus === 'Pending Discharge') {
       await checkPageBreak(20);
@@ -404,8 +406,8 @@ const StaffDetailsContent = ({
       doc.text(staffStatus.toUpperCase(), pageWidth / 2, yPos + 10, {
         align: 'center',
       });
-      doc.setTextColor(0); // Reset color
-      yPos += 20; // Add space after watermark
+      doc.setTextColor(0); 
+      yPos += 20; 
     }
 
 
@@ -742,11 +744,11 @@ export default function StaffPage() {
   const [editingStaff, setEditingStaff] = React.useState<StaffMember | null>(null);
   const [staffToDelete, setStaffToDelete] = React.useState<StaffMember | null>(null);
   const [viewingStaffMember, setViewingStaffMember] = React.useState<StaffMember | null>(null);
-  const staffCsvInputRef = React.useRef<HTMLInputElement>(null); // Renamed for clarity
-  const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null); // New ref for accomplishment CSVs
+  const staffCsvInputRef = React.useRef<HTMLInputElement>(null);
+  const accomplishmentCsvInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const [isImportingStaffCsv, setIsImportingStaffCsv] = React.useState(false); // Renamed
-  const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false); // New state
+  const [isImportingStaffCsv, setIsImportingStaffCsv] = React.useState(false);
+  const [isImportingAccomplishments, setIsImportingAccomplishments] = React.useState(false);
   const [openSquadrons, setOpenSquadrons] = React.useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = React.useState("");
 
@@ -1639,7 +1641,6 @@ export default function StaffPage() {
         <AlertTitle>Staff CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import staff, upload a CSV file. The system will attempt to parse the headers provided.
-          The following fields are used if their corresponding headers are found:
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>PrimaryUnit</code> (e.g., "701 Squadron") - Populates 'Squadron'.</li>
             <li><code>MemberUID</code> (e.g., "8001234") - Populates 'Service Number'. Used to match existing records for updates. **Required for each record.**</li>
@@ -1756,7 +1757,3 @@ export default function StaffPage() {
     </div>
   );
 }
-
-
-
-
