@@ -35,6 +35,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 
 
@@ -168,14 +170,16 @@ export default function DashboardPage() {
 
   const complianceData = React.useMemo(() => {
     if (processedReports.length > 0) {
-      const compliant = processedReports.filter(r => r.complianceStatusText === "Compliant").length;
-      const partiallyCompliant = processedReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-      const nonCompliant = processedReports.filter(r => r.complianceStatusText === "Not Compliant").length;
-      return { compliant, partiallyCompliant, nonCompliant };
+      const activeReports = processedReports.filter(r => r.status === 'Active');
+      const compliant = activeReports.filter(r => r.complianceStatusText === "Compliant").length;
+      const partiallyCompliant = activeReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+      const nonCompliant = activeReports.filter(r => r.complianceStatusText === "Not Compliant").length;
+      return { compliant, partiallyCompliant, nonCompliant, total: activeReports.length };
     }
-     if (staffList.length > 0) {
-        return { compliant: 0, partiallyCompliant: 0, nonCompliant: staffList.length };
-     }
+    const activeStaffCount = staffList.filter(s => (s.status || 'Active') === 'Active').length;
+    if (activeStaffCount > 0) {
+       return { compliant: 0, partiallyCompliant: 0, nonCompliant: activeStaffCount, total: activeStaffCount };
+    }
     return null;
   }, [processedReports, staffList]);
 
@@ -203,17 +207,14 @@ export default function DashboardPage() {
     : [];
 
   const handlePieSegmentClick = (segmentName: StaffComplianceReport["complianceStatusText"]) => {
-    const filteredData = processedReports.filter(report => report.complianceStatusText === segmentName);
+    const filteredData = processedReports.filter(report => report.status === 'Active' && report.complianceStatusText === segmentName);
     setSelectedComplianceSegmentData(filteredData);
-    setSelectedComplianceSegmentTitle(`${segmentName} Staff Members (${filteredData.length})`);
+    setSelectedComplianceSegmentTitle(`Active & ${segmentName} Staff (${filteredData.length})`);
     setIsComplianceDetailOpen(true);
   };
   
   const handleExportComplianceSegmentPdf = async () => {
     if (selectedComplianceSegmentData.length === 0) return;
-
-    const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable'); 
 
     const doc = new jsPDF();
     resetLetterheadCache();
@@ -352,11 +353,11 @@ export default function DashboardPage() {
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card className="lg:col-span-1 shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-lg font-medium">Staff Compliance</CardTitle>
+            <CardTitle className="text-lg font-medium">Active Staff Compliance</CardTitle>
             <UserCheck className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {complianceData && (staffList && staffList.length > 0) ? (
+            {complianceData && complianceData.total > 0 ? (
               <>
                 <div className="flex flex-col items-center mb-1 text-center">
                   <div className="text-xl font-bold" style={{ color: chartConfig.compliant.color }}>
@@ -370,7 +371,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground text-center mb-4">
-                  Out of {complianceData.compliant + complianceData.partiallyCompliant + complianceData.nonCompliant} total staff.
+                  Out of {complianceData.total} total active staff.
                 </p>
                 <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[250px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -405,7 +406,7 @@ export default function DashboardPage() {
                 </ChartContainer>
               </>
             ) : (
-              <p className="text-muted-foreground pt-4">No compliance data available or staff list is empty.</p>
+              <p className="text-muted-foreground pt-4 text-center">No active staff compliance data available.</p>
             )}
           </CardContent>
         </Card>
@@ -444,7 +445,7 @@ export default function DashboardPage() {
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-muted-foreground pt-4">No accomplishments expiring soon.</p>
+              <p className="text-muted-foreground pt-4">No accomplishments expiring soon for active staff.</p>
             )}
           </CardContent>
         </Card>

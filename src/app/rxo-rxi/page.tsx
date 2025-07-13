@@ -30,6 +30,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, getRegionForSquadron } from '@/lib/utils';
 import { processComplianceReports } from "@/lib/compliance-processing";
 
@@ -92,7 +94,10 @@ export default function RxoRxiPage() {
             return acc;
         }, {} as Record<string, { staff: StaffMember[], reports: StaffComplianceReport[], summary: { compliant: number, partiallyCompliant: number, nonCompliant: number } }>);
 
-        allProcessedReports.forEach(report => {
+        // Filter for active staff first
+        const activeReports = allProcessedReports.filter(report => report.status === 'Active');
+
+        activeReports.forEach(report => {
             const region = getRegionForSquadron(report.squadron);
             if (dataByRegion[region]) {
                 dataByRegion[region].reports.push(report);
@@ -111,15 +116,12 @@ export default function RxoRxiPage() {
     const handlePieSegmentClick = (region: string, statusText: StaffComplianceReport["complianceStatusText"]) => {
         const filteredData = regionalData[region].reports.filter(report => report.complianceStatusText === statusText);
         setSelectedData(filteredData);
-        setSelectedTitle(`${region} - ${statusText} Staff (${filteredData.length})`);
+        setSelectedTitle(`${region} - Active & ${statusText} Staff (${filteredData.length})`);
         setIsDetailOpen(true);
     };
 
     const handleExportPdf = async () => {
         if (selectedData.length === 0) return;
-        const { default: jsPDF } = await import('jspdf');
-        await import('jspdf-autotable'); 
-
         const doc = new jsPDF();
         resetLetterheadCache();
         const filename = `${selectedTitle.replace(/\s+/g, '_')}_${format(new Date(), "yyyy-MM-dd")}.pdf`;
@@ -194,7 +196,7 @@ export default function RxoRxiPage() {
                         <ClipboardList className="h-8 w-8 text-primary hidden sm:block" />
                         <div>
                             <CardTitle className="text-2xl">RXO / RXI Dashboard</CardTitle>
-                            <CardDescription>Regional overview of staff compliance metrics.</CardDescription>
+                            <CardDescription>Regional overview of active staff compliance metrics.</CardDescription>
                         </div>
                     </div>
                 </CardHeader>
@@ -214,7 +216,7 @@ export default function RxoRxiPage() {
                         <Card key={region} className="shadow-lg flex flex-col">
                             <CardHeader className="text-center">
                                 <CardTitle className="text-xl">{region}</CardTitle>
-                                <CardDescription>{totalStaff} Staff Member(s)</CardDescription>
+                                <CardDescription>{totalStaff} Active Staff</CardDescription>
                             </CardHeader>
                             <CardContent className="pt-4 flex-grow flex flex-col justify-center items-center">
                                 {totalStaff > 0 ? (
@@ -245,7 +247,7 @@ export default function RxoRxiPage() {
                                 ) : (
                                     <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
                                         <UserCheck className="h-10 w-10 mb-2" />
-                                        <p>No staff assigned.</p>
+                                        <p>No active staff.</p>
                                     </div>
                                 )}
                             </CardContent>
