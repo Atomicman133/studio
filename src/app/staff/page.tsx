@@ -298,6 +298,30 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   return { rank, firstName: null, lastName: namePart };
 }
 
+// Component to render the dialog description with OIC level only when data is ready
+const StaffDialogDescription = ({
+  staffMember,
+  trainingLogs,
+  isLoadingLogs,
+}: {
+  staffMember: StaffMember;
+  trainingLogs: TrainingLog[];
+  isLoadingLogs: boolean;
+}) => {
+  const oicLevel = !isLoadingLogs ? calculateOICLevel(trainingLogs) : null;
+  return (
+    <DialogDescription>
+      Service No: {staffMember.serviceNumber}
+      {isLoadingLogs ? (
+        <Loader2 className="inline h-4 w-4 ml-2 animate-spin" />
+      ) : (
+        oicLevel !== null && ` | OIC Level: ${oicLevel}`
+      )}
+      {' '}| Role: {staffMember.role || "N/A"} | Squadron: {staffMember.squadron || 'N/A'}
+    </DialogDescription>
+  );
+};
+
 
 export default function StaffPage() {
   const { data: staffList = [], isLoading, error } = useStaff();
@@ -1496,14 +1520,11 @@ export default function StaffPage() {
             <DialogContent className="sm:max-w-4xl">
                 <DialogHeader>
                     <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
-                    <DialogDescription>
-                       Service No: {viewingStaffMember.serviceNumber}
-                       {(() => {
-                         const oicLevel = calculateOICLevel(viewedStaffTrainingLogs);
-                         return oicLevel !== null ? ` | OIC Level: ${oicLevel}` : '';
-                       })()}
-                       {' '}| Role: {viewingStaffMember.role || "N/A"} | Squadron: {viewingStaffMember.squadron || 'N/A'}
-                    </DialogDescription>
+                     <StaffDialogDescription
+                        staffMember={viewingStaffMember}
+                        trainingLogs={viewedStaffTrainingLogs}
+                        isLoadingLogs={isLoadingViewedStaffLogs}
+                      />
                 </DialogHeader>
                 <div className="max-h-[70vh] overflow-y-auto p-1 pr-4">
                     <div className="space-y-6 py-4">
@@ -1736,4 +1757,5 @@ export default function StaffPage() {
     </div>
   );
 }
+
 
