@@ -298,7 +298,7 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   return { rank, firstName: null, lastName: namePart };
 }
 
-// *** NEW COMPONENT FOR DIALOG CONTENT ***
+// *** NEW COMPONENT FOR DIALOG CONTENT, moved outside the main component ***
 const StaffDetailsContent = ({
   staffMember,
   onEdit,
@@ -320,7 +320,7 @@ const StaffDetailsContent = ({
   const toast = useToast();
 
   const oicLevel = React.useMemo(() => {
-    if (isLoadingLogs || trainingLogs.length === 0) return null;
+    if (isLoadingLogs || !trainingLogs || trainingLogs.length === 0) return null;
     return calculateOICLevel(trainingLogs);
   }, [trainingLogs, isLoadingLogs]);
   
@@ -731,7 +731,6 @@ const StaffDetailsContent = ({
     </>
   );
 };
-
 
 export default function StaffPage() {
   const { data: staffList = [], isLoading, error } = useStaff();
@@ -1720,9 +1719,6 @@ export default function StaffPage() {
                 onEdit={handleEdit}
                 isMutationPending={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}
               />
-              <DialogFooter className="pt-4 border-t gap-2">
-                 <Button onClick={closeViewDialog} disabled={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}>Close</Button>
-              </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
