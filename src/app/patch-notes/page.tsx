@@ -12,8 +12,29 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.1",
+    version: "0.2.2",
     date: "Current",
+    title: "Staff Status Management & OIC Calculation Refinements",
+    sections: [
+      {
+        title: "Feature Enhancements",
+        items: [
+          "Added a 'Status' field to staff profiles with options: 'Active', 'UAL' (Unauthorized Absence), and 'Pending Discharge'.",
+          "Compliance reports now default to showing only 'Active' staff. 'UAL' and 'Pending Discharge' staff are hidden unless directly searched for.",
+          "Exported PDF profiles for 'UAL' or 'Pending Discharge' staff now display a prominent red watermark at the top to clearly indicate their status.",
+        ],
+      },
+      {
+        title: "Logic Improvements",
+        items: [
+          "The OIC Level calculation now correctly excludes training records marked as 'Historical' or that contain 'Held in C1' in their details, ensuring a more accurate reflection of current qualifications.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.1",
+    date: "Previous Update",
     title: "Improved Compliance Reporting Workflow",
     sections: [
       {
