@@ -85,7 +85,7 @@ type StaffGroup = {
   staffMembers: StaffMember[];
 };
 
-const STAFF_TRAINING_LOGS_QUERY_KEY = 'staffTrainingLogs';
+const STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX = 'staffTrainingLogs';
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
@@ -298,27 +298,435 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   return { rank, firstName: null, lastName: namePart };
 }
 
-// Component to render the dialog description with OIC level only when data is ready
-const StaffDialogDescription = ({
+// *** NEW COMPONENT FOR DIALOG CONTENT ***
+const StaffDetailsContent = ({
   staffMember,
-  trainingLogs,
-  isLoadingLogs,
+  onEdit,
+  isMutationPending
 }: {
   staffMember: StaffMember;
-  trainingLogs: TrainingLog[];
-  isLoadingLogs: boolean;
+  onEdit: (staff: StaffMember) => void;
+  isMutationPending: boolean;
 }) => {
+  const {
+    data: trainingLogs = [],
+    isLoading: isLoadingLogs,
+    error: errorLogs,
+  } = useQuery<TrainingLog[], Error>({
+    queryKey: [`${STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMember.id}`],
+    queryFn: () => fetchTrainingLogsForStaff(staffMember),
+    enabled: !!staffMember,
+  });
+  const toast = useToast();
+
   const oicLevel = !isLoadingLogs ? calculateOICLevel(trainingLogs) : null;
+  
+  const calculateSingleStaffCompliance = (staffMember: StaffMember, memberLogs: TrainingLog[]): { criteriaChecks: ComplianceCriterionCheck[], overallStatus: StaffComplianceReport["complianceStatusText"] } => {
+    const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
+      const relevantLogs = memberLogs
+        .filter(log => criterion.identifier(log))
+        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
+
+      let isMet = false;
+      let details = "Missing";
+      let selectedLog: TrainingLog | undefined = undefined;
+
+      if (relevantLogs.length > 0) {
+        selectedLog = relevantLogs[0];
+        const completionDate = startOfDay(new Date(selectedLog.completionDate));
+        if (!isValidDate(completionDate)) {
+          details = "Invalid completion date in record.";
+        } else {
+          const today = startOfDay(new Date());
+          if (criterion.yearsToExpire) {
+            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
+            isMet = isBefore(today, expiryDate);
+            if (isMet) {
+              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(addDays(expiryDate, -1), 'dd/MM/yyyy')}.`;
+            } else {
+              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+            }
+          } else {
+            isMet = true;
+            details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
+          }
+        }
+      }
+      return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
+    });
+
+    const metCount = criteriaChecks.filter(c => c.isMet).length;
+    let overallStatus: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
+    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
+      overallStatus = "Compliant";
+    } else if (metCount >= 3) { 
+      overallStatus = "Partially Compliant";
+    }
+    return { criteriaChecks, overallStatus };
+  };
+
+  const handleExportFullProfilePdf = async () => {
+    const doc = new jsPDF();
+    resetLetterheadCache();
+    const filename = `profile_${staffMember.rank}_${staffMember.lastName}_${staffMember.firstName}_${staffMember.serviceNumber}.pdf`;
+
+    const margin = 15;
+    let yPos = margin;
+    const lineSpacing = 7;
+    const sectionSpacing = 10;
+    const indent = 5;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxLineWidth = pageWidth - (margin * 2);
+    let headerHeight = 0;
+    let footerHeight = 0;
+
+    const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+    headerHeight = hh;
+    footerHeight = fh;
+    yPos = margin + headerHeight + 5;
+
+    const checkPageBreak = async (neededHeight: number = lineSpacing) => {
+        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+            addPageNumbers(doc, footerHeight, margin); 
+            doc.addPage();
+            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+            yPos = margin + headerHeight + 5;
+        }
+    };
+    
+    // Add UAL/Pending Discharge watermark if applicable
+    const staffStatus = staffMember.status || 'Active';
+    if (staffStatus === 'UAL' || staffStatus === 'Pending Discharge') {
+      await checkPageBreak(20);
+      doc.setFontSize(48);
+      doc.setTextColor(255, 0, 0);
+      doc.setFont(undefined, 'bold');
+      doc.text(staffStatus.toUpperCase(), pageWidth / 2, yPos + 10, {
+        align: 'center',
+      });
+      doc.setTextColor(0); // Reset color
+      yPos += 20; // Add space after watermark
+    }
+
+
+    const addSectionTitle = async (title: string) => {
+      await checkPageBreak(sectionSpacing + 14);
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, margin, yPos);
+      yPos += lineSpacing * 1.5;
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+    };
+
+    const addDetailLine = async (label: string, value?: string | null) => {
+      if (value === undefined || value === null || value.trim() === "") return;
+      await checkPageBreak(lineSpacing);
+      const labelWidth = doc.getTextWidth(`${label}: `) + 2;
+      doc.setFont(undefined, 'bold');
+      doc.text(`${label}:`, margin, yPos);
+      doc.setFont(undefined, 'normal');
+      const valueLines = doc.splitTextToSize(value, maxLineWidth - labelWidth);
+      await checkPageBreak(valueLines.length * (lineSpacing * 0.7));
+      doc.text(valueLines, margin + labelWidth, yPos);
+      yPos += valueLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
+    };
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    await checkPageBreak(sectionSpacing + 18);
+    doc.text(`Staff Profile: ${staffMember.rank} ${staffMember.firstName} ${staffMember.lastName}`, margin, yPos);
+    yPos += sectionSpacing;
+
+    await addSectionTitle("Basic Information");
+    await addDetailLine("Service Number", staffMember.serviceNumber);
+    if (oicLevel !== null) {
+      await addDetailLine("OIC Level", oicLevel.toString());
+    }
+    await addDetailLine("Role", staffMember.role);
+    await addDetailLine("Squadron", staffMember.squadron);
+    yPos += sectionSpacing * 0.5;
+
+    await addSectionTitle("Contact Details");
+    await addDetailLine("Email", staffMember.email);
+    await addDetailLine("Phone", staffMember.phone);
+    await addDetailLine("Address", staffMember.address);
+    await addDetailLine("Join Date", staffMember.joinDate ? format(new Date(staffMember.joinDate), "PPP") : "N/A");
+    yPos += sectionSpacing * 0.5;
+
+    await addSectionTitle("Compliance Status");
+    const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, trainingLogs);
+    await addDetailLine("Overall Status", overallStatus);
+    if (overallStatus !== "Compliant") {
+        await checkPageBreak(lineSpacing);
+        doc.setFont(undefined, 'bold');
+        doc.text("Non-Compliant Items:", margin, yPos);
+        yPos += lineSpacing * 0.8;
+        doc.setFont(undefined, 'normal');
+        for (const criterion of criteriaChecks) {
+            if (!criterion.isMet) {
+                const itemText = `- ${criterion.name}: ${criterion.details}`;
+                const lines = doc.splitTextToSize(itemText, maxLineWidth - indent);
+                await checkPageBreak(lines.length * (lineSpacing * 0.7));
+                doc.text(lines, margin + indent, yPos);
+                yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
+            }
+        }
+    }
+    yPos += sectionSpacing * 0.5;
+
+    await addSectionTitle("Service History");
+    if (staffMember.serviceHistory && staffMember.serviceHistory.length > 0) {
+        for (const entry of staffMember.serviceHistory.sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime())) {
+            await checkPageBreak(lineSpacing * 3);
+            let entryText = `${entry.type}: ${entry.item} (Effective: ${format(new Date(entry.effectiveDate), "PP")}`;
+            if (entry.endDate) entryText += ` - End: ${format(new Date(entry.endDate), "PP")}`;
+            entryText += ")";
+            if (entry.notes) entryText += ` Notes: ${entry.notes}`;
+            const lines = doc.splitTextToSize(entryText, maxLineWidth);
+            doc.text(lines, margin, yPos);
+            yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
+        }
+    } else {
+        await addDetailLine("", "No service history recorded.");
+    }
+    yPos += sectionSpacing * 0.5;
+
+    await addSectionTitle("Training Records");
+    if (trainingLogs && trainingLogs.length > 0) {
+        for (const log of trainingLogs) {
+            await checkPageBreak(lineSpacing * 3);
+            let logText = `${log.courseName} (Completed: ${format(new Date(log.completionDate), "PP")})`;
+            if (log.qualificationAchieved) logText += ` - Qual: ${log.qualificationAchieved}`;
+            if (log.instructorQualification) logText += ` - Instr. Qual: ${log.instructorQualification}`;
+            const lines = doc.splitTextToSize(logText, maxLineWidth);
+            doc.text(lines, margin, yPos);
+            yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
+        }
+    } else {
+        await addDetailLine("", "No training records found for this staff member.");
+    }
+    yPos += sectionSpacing * 0.5;
+    
+    const placeholderSections = ["Meetings Attended", "Professional Development Plans", "Discipline Actions Involvement", "Safety Audits Involvement"];
+    for (const sectionTitle of placeholderSections) {
+        await addSectionTitle(sectionTitle);
+        await addDetailLine("", `Data for ${sectionTitle.toLowerCase()} is not yet integrated into this profile export.`);
+        yPos += sectionSpacing * 0.5;
+    }
+
+    addPageNumbers(doc, footerHeight, margin);
+    doc.save(filename);
+    toast({title: "Profile PDF Exported", description: `${filename} has been downloaded.`});
+  };
+
   return (
-    <DialogDescription>
-      Service No: {staffMember.serviceNumber}
-      {isLoadingLogs ? (
-        <Loader2 className="inline h-4 w-4 ml-2 animate-spin" />
-      ) : (
-        oicLevel !== null && ` | OIC Level: ${oicLevel}`
-      )}
-      {' '}| Role: {staffMember.role || "N/A"} | Squadron: {staffMember.squadron || 'N/A'}
-    </DialogDescription>
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          {staffMember.rank} {staffMember.firstName} {staffMember.lastName}
+        </DialogTitle>
+        <DialogDescription>
+          Service No: {staffMember.serviceNumber}
+          {isLoadingLogs ? (
+            <Loader2 className="inline h-4 w-4 ml-2 animate-spin" />
+          ) : (
+            oicLevel !== null && ` | OIC Level: ${oicLevel}`
+          )}
+          {' '}| Role: {staffMember.role || "N/A"} | Squadron: {staffMember.squadron || 'N/A'}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="max-h-[70vh] overflow-y-auto p-1 pr-4">
+          <div className="space-y-6 py-4">
+            <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2"><User className="h-5 w-5" /> Contact Information</CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                      <p className="font-semibold">Email</p>
+                      <p className="text-muted-foreground">{staffMember.email}</p>
+                  </div>
+                  <div>
+                      <p className="font-semibold">Phone</p>
+                      <p className="text-muted-foreground">{staffMember.phone || "N/A"}</p>
+                  </div>
+                  <div>
+                      <p className="font-semibold">Join Date</p>
+                      <p className="text-muted-foreground">{staffMember.joinDate && isValidDate(new Date(staffMember.joinDate)) ? format(new Date(staffMember.joinDate), "PP") : "N/A"}</p>
+                  </div>
+                   <div>
+                      <p className="font-semibold">Address</p>
+                      <p className="text-muted-foreground">{staffMember.address || "N/A"}</p>
+                  </div>
+                </CardContent>
+            </Card>
+
+              <Accordion type="multiple" className="w-full">
+                 <AccordionItem value="compliance-status">
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5" /> Compliance Status
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    {isLoadingLogs ? (
+                      <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                    ) : errorLogs ? (
+                      <p className="text-sm text-destructive p-4">Error loading compliance data: {errorLogs.message}</p>
+                    ) : (
+                      (() => {
+                        const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, trainingLogs);
+                        return (
+                          <div className="space-y-2 p-2 border rounded-md">
+                            <p className="text-sm"><strong>Overall:</strong> <Badge variant={overallStatus === "Compliant" ? "default" : overallStatus === "Partially Compliant" ? "secondary" : "destructive"}>{overallStatus}</Badge></p>
+                            {overallStatus !== "Compliant" && (
+                              <ul className="list-disc pl-5 text-xs">
+                                {criteriaChecks.filter(c => !c.isMet).map(c => (
+                                  <li key={c.key} className="text-muted-foreground">{c.name}: {c.details}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })()
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="service-history">
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2">
+                      <History className="h-5 w-5" /> Service History ({(staffMember.serviceHistory || []).length})
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="max-h-[300px] overflow-y-auto border rounded-md">
+                      {(staffMember.serviceHistory || []).length === 0 ? (
+                        <p className="text-sm text-muted-foreground p-4 text-center">No service history recorded.</p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Item</TableHead>
+                              <TableHead>Effective Date</TableHead>
+                              <TableHead>End Date</TableHead>
+                              <TableHead>Notes</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(staffMember.serviceHistory || []).sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime()).map(entry => (
+                              <TableRow key={entry.id}>
+                                <TableCell><Badge variant={entry.type === "Rank" ? "secondary" : "outline"}>{entry.type}</Badge></TableCell>
+                                <TableCell>{entry.item}</TableCell>
+                                <TableCell>{format(new Date(entry.effectiveDate), "PP")}</TableCell>
+                                <TableCell>{entry.endDate ? format(new Date(entry.endDate), "PP") : "N/A"}</TableCell>
+                                <TableCell className="truncate max-w-xs">{entry.notes || "N/A"}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="training">
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2">
+                      <GraduationCap className="h-5 w-5" /> Training Records ({isLoadingLogs ? <Loader2 className="h-4 w-4 animate-spin"/> : trainingLogs.length})
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="max-h-[300px] overflow-y-auto border rounded-md">
+                      {isLoadingLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+                      {errorLogs && <p className="text-sm text-destructive p-4">Error loading training records: {errorLogs.message}</p>}
+                      {!isLoadingLogs && !errorLogs && trainingLogs.length === 0 && (
+                          <p className="text-sm text-muted-foreground p-4 text-center">No training records found for this staff member.</p>
+                      )}
+                      {!isLoadingLogs && !errorLogs && trainingLogs.length > 0 && (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Course Name</TableHead>
+                              <TableHead>Completion Date</TableHead>
+                              <TableHead>Qualification</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {trainingLogs.map(log => (
+                              <TableRow key={log.id}>
+                                <TableCell>{log.courseName}</TableCell>
+                                <TableCell>{log.completionDate && isValidDate(new Date(log.completionDate)) ? format(new Date(log.completionDate), "PP") : "Invalid Date"}</TableCell>
+                                <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="meetings">
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2">
+                     <FileText className="h-5 w-5" /> Meetings Attended
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                     <p className="text-sm text-muted-foreground p-4 text-center">Meeting attendance data not yet integrated.</p>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="pdps">
+                  <AccordionTrigger>
+                    <div className="flex items-center gap-2">
+                      <Briefcase className="h-5 w-5" /> Professional Development
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                      <p className="text-sm text-muted-foreground p-4 text-center">PDP data not yet integrated.</p>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="discipline">
+                  <AccordionTrigger>
+                      <div className="flex items-center gap-2">
+                          <Gavel className="h-5 w-5" /> Discipline Actions
+                      </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                       <p className="text-sm text-muted-foreground p-4 text-center">Discipline action data not yet integrated.</p>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="audits">
+                  <AccordionTrigger>
+                      <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-5 w-5" /> Safety Audits Involvement
+                      </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                      <p className="text-sm text-muted-foreground p-4 text-center">Safety audit involvement data not yet integrated.</p>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
+      </div>
+      <DialogFooter className="pt-4 border-t gap-2">
+          <Button variant="outline" onClick={() => onEdit(staffMember)} disabled={isMutationPending}>
+              <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
+          </Button>
+          <Button
+              variant="default"
+              onClick={handleExportFullProfilePdf}
+              disabled={isLoadingLogs || isMutationPending}
+          >
+              {isLoadingLogs ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+              Export Full Profile (PDF)
+          </Button>
+      </DialogFooter>
+    </>
   );
 };
 
@@ -364,18 +772,6 @@ export default function StaffPage() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isImportingStaffCsv, isImportingAccomplishments]);
-
-
-  const {
-    data: viewedStaffTrainingLogs = [],
-    isLoading: isLoadingViewedStaffLogs,
-    error: errorViewedStaffLogs
-  } = useQuery<TrainingLog[], Error>({
-    queryKey: [STAFF_TRAINING_LOGS_QUERY_KEY, viewingStaffMember?.id || `${viewingStaffMember?.lastName}, ${viewingStaffMember?.firstName}_${viewingStaffMember?.rank}`],
-    queryFn: () => fetchTrainingLogsForStaff(viewingStaffMember),
-    enabled: !!viewingStaffMember,
-    staleTime: 1000 * 60 * 2,
-  });
 
   const filteredStaffList = React.useMemo(() => {
     if (!staffList) return [];
@@ -1049,207 +1445,7 @@ export default function StaffPage() {
     reader.readAsText(file);
   };
 
-
-  const calculateSingleStaffCompliance = (staffMember: StaffMember, memberLogs: TrainingLog[]): { criteriaChecks: ComplianceCriterionCheck[], overallStatus: StaffComplianceReport["complianceStatusText"] } => {
-    const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      const relevantLogs = memberLogs
-        .filter(log => criterion.identifier(log))
-        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
-
-      let isMet = false;
-      let details = "Missing";
-      let selectedLog: TrainingLog | undefined = undefined;
-
-      if (relevantLogs.length > 0) {
-        selectedLog = relevantLogs[0];
-        const completionDate = startOfDay(new Date(selectedLog.completionDate));
-        if (!isValidDate(completionDate)) {
-          details = "Invalid completion date in record.";
-        } else {
-          const today = startOfDay(new Date());
-          if (criterion.yearsToExpire) {
-            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            isMet = isBefore(today, expiryDate);
-            if (isMet) {
-              details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(addDays(expiryDate, -1), 'dd/MM/yyyy')}.`;
-            } else {
-              details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
-            }
-          } else {
-            isMet = true;
-            details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
-          }
-        }
-      }
-      return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
-    });
-
-    const metCount = criteriaChecks.filter(c => c.isMet).length;
-    let overallStatus: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
-    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
-      overallStatus = "Compliant";
-    } else if (metCount >= 3) { 
-      overallStatus = "Partially Compliant";
-    }
-    return { criteriaChecks, overallStatus };
-  };
-
-  const handleExportFullProfilePdf = async (staffMember: StaffMember, staffTrainingLogs: TrainingLog[]) => {
-    const doc = new jsPDF();
-    resetLetterheadCache();
-    const filename = `profile_${staffMember.rank}_${staffMember.lastName}_${staffMember.firstName}_${staffMember.serviceNumber}.pdf`;
-
-    const margin = 15;
-    let yPos = margin;
-    const lineSpacing = 7;
-    const sectionSpacing = 10;
-    const indent = 5;
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const maxLineWidth = pageWidth - (margin * 2);
-    let headerHeight = 0;
-    let footerHeight = 0;
-
-    const { headerHeight: hh, footerHeight: fh } = await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
-    headerHeight = hh;
-    footerHeight = fh;
-    yPos = margin + headerHeight + 5;
-
-    const checkPageBreak = async (neededHeight: number = lineSpacing) => {
-        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
-            addPageNumbers(doc, footerHeight, margin); 
-            doc.addPage();
-            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
-            yPos = margin + headerHeight + 5;
-        }
-    };
-    
-    // Add UAL/Pending Discharge watermark if applicable
-    const staffStatus = staffMember.status || 'Active';
-    if (staffStatus === 'UAL' || staffStatus === 'Pending Discharge') {
-      await checkPageBreak(20);
-      doc.setFontSize(48);
-      doc.setTextColor(255, 0, 0);
-      doc.setFont(undefined, 'bold');
-      doc.text(staffStatus.toUpperCase(), pageWidth / 2, yPos + 10, {
-        align: 'center',
-      });
-      doc.setTextColor(0); // Reset color
-      yPos += 20; // Add space after watermark
-    }
-
-
-    const addSectionTitle = async (title: string) => {
-      await checkPageBreak(sectionSpacing + 14);
-      doc.setFontSize(14);
-      doc.setFont(undefined, 'bold');
-      doc.text(title, margin, yPos);
-      yPos += lineSpacing * 1.5;
-      doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
-    };
-
-    const addDetailLine = async (label: string, value?: string | null) => {
-      if (value === undefined || value === null || value.trim() === "") return;
-      await checkPageBreak(lineSpacing);
-      const labelWidth = doc.getTextWidth(`${label}: `) + 2;
-      doc.setFont(undefined, 'bold');
-      doc.text(`${label}:`, margin, yPos);
-      doc.setFont(undefined, 'normal');
-      const valueLines = doc.splitTextToSize(value, maxLineWidth - labelWidth);
-      await checkPageBreak(valueLines.length * (lineSpacing * 0.7));
-      doc.text(valueLines, margin + labelWidth, yPos);
-      yPos += valueLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3);
-    };
-
-    doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
-    await checkPageBreak(sectionSpacing + 18);
-    doc.text(`Staff Profile: ${staffMember.rank} ${staffMember.firstName} ${staffMember.lastName}`, margin, yPos);
-    yPos += sectionSpacing;
-
-    await addSectionTitle("Basic Information");
-    await addDetailLine("Service Number", staffMember.serviceNumber);
-    const oicLevel = calculateOICLevel(staffTrainingLogs);
-    if (oicLevel !== null) {
-      await addDetailLine("OIC Level", oicLevel.toString());
-    }
-    await addDetailLine("Role", staffMember.role);
-    await addDetailLine("Squadron", staffMember.squadron);
-    yPos += sectionSpacing * 0.5;
-
-    await addSectionTitle("Contact Details");
-    await addDetailLine("Email", staffMember.email);
-    await addDetailLine("Phone", staffMember.phone);
-    await addDetailLine("Address", staffMember.address);
-    await addDetailLine("Join Date", staffMember.joinDate ? format(new Date(staffMember.joinDate), "PPP") : "N/A");
-    yPos += sectionSpacing * 0.5;
-
-    await addSectionTitle("Compliance Status");
-    const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, staffTrainingLogs);
-    await addDetailLine("Overall Status", overallStatus);
-    if (overallStatus !== "Compliant") {
-        await checkPageBreak(lineSpacing);
-        doc.setFont(undefined, 'bold');
-        doc.text("Non-Compliant Items:", margin, yPos);
-        yPos += lineSpacing * 0.8;
-        doc.setFont(undefined, 'normal');
-        for (const criterion of criteriaChecks) {
-            if (!criterion.isMet) {
-                const itemText = `- ${criterion.name}: ${criterion.details}`;
-                const lines = doc.splitTextToSize(itemText, maxLineWidth - indent);
-                await checkPageBreak(lines.length * (lineSpacing * 0.7));
-                doc.text(lines, margin + indent, yPos);
-                yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
-            }
-        }
-    }
-    yPos += sectionSpacing * 0.5;
-
-    await addSectionTitle("Service History");
-    if (staffMember.serviceHistory && staffMember.serviceHistory.length > 0) {
-        for (const entry of staffMember.serviceHistory.sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime())) {
-            await checkPageBreak(lineSpacing * 3);
-            let entryText = `${entry.type}: ${entry.item} (Effective: ${format(new Date(entry.effectiveDate), "PP")}`;
-            if (entry.endDate) entryText += ` - End: ${format(new Date(entry.endDate), "PP")}`;
-            entryText += ")";
-            if (entry.notes) entryText += ` Notes: ${entry.notes}`;
-            const lines = doc.splitTextToSize(entryText, maxLineWidth);
-            doc.text(lines, margin, yPos);
-            yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
-        }
-    } else {
-        await addDetailLine("", "No service history recorded.");
-    }
-    yPos += sectionSpacing * 0.5;
-
-    await addSectionTitle("Training Records");
-    if (staffTrainingLogs && staffTrainingLogs.length > 0) {
-        for (const log of staffTrainingLogs) {
-            await checkPageBreak(lineSpacing * 3);
-            let logText = `${log.courseName} (Completed: ${format(new Date(log.completionDate), "PP")})`;
-            if (log.qualificationAchieved) logText += ` - Qual: ${log.qualificationAchieved}`;
-            if (log.instructorQualification) logText += ` - Instr. Qual: ${log.instructorQualification}`;
-            const lines = doc.splitTextToSize(logText, maxLineWidth);
-            doc.text(lines, margin, yPos);
-            yPos += lines.length * (lineSpacing * 0.7) + (lineSpacing * 0.2);
-        }
-    } else {
-        await addDetailLine("", "No training records found for this staff member.");
-    }
-    yPos += sectionSpacing * 0.5;
-    
-    const placeholderSections = ["Meetings Attended", "Professional Development Plans", "Discipline Actions Involvement", "Safety Audits Involvement"];
-    for (const sectionTitle of placeholderSections) {
-        await addSectionTitle(sectionTitle);
-        await addDetailLine("", `Data for ${sectionTitle.toLowerCase()} is not yet integrated into this profile export.`);
-        yPos += sectionSpacing * 0.5;
-    }
-
-    addPageNumbers(doc, footerHeight, margin);
-    doc.save(filename);
-    toast({title: "Profile PDF Exported", description: `${filename} has been downloaded.`});
-  };
-
+  const isLoadingAnyMutation = updateStaffMutation.isPending || deleteStaffMutation.isPending || addStaffMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -1390,18 +1586,18 @@ export default function StaffPage() {
                             <TableCell className="text-right">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" className="h-8 w-8 p-0" disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
+                                  <Button variant="ghost" className="h-8 w-8 p-0" disabled={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}>
                                     <span className="sr-only">Open menu</span>
                                     <MoreHorizontal className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
+                                  <DropdownMenuItem onClick={() => handleViewDetails(staff)} disabled={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}>
                                     <Info className="mr-2 h-4 w-4" />
                                     View Details
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>
+                                  <DropdownMenuItem onClick={() => handleEdit(staff)} disabled={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}>
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Edit
                                   </DropdownMenuItem>
@@ -1409,7 +1605,7 @@ export default function StaffPage() {
                                   <DropdownMenuItem
                                     onClick={() => setStaffToDelete(staff)}
                                     className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                    disabled={updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
+                                    disabled={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}
                                   >
                                     <Trash2 className="mr-2 h-4 w-4" />
                                     Delete
@@ -1516,215 +1712,18 @@ export default function StaffPage() {
       </Dialog>
 
       {viewingStaffMember && (
-         <Dialog open={!!viewingStaffMember} onOpenChange={closeViewDialog}>
-            <DialogContent className="sm:max-w-4xl">
-                <DialogHeader>
-                    <DialogTitle>{viewingStaffMember.rank} {viewingStaffMember.firstName} {viewingStaffMember.lastName}</DialogTitle>
-                     <StaffDialogDescription
-                        staffMember={viewingStaffMember}
-                        trainingLogs={viewedStaffTrainingLogs}
-                        isLoadingLogs={isLoadingViewedStaffLogs}
-                      />
-                </DialogHeader>
-                <div className="max-h-[70vh] overflow-y-auto p-1 pr-4">
-                    <div className="space-y-6 py-4">
-                      <Card>
-                          <CardHeader>
-                            <CardTitle className="text-lg flex items-center gap-2"><User className="h-5 w-5" /> Contact Information</CardTitle>
-                          </CardHeader>
-                          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                            <div>
-                                <p className="font-semibold">Email</p>
-                                <p className="text-muted-foreground">{viewingStaffMember.email}</p>
-                            </div>
-                            <div>
-                                <p className="font-semibold">Phone</p>
-                                <p className="text-muted-foreground">{viewingStaffMember.phone || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="font-semibold">Join Date</p>
-                                <p className="text-muted-foreground">{viewingStaffMember.joinDate && isValidDate(new Date(viewingStaffMember.joinDate)) ? format(new Date(viewingStaffMember.joinDate), "PP") : "N/A"}</p>
-                            </div>
-                             <div>
-                                <p className="font-semibold">Address</p>
-                                <p className="text-muted-foreground">{viewingStaffMember.address || "N/A"}</p>
-                            </div>
-                          </CardContent>
-                      </Card>
-
-                        <Accordion type="multiple" className="w-full">
-                           <AccordionItem value="compliance-status">
-                            <AccordionTrigger>
-                              <div className="flex items-center gap-2">
-                                <ShieldCheck className="h-5 w-5" /> Compliance Status
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                              {isLoadingViewedStaffLogs ? (
-                                <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
-                              ) : errorViewedStaffLogs ? (
-                                <p className="text-sm text-destructive p-4">Error loading compliance data: {errorViewedStaffLogs.message}</p>
-                              ) : (
-                                (() => {
-                                  const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(viewingStaffMember, viewedStaffTrainingLogs);
-                                  return (
-                                    <div className="space-y-2 p-2 border rounded-md">
-                                      <p className="text-sm"><strong>Overall:</strong> <Badge variant={overallStatus === "Compliant" ? "default" : overallStatus === "Partially Compliant" ? "secondary" : "destructive"}>{overallStatus}</Badge></p>
-                                      {overallStatus !== "Compliant" && (
-                                        <ul className="list-disc pl-5 text-xs">
-                                          {criteriaChecks.filter(c => !c.isMet).map(c => (
-                                            <li key={c.key} className="text-muted-foreground">{c.name}: {c.details}</li>
-                                          ))}
-                                        </ul>
-                                      )}
-                                    </div>
-                                  );
-                                })()
-                              )}
-                            </AccordionContent>
-                          </AccordionItem>
-                          <AccordionItem value="service-history">
-                            <AccordionTrigger>
-                              <div className="flex items-center gap-2">
-                                <History className="h-5 w-5" /> Service History ({(viewingStaffMember.serviceHistory || []).length})
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                              <div className="max-h-[300px] overflow-y-auto border rounded-md">
-                                {(viewingStaffMember.serviceHistory || []).length === 0 ? (
-                                  <p className="text-sm text-muted-foreground p-4 text-center">No service history recorded.</p>
-                                ) : (
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead>Type</TableHead>
-                                        <TableHead>Item</TableHead>
-                                        <TableHead>Effective Date</TableHead>
-                                        <TableHead>End Date</TableHead>
-                                        <TableHead>Notes</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {(viewingStaffMember.serviceHistory || []).sort((a,b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime()).map(entry => (
-                                        <TableRow key={entry.id}>
-                                          <TableCell><Badge variant={entry.type === "Rank" ? "secondary" : "outline"}>{entry.type}</Badge></TableCell>
-                                          <TableCell>{entry.item}</TableCell>
-                                          <TableCell>{format(new Date(entry.effectiveDate), "PP")}</TableCell>
-                                          <TableCell>{entry.endDate ? format(new Date(entry.endDate), "PP") : "N/A"}</TableCell>
-                                          <TableCell className="truncate max-w-xs">{entry.notes || "N/A"}</TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                )}
-                              </div>
-                            </AccordionContent>
-                          </AccordionItem>
-                          <AccordionItem value="training">
-                            <AccordionTrigger>
-                              <div className="flex items-center gap-2">
-                                <GraduationCap className="h-5 w-5" /> Training Records ({isLoadingViewedStaffLogs ? <Loader2 className="h-4 w-4 animate-spin"/> : viewedStaffTrainingLogs.length})
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                              <div className="max-h-[300px] overflow-y-auto border rounded-md">
-                                {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
-                                {errorViewedStaffLogs && <p className="text-sm text-destructive p-4">Error loading training records: {errorViewedStaffLogs.message}</p>}
-                                {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
-                                    <p className="text-sm text-muted-foreground p-4 text-center">No training records found for this staff member.</p>
-                                )}
-                                {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length > 0 && (
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead>Course Name</TableHead>
-                                        <TableHead>Completion Date</TableHead>
-                                        <TableHead>Qualification</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {viewedStaffTrainingLogs.map(log => (
-                                        <TableRow key={log.id}>
-                                          <TableCell>{log.courseName}</TableCell>
-                                          <TableCell>{log.completionDate && isValidDate(new Date(log.completionDate)) ? format(new Date(log.completionDate), "PP") : "Invalid Date"}</TableCell>
-                                          <TableCell>{log.qualificationAchieved || log.instructorQualification || "N/A"}</TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                )}
-                              </div>
-                            </AccordionContent>
-                          </AccordionItem>
-
-                          <AccordionItem value="meetings">
-                            <AccordionTrigger>
-                              <div className="flex items-center gap-2">
-                               <FileText className="h-5 w-5" /> Meetings Attended
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                               <p className="text-sm text-muted-foreground p-4 text-center">Meeting attendance data not yet integrated.</p>
-                            </AccordionContent>
-                          </AccordionItem>
-
-                          <AccordionItem value="pdps">
-                            <AccordionTrigger>
-                              <div className="flex items-center gap-2">
-                                <Briefcase className="h-5 w-5" /> Professional Development
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                <p className="text-sm text-muted-foreground p-4 text-center">PDP data not yet integrated.</p>
-                            </AccordionContent>
-                          </AccordionItem>
-
-                          <AccordionItem value="discipline">
-                            <AccordionTrigger>
-                                <div className="flex items-center gap-2">
-                                    <Gavel className="h-5 w-5" /> Discipline Actions
-                                </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                 <p className="text-sm text-muted-foreground p-4 text-center">Discipline action data not yet integrated.</p>
-                            </AccordionContent>
-                          </AccordionItem>
-
-                          <AccordionItem value="audits">
-                            <AccordionTrigger>
-                                <div className="flex items-center gap-2">
-                                    <ShieldCheck className="h-5 w-5" /> Safety Audits Involvement
-                                </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                                <p className="text-sm text-muted-foreground p-4 text-center">Safety audit involvement data not yet integrated.</p>
-                            </AccordionContent>
-                          </AccordionItem>
-                        </Accordion>
-                      </div>
-                </div>
-                <DialogFooter className="pt-4 border-t gap-2">
-                    <Button variant="outline" onClick={() => {
-                      if (viewingStaffMember) {
-                        handleEdit(viewingStaffMember);
-                      }
-                    }}
-                    disabled={updateStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
-                    >
-                        <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
-                    </Button>
-                    <Button
-                        variant="default"
-                        onClick={() => viewingStaffMember && handleExportFullProfilePdf(viewingStaffMember, viewedStaffTrainingLogs)}
-                        disabled={isLoadingViewedStaffLogs || updateStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}
-                    >
-                        {isLoadingViewedStaffLogs && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Full Profile (PDF)
-                    </Button>
-                    <Button onClick={closeViewDialog} disabled={updateStaffMutation.isPending || isImportingStaffCsv || isImportingAccomplishments}>Close</Button>
-                </DialogFooter>
-            </DialogContent>
-         </Dialog>
+        <Dialog open={!!viewingStaffMember} onOpenChange={closeViewDialog}>
+          <DialogContent className="sm:max-w-4xl">
+              <StaffDetailsContent 
+                staffMember={viewingStaffMember} 
+                onEdit={handleEdit}
+                isMutationPending={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}
+              />
+              <DialogFooter className="pt-4 border-t gap-2">
+                 <Button onClick={closeViewDialog} disabled={isLoadingAnyMutation || isImportingStaffCsv || isImportingAccomplishments}>Close</Button>
+              </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {staffToDelete && (
@@ -1757,6 +1756,7 @@ export default function StaffPage() {
     </div>
   );
 }
+
 
 
 
