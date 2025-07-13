@@ -3,7 +3,7 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { staffMemberSchema, type StaffMember, RANKS } from "../staff-schema";
+import { staffMemberSchema, type StaffMember, RANKS, STAFF_STATUSES } from "../staff-schema";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -44,17 +44,19 @@ interface StaffFormProps {
 export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubmitting }: StaffFormProps) {
   const form = useForm<StaffMember>({
     resolver: zodResolver(staffMemberSchema),
-    defaultValues: defaultValues || {
-      serviceNumber: "",
-      rank: undefined,
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      role: "",
-      joinDate: undefined,
-      squadron: "",
-      address: "", // Added address
+    defaultValues: {
+      ...defaultValues,
+      serviceNumber: defaultValues?.serviceNumber || "",
+      rank: defaultValues?.rank,
+      firstName: defaultValues?.firstName || "",
+      lastName: defaultValues?.lastName || "",
+      email: defaultValues?.email || "",
+      phone: defaultValues?.phone || "",
+      role: defaultValues?.role || "",
+      joinDate: defaultValues?.joinDate,
+      squadron: defaultValues?.squadron || "",
+      address: defaultValues?.address || "",
+      status: defaultValues?.status || "Active",
     },
   });
 
@@ -232,19 +234,44 @@ export function StaffForm({ onSubmit, defaultValues, onCancel, isEditing, isSubm
               </FormItem>
             )}
           />
-            <FormField
-              control={form.control}
-              name="address"
-              render={({ field }) => (
-                <FormItem className="md:col-span-2">
-                  <FormLabel>Address (Optional)</FormLabel>
+          <FormField
+            control={form.control}
+            name="status"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Status</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting}>
                   <FormControl>
-                    <Textarea placeholder="123 Main St, Anytown" {...field} rows={3} disabled={isSubmitting} />
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a status" />
+                    </SelectTrigger>
                   </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                  <SelectContent>
+                    {STAFF_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormDescription>UAL or Pending Discharge will hide from default compliance lists.</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="address"
+            render={({ field }) => (
+              <FormItem className="md:col-span-2">
+                <FormLabel>Address (Optional)</FormLabel>
+                <FormControl>
+                  <Textarea placeholder="123 Main St, Anytown" {...field} rows={3} disabled={isSubmitting} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
         </div>
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>

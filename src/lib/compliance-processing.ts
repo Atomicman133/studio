@@ -138,6 +138,7 @@ export function processComplianceReports(
       staffServiceNumberActual: staffServiceNumberActual,
       complianceStatusText,
       complianceStatusVariant,
+      status: staff.status || "Active",
     };
   })
   .sort((a,b) => {
@@ -182,6 +183,8 @@ export function getExpiringAccomplishments(
     const thresholdDate = addDays(today, daysThreshold);
     const expiring: ExpiringAccomplishment[] = [];
 
+    const activeStaff = staffList.filter(s => (s.status || 'Active') === 'Active');
+
     trainingLogs.forEach(log => {
         COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
             if (criterion.identifier(log) && criterion.yearsToExpire) {
@@ -189,15 +192,17 @@ export function getExpiringAccomplishments(
                 if (!isValidDate(completionDate)) return;
                 const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
                 if (isAfter(expiryDate, today) && isBefore(expiryDate, thresholdDate)) {
-                    const staffMember = staffList.find(s => s.serviceNumber === log.serviceNumber);
-                    expiring.push({
-                        staffName: staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : log.staffName,
-                        staffRank: staffMember ? staffMember.rank : log.rank,
-                        squadron: staffMember ? staffMember.squadron || "N/A" : log.squadron,
-                        courseName: `${criterion.name} (${log.courseName})`,
-                        expiryDate: expiryDate,
-                        daysLeft: differenceInDays(expiryDate, today)
-                    });
+                    const staffMember = activeStaff.find(s => s.serviceNumber === log.serviceNumber);
+                    if (staffMember) { // Only add if the staff member is active
+                      expiring.push({
+                          staffName: `${staffMember.firstName} ${staffMember.lastName}`,
+                          staffRank: staffMember.rank,
+                          squadron: staffMember.squadron || "N/A",
+                          courseName: `${criterion.name} (${log.courseName})`,
+                          expiryDate: expiryDate,
+                          daysLeft: differenceInDays(expiryDate, today)
+                      });
+                    }
                 }
             }
         });

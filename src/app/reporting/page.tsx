@@ -111,13 +111,17 @@ export default function CompliancePage() {
   }, [staffList, trainingLogs, isLoadingStaff, isLoadingLogs]);
 
   const filteredComplianceReports = React.useMemo(() => {
-    if (!searchQuery) return complianceReports;
-    const lowercasedQuery = searchQuery.toLowerCase();
-    return complianceReports.filter(report =>
-      report.staffMemberName.toLowerCase().includes(lowercasedQuery) ||
-      (report.staffServiceNumberActual && report.staffServiceNumberActual.includes(lowercasedQuery)) ||
-      report.squadron.toLowerCase().includes(lowercasedQuery)
-    );
+    if (searchQuery) {
+      const lowercasedQuery = searchQuery.toLowerCase();
+      // Search across ALL reports, regardless of status
+      return complianceReports.filter(report =>
+        report.staffMemberName.toLowerCase().includes(lowercasedQuery) ||
+        (report.staffServiceNumberActual && report.staffServiceNumberActual.includes(lowercasedQuery)) ||
+        report.squadron.toLowerCase().includes(lowercasedQuery)
+      );
+    }
+    // If no search query, filter out UAL and Pending Discharge staff
+    return complianceReports.filter(report => report.status === 'Active');
   }, [complianceReports, searchQuery]);
 
 
@@ -188,6 +192,20 @@ export default function CompliancePage() {
         yPos = margin + headerHeight + 5;
       }
     };
+    
+    // Add UAL/Pending Discharge watermark if applicable
+    if (report.status === 'UAL' || report.status === 'Pending Discharge') {
+      await checkPageBreak(20);
+      doc.setFontSize(48);
+      doc.setTextColor(255, 0, 0);
+      doc.setFont(undefined, 'bold');
+      doc.text(report.status.toUpperCase(), pageWidth / 2, yPos + 10, {
+        align: 'center',
+      });
+      doc.setTextColor(0); // Reset color
+      yPos += 20; // Add space after watermark
+    }
+
 
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
@@ -308,21 +326,23 @@ export default function CompliancePage() {
     await checkPageBreak();
     doc.text(`Generated on: ${currentDate}`, pageWidth / 2, yPos, { align: "center" });
     yPos += sectionSpacing * 1.5;
+    
+    const activeStaffReports = complianceReports.filter(r => r.status === 'Active');
 
     // --- Overall Compliance Counts ---
-    const compliantCount = complianceReports.filter(r => r.complianceStatusText === "Compliant").length;
-    const partiallyCompliantCount = complianceReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
-    const nonCompliantCount = complianceReports.filter(r => r.complianceStatusText === "Not Compliant").length;
+    const compliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Compliant").length;
+    const partiallyCompliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
+    const nonCompliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Not Compliant").length;
 
     doc.setFontSize(14);
     doc.setFont(undefined, 'bold');
     await checkPageBreak(lineSpacing);
-    doc.text("Overall Compliance Status:", pageMargin, yPos);
+    doc.text("Active Staff Compliance Status:", pageMargin, yPos);
     yPos += lineSpacing * 1.5;
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
     await checkPageBreak(lineSpacing * 3);
-    doc.text(`Total Staff: ${complianceReports.length}`, pageMargin, yPos); yPos += lineSpacing;
+    doc.text(`Total Active Staff: ${activeStaffReports.length}`, pageMargin, yPos); yPos += lineSpacing;
     doc.text(`Compliant: ${compliantCount}`, pageMargin, yPos); yPos += lineSpacing;
     doc.text(`Partially Compliant: ${partiallyCompliantCount}`, pageMargin, yPos); yPos += lineSpacing;
     doc.text(`Not Compliant: ${nonCompliantCount}`, pageMargin, yPos);
@@ -332,12 +352,12 @@ export default function CompliancePage() {
     doc.setFontSize(14);
     doc.setFont(undefined, 'bold');
     await checkPageBreak(lineSpacing);
-    doc.text("Non-Compliance by Category:", pageMargin, yPos);
+    doc.text("Non-Compliance by Category (Active Staff):", pageMargin, yPos);
     yPos += lineSpacing * 1.5;
     doc.setFontSize(10);
 
     for (const criterion of COMPLIANCE_CRITERIA_CONFIG) {
-        const nonCompliantForCriterion = complianceReports.filter(report =>
+        const nonCompliantForCriterion = activeStaffReports.filter(report =>
             !report.criteriaChecks.find(c => c.key === criterion.key)?.isMet
         ).length;
         if (await checkPageBreak()) {
@@ -353,7 +373,7 @@ export default function CompliancePage() {
 
     // --- Detailed Staff List ---
     let currentSquadron = "";
-    for (const report of complianceReports) {
+    for (const report of activeStaffReports) {
       if (report.squadron !== currentSquadron) {
         if (currentSquadron !== "") {
             yPos += sectionSpacing / 2;
@@ -676,6 +696,7 @@ export default function CompliancePage() {
                         <TableCell>{report.squadron}</TableCell>
                         <TableCell className="font-medium">
                           {report.staffMemberRank} {report.staffMemberName}
+                          {report.status !== 'Active' && <Badge variant="destructive" className="ml-2">{report.status}</Badge>}
                         </TableCell>
                         <TableCell>
                           <Badge variant={report.complianceStatusVariant}>
@@ -735,7 +756,7 @@ export default function CompliancePage() {
         </CardContent>
         {!isLoadingAny && !errorAny && complianceReports.length > 0 && (
           <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
-            {searchQuery ? `Showing ${filteredComplianceReports.length} of ${complianceReports.length} total reports.` : `Displaying compliance reports for ${complianceReports.length} staff member(s).`}
+            {searchQuery ? `Showing ${filteredComplianceReports.length} of ${complianceReports.length} total reports.` : `Displaying ${filteredComplianceReports.length} of ${complianceReports.length} active staff reports.`}
           </CardFooter>
         )}
       </Card>

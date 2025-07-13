@@ -645,6 +645,7 @@ export default function StaffPage() {
             squadron: squadron,
             address: address,
             joinDate: existingStaffMember?.joinDate || null,
+            status: existingStaffMember?.status || 'Active',
           };
 
           if (existingStaffMember) {
@@ -1097,6 +1098,21 @@ export default function StaffPage() {
             yPos = margin + headerHeight + 5;
         }
     };
+    
+    // Add UAL/Pending Discharge watermark if applicable
+    const staffStatus = staffMember.status || 'Active';
+    if (staffStatus === 'UAL' || staffStatus === 'Pending Discharge') {
+      await checkPageBreak(20);
+      doc.setFontSize(48);
+      doc.setTextColor(255, 0, 0);
+      doc.setFont(undefined, 'bold');
+      doc.text(staffStatus.toUpperCase(), pageWidth / 2, yPos + 10, {
+        align: 'center',
+      });
+      doc.setTextColor(0); // Reset color
+      yPos += 20; // Add space after watermark
+    }
+
 
     const addSectionTitle = async (title: string) => {
       await checkPageBreak(sectionSpacing + 14);
@@ -1337,7 +1353,12 @@ export default function StaffPage() {
                           <TableRow key={staff.id}>
                             <TableCell>{staff.serviceNumber}</TableCell>
                             <TableCell>{staff.rank}</TableCell>
-                            <TableCell className="font-medium">{`${staff.firstName} ${staff.lastName}`}</TableCell>
+                            <TableCell className="font-medium">
+                              {`${staff.firstName} ${staff.lastName}`}
+                              {(staff.status === 'UAL' || staff.status === 'Pending Discharge') && (
+                                <Badge variant="destructive" className="ml-2">{staff.status}</Badge>
+                              )}
+                            </TableCell>
                             <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role || "N/A"}</TableCell>
                             <TableCell className="hidden lg:table-cell">
                               {staff.joinDate && isValidDate(new Date(staff.joinDate)) ? format(new Date(staff.joinDate), "PP") : "N/A"}
@@ -1419,7 +1440,6 @@ export default function StaffPage() {
         <AlertTitle>Accomplishments CSV Import Instructions</AlertTitle>
         <AlertDescription>
           To bulk import training, positions, or ranks, upload a CSV file. The header row is required.
-          The system expects the following headers:
           <code className="block whitespace-pre-wrap bg-muted p-2 rounded-md my-2 text-xs">Unit_1,Surname,EffectiveDate,EndDate,ChangeType,StatusName,Details,Comment</code>
           <ul className="list-disc pl-5 mt-2 text-xs space-y-1">
             <li><code>Unit_1</code>: Populates 'Squadron' for new training log entries.</li>
@@ -1459,17 +1479,15 @@ export default function StaffPage() {
                 : "Fill in the form to add a new staff member."}
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[70vh] p-1">
-            <div className="py-4 pr-4">
-                <StaffForm
-                  onSubmit={editingStaff ? handleUpdateStaff : handleAddStaff}
-                  defaultValues={editingStaff || undefined}
-                  onCancel={closeForm}
-                  isEditing={!!editingStaff}
-                  isSubmitting={editingStaff ? updateStaffMutation.isPending : addStaffMutation.isPending}
-                />
-            </div>
-          </ScrollArea>
+          <div className="py-4 pr-1">
+              <StaffForm
+                onSubmit={editingStaff ? handleUpdateStaff : handleAddStaff}
+                defaultValues={editingStaff || undefined}
+                onCancel={closeForm}
+                isEditing={!!editingStaff}
+                isSubmitting={editingStaff ? updateStaffMutation.isPending : addStaffMutation.isPending}
+              />
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -1487,7 +1505,7 @@ export default function StaffPage() {
                        {' '}| Role: {viewingStaffMember.role || "N/A"} | Squadron: {viewingStaffMember.squadron || 'N/A'}
                     </DialogDescription>
                 </DialogHeader>
-                <ScrollArea className="max-h-[70vh] p-1 pr-4">
+                <div className="max-h-[70vh] overflow-y-auto p-1 pr-4">
                     <div className="space-y-6 py-4">
                       <Card>
                           <CardHeader>
@@ -1551,7 +1569,7 @@ export default function StaffPage() {
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                              <div className="overflow-y-auto max-h-[300px] border rounded-md">
+                              <div className="max-h-[300px] overflow-y-auto border rounded-md">
                                 {(viewingStaffMember.serviceHistory || []).length === 0 ? (
                                   <p className="text-sm text-muted-foreground p-4 text-center">No service history recorded.</p>
                                 ) : (
@@ -1588,7 +1606,7 @@ export default function StaffPage() {
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                              <div className="overflow-y-auto max-h-[300px] border rounded-md">
+                              <div className="max-h-[300px] overflow-y-auto border rounded-md">
                                 {isLoadingViewedStaffLogs && <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
                                 {errorViewedStaffLogs && <p className="text-sm text-destructive p-4">Error loading training records: {errorViewedStaffLogs.message}</p>}
                                 {!isLoadingViewedStaffLogs && !errorViewedStaffLogs && viewedStaffTrainingLogs.length === 0 && (
@@ -1663,7 +1681,7 @@ export default function StaffPage() {
                           </AccordionItem>
                         </Accordion>
                       </div>
-                </ScrollArea>
+                </div>
                 <DialogFooter className="pt-4 border-t gap-2">
                     <Button variant="outline" onClick={() => {
                       if (viewingStaffMember) {

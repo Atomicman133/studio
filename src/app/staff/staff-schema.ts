@@ -19,6 +19,8 @@ export const RANKS = [
   "GPCAPT(AAFC)",
 ] as const;
 
+export const STAFF_STATUSES = ["Active", "UAL", "Pending Discharge"] as const;
+
 export const serviceHistoryEntrySchema = z.object({
   id: z.string().uuid().optional(), // IDs for these are generated as UUIDs
   type: z.enum(["Rank", "Position"]),
@@ -42,6 +44,7 @@ export const staffMemberSchema = z.object({
   squadron: z.string().optional(),
   address: z.string().optional(),
   serviceHistory: z.array(serviceHistoryEntrySchema).optional().default([]),
+  status: z.enum(STAFF_STATUSES).default("Active").optional(),
 });
 
 export type StaffMember = z.infer<typeof staffMemberSchema>;

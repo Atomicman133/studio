@@ -1,5 +1,5 @@
 
-import type { StaffMember } from "@/app/staff/staff-schema";
+import type { StaffMember, STAFF_STATUSES } from "@/app/staff/staff-schema";
 import type { TrainingLog } from "@/app/training/training-schema";
 
 export interface ComplianceCriterionCheck {
@@ -21,6 +21,7 @@ export interface StaffComplianceReport {
   staffServiceNumberActual?: string; // Explicit field for the staff member's actual service number
   complianceStatusText: "Compliant" | "Partially Compliant" | "Not Compliant";
   complianceStatusVariant: "default" | "secondary" | "destructive";
+  status: typeof STAFF_STATUSES[number];
 }
 
 // Helper function for flexible keyword matching (case-insensitive)
