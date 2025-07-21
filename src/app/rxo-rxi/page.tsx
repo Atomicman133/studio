@@ -5,7 +5,7 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, UserCheck, Loader2, Download, ClipboardList } from "lucide-react";
+import { AlertTriangle, UserCheck, Loader2, Download, ClipboardList, ListFilter } from "lucide-react";
 import { format } from "date-fns";
 
 import type { StaffMember } from "../staff/staff-schema";
@@ -34,6 +34,9 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, getRegionForSquadron } from '@/lib/utils';
 import { processComplianceReports } from "@/lib/compliance-processing";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AttendanceReportGenerator } from "./components/attendance-report-generator";
+
 
 const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
 const RENDER_ORDER = ['Headquarters', 'North', 'South', 'East', 'West'];
@@ -196,65 +199,77 @@ export default function RxoRxiPage() {
                         <ClipboardList className="h-8 w-8 text-primary hidden sm:block" />
                         <div>
                             <CardTitle className="text-2xl">RXO / RXI Dashboard</CardTitle>
-                            <CardDescription>Regional overview of active staff compliance metrics.</CardDescription>
+                            <CardDescription>Regional overview of active staff compliance metrics and attendance reporting.</CardDescription>
                         </div>
                     </div>
                 </CardHeader>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                {RENDER_ORDER.map(region => {
-                    const data = regionalData[region];
-                    const totalStaff = data.reports.length;
-                    const pieData = [
-                        { name: 'Compliant', value: data.summary.compliant, fill: chartConfig.compliant.color, statusText: 'Compliant' as const },
-                        { name: 'Partially Compliant', value: data.summary.partiallyCompliant, fill: chartConfig.partiallyCompliant.color, statusText: 'Partially Compliant' as const },
-                        { name: 'Non-Compliant', value: data.summary.nonCompliant, fill: chartConfig.nonCompliant.color, statusText: 'Not Compliant' as const },
-                    ].filter(item => item.value > 0);
+            <Tabs defaultValue="regional-compliance" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="regional-compliance">Regional Compliance</TabsTrigger>
+                    <TabsTrigger value="attendance-reporting">Attendance Reporting</TabsTrigger>
+                </TabsList>
+                <TabsContent value="regional-compliance" className="mt-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                        {RENDER_ORDER.map(region => {
+                            const data = regionalData[region];
+                            const totalStaff = data.reports.length;
+                            const pieData = [
+                                { name: 'Compliant', value: data.summary.compliant, fill: chartConfig.compliant.color, statusText: 'Compliant' as const },
+                                { name: 'Partially Compliant', value: data.summary.partiallyCompliant, fill: chartConfig.partiallyCompliant.color, statusText: 'Partially Compliant' as const },
+                                { name: 'Non-Compliant', value: data.summary.nonCompliant, fill: chartConfig.nonCompliant.color, statusText: 'Not Compliant' as const },
+                            ].filter(item => item.value > 0);
 
-                    return (
-                        <Card key={region} className="shadow-lg flex flex-col">
-                            <CardHeader className="text-center">
-                                <CardTitle className="text-xl">{region}</CardTitle>
-                                <CardDescription>{totalStaff} Active Staff</CardDescription>
-                            </CardHeader>
-                            <CardContent className="pt-4 flex-grow flex flex-col justify-center items-center">
-                                {totalStaff > 0 ? (
-                                    <ChartContainer config={chartConfig} className="aspect-square h-[200px]">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <PieChart>
-                                                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                                                <Pie
-                                                    data={pieData}
-                                                    dataKey="value"
-                                                    nameKey="name"
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    outerRadius={80}
-                                                    innerRadius={60}
-                                                    strokeWidth={2}
-                                                    labelLine={false}
-                                                    onClick={(segmentData) => handlePieSegmentClick(region, segmentData.statusText)}
-                                                >
-                                                    {pieData.map((entry) => (
-                                                        <Cell key={entry.name} fill={entry.fill} />
-                                                    ))}
-                                                </Pie>
-                                                <Legend content={<ChartTooltipContent nameKey="name" hideIndicator />} />
-                                            </PieChart>
-                                        </ResponsiveContainer>
-                                    </ChartContainer>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
-                                        <UserCheck className="h-10 w-10 mb-2" />
-                                        <p>No active staff.</p>
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    );
-                })}
-            </div>
+                            return (
+                                <Card key={region} className="shadow-lg flex flex-col">
+                                    <CardHeader className="text-center">
+                                        <CardTitle className="text-xl">{region}</CardTitle>
+                                        <CardDescription>{totalStaff} Active Staff</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="pt-4 flex-grow flex flex-col justify-center items-center">
+                                        {totalStaff > 0 ? (
+                                            <ChartContainer config={chartConfig} className="aspect-square h-[200px]">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <PieChart>
+                                                        <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                                                        <Pie
+                                                            data={pieData}
+                                                            dataKey="value"
+                                                            nameKey="name"
+                                                            cx="50%"
+                                                            cy="50%"
+                                                            outerRadius={80}
+                                                            innerRadius={60}
+                                                            strokeWidth={2}
+                                                            labelLine={false}
+                                                            onClick={(segmentData) => handlePieSegmentClick(region, segmentData.statusText)}
+                                                        >
+                                                            {pieData.map((entry) => (
+                                                                <Cell key={entry.name} fill={entry.fill} />
+                                                            ))}
+                                                        </Pie>
+                                                        <Legend content={<ChartTooltipContent nameKey="name" hideIndicator />} />
+                                                    </PieChart>
+                                                </ResponsiveContainer>
+                                            </ChartContainer>
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
+                                                <UserCheck className="h-10 w-10 mb-2" />
+                                                <p>No active staff.</p>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            );
+                        })}
+                    </div>
+                </TabsContent>
+                <TabsContent value="attendance-reporting" className="mt-6">
+                    <AttendanceReportGenerator />
+                </TabsContent>
+            </Tabs>
+
 
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
                 <DialogContent className="sm:max-w-4xl">
