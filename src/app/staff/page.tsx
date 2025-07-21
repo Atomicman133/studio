@@ -1183,6 +1183,22 @@ export default function StaffPage() {
 
     const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
     const staffMapByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
+    
+    // Fetch all logs once for de-duplication check
+    const allTrainingLogs: TrainingLog[] = queryClient.getQueryData([TRAINING_LOGS_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [TRAINING_LOGS_QUERY_KEY], queryFn: async () => {
+        const querySnapshot = await getDocs(query(collection(db, "trainingLogs")));
+        return querySnapshot.docs.map(d => convertTrainingLogTimestamps(d.data()));
+    }});
+    const logsByServiceNumber = new Map<string, TrainingLog[]>();
+    allTrainingLogs.forEach(log => {
+        if (log.serviceNumber) {
+            if (!logsByServiceNumber.has(log.serviceNumber)) {
+                logsByServiceNumber.set(log.serviceNumber, []);
+            }
+            logsByServiceNumber.get(log.serviceNumber)!.push(log);
+        }
+    });
+
 
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -1309,7 +1325,22 @@ export default function StaffPage() {
                   }
               } else {
                   if (!details) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Accomplishment missing 'Details'.`); continue; }
-                  allOperations.push({ type: 'log', payload: {
+
+                  // --- DUPLICATION CHECK ---
+                  const existingLogsForStaff = logsByServiceNumber.get(matchedStaffFromMap.serviceNumber) || [];
+                  const isDuplicate = existingLogsForStaff.some(log =>
+                      log.courseName.toLowerCase() === details.toLowerCase() &&
+                      isValidDate(log.completionDate) &&
+                      startOfDay(log.completionDate).getTime() === startOfDay(effectiveDate).getTime()
+                  );
+
+                  if (isDuplicate) {
+                      skippedRecordsLog.push(`Row ${i + 1}: Skipped - Duplicate accomplishment for SN ${matchedStaffFromMap.serviceNumber} on ${format(effectiveDate, 'dd/MM/yy')}.`);
+                      continue;
+                  }
+                  // --- END DUPLICATION CHECK ---
+
+                  const logPayload = {
                       rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
                       staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
                       squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
@@ -1320,7 +1351,13 @@ export default function StaffPage() {
                       instructorQualification: "",
                       achievementDetails: csvRowData["Comment"]?.trim() || "",
                       serviceNumber: matchedStaffFromMap.serviceNumber,
-                  }});
+                  };
+                  allOperations.push({ type: 'log', payload: logPayload });
+                   // Also add to the temporary map to prevent duplicates within the same import file
+                  const tempLogs = logsByServiceNumber.get(matchedStaffFromMap.serviceNumber) || [];
+                  tempLogs.push(logPayload as TrainingLog);
+                  logsByServiceNumber.set(matchedStaffFromMap.serviceNumber, tempLogs);
+
               }
               staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
@@ -1679,7 +1716,7 @@ export default function StaffPage() {
             <li><code>Comment</code>: (Text) Populates 'notes' for service history entries or 'achievementDetails' for training logs.</li>
           </ul>
            <p className="mt-2 text-xs">
-            <strong>Important:</strong> Staff profiles must exist for each `MemberUID` for any processing to occur. The "Surname" field must be parsable for UID, Rank, and Name.
+            <strong>Important:</strong> Staff profiles must exist for each `MemberUID` for any processing to occur. The "Surname" field must be parsable for UID, Rank, and Name. If an accomplishment with the same course name and completion date already exists for a staff member, it will be ignored to prevent duplicates.
           </p>
         </AlertDescription>
       </Alert>
