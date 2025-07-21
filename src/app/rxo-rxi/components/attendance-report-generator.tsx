@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ReportHeader {
   unit: string;
