@@ -27,6 +27,61 @@ interface MemberReport {
   notAttended: { name: string; attendance: string }[];
 }
 
+const robustCsvParser = (csvText: string): string[][] => {
+    const rows: string[][] = [];
+    if (!csvText || csvText.trim() === "") return rows;
+
+    let currentRow: string[] = [];
+    let currentField = "";
+    let inQuotedField = false;
+    const normalizedText = csvText.replace(/\r\n|\r/g, '\n');
+
+    for (let i = 0; i < normalizedText.length; i++) {
+        const char = normalizedText[i];
+
+        if (inQuotedField) {
+            if (char === '"') {
+                if (i + 1 < normalizedText.length && normalizedText[i + 1] === '"') {
+                    currentField += '"';
+                    i++;
+                } else {
+                    inQuotedField = false;
+                }
+            } else {
+                currentField += char;
+            }
+        } else {
+            if (char === '"') {
+                if (currentField.trim() === "") {
+                    inQuotedField = true;
+                } else {
+                    currentField += char;
+                }
+            } else if (char === ',') {
+                currentRow.push(currentField.trim());
+                currentField = "";
+            } else if (char === '\n') {
+                currentRow.push(currentField.trim());
+                currentField = "";
+                if (currentRow.length > 0 && (rows.length > 0 ? currentRow.some(f => f.trim() !== "") : true) ) {
+                    rows.push([...currentRow]);
+                }
+                currentRow = [];
+            } else {
+                currentField += char;
+            }
+        }
+    }
+    if (currentField || currentRow.length > 0) {
+        currentRow.push(currentField.trim());
+    }
+    if (currentRow.length > 0 && currentRow.some(f => f.trim() !== "")) {
+        rows.push([...currentRow]);
+    }
+    return rows;
+};
+
+
 export function AttendanceReportGenerator() {
   const { toast } = useToast();
   const [file, setFile] = React.useState<File | null>(null);
@@ -59,42 +114,66 @@ export function AttendanceReportGenerator() {
     reader.onload = (e) => {
       try {
         const text = e.target?.result as string;
-        const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
+        const allRows = robustCsvParser(text);
 
-        if (lines.length < 4) {
+        if (allRows.length < 4) {
           throw new Error("CSV file is missing required header or data rows.");
         }
 
-        // Parse Header
-        const headerDataLine = lines[1];
-        const unitMatch = headerDataLine.match(/Unit:\s*([^,]+)/);
-        const startDateMatch = headerDataLine.match(/Start date:\s*([^,]+)/);
-        const endDateMatch = headerDataLine.match(/End date:\s*([^,]+)/);
-        if (!unitMatch || !startDateMatch || !endDateMatch) {
-          throw new Error("Could not parse report header from the CSV file.");
+        // --- New Header Parsing Logic ---
+        const headerRow = allRows[0];
+        const headerDataRow = allRows[1];
+        
+        const unitIndex = headerRow.findIndex(h => h.toLowerCase().includes('unit'));
+        const startDateIndex = headerRow.findIndex(h => h.toLowerCase().includes('startdate'));
+        const endDateIndex = headerRow.findIndex(h => h.toLowerCase().includes('enddate'));
+
+        if (unitIndex === -1 || startDateIndex === -1 || endDateIndex === -1) {
+            throw new Error("Could not find 'Unit', 'Startdate', or 'Enddate' columns in the CSV header.");
         }
+
+        const unitValue = headerDataRow[unitIndex]?.replace(/Unit:\s*/, '').trim();
+        const startDateValue = headerDataRow[startDateIndex]?.replace(/Start date:\s*/, '').trim();
+        const endDateValue = headerDataRow[endDateIndex]?.replace(/End date:\s*/, '').trim();
+
+        if (!unitValue || !startDateValue || !endDateValue) {
+            throw new Error("Header data (Unit, Start Date, End Date) is missing or empty.");
+        }
+        
         const header: ReportHeader = {
-          unit: unitMatch[1].trim(),
-          startDate: startDateMatch[1].trim(),
-          endDate: endDateMatch[1].trim(),
+          unit: unitValue,
+          startDate: startDateValue,
+          endDate: endDateValue,
         };
         setReportHeader(header);
+        // --- End New Header Parsing Logic ---
 
-        // Parse Member Data
-        const memberDataLines = lines.slice(3);
+
+        // Parse Member Data - find the correct column for member name and activity
+        const memberDataHeaderRow = allRows[2];
+        const memberNameIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('member'));
+        const activityNameIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('activity'));
+        const attendanceIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('attendance'));
+
+        if (memberNameIndex === -1 || activityNameIndex === -1 || attendanceIndex === -1) {
+             throw new Error("Could not find 'Member', 'Activity', or 'Attendance' columns for the member data section.");
+        }
+
+        const memberDataLines = allRows.slice(3);
         const groupedByMember: Record<string, { name: string; attendance: string }[]> = {};
 
-        memberDataLines.forEach(line => {
-          const parts = line.split(',');
-          if (parts.length >= 3) {
-            const memberName = parts[0].trim();
-            const activityName = parts[1].trim();
-            const attendance = parts[2].trim();
+        memberDataLines.forEach(lineParts => {
+          if (lineParts.length > Math.max(memberNameIndex, activityNameIndex, attendanceIndex)) {
+            const memberName = lineParts[memberNameIndex].trim();
+            const activityName = lineParts[activityNameIndex].trim();
+            const attendance = lineParts[attendanceIndex].trim();
 
-            if (!groupedByMember[memberName]) {
-              groupedByMember[memberName] = [];
+            if (memberName && activityName) { // Ensure member and activity names are not empty
+                if (!groupedByMember[memberName]) {
+                  groupedByMember[memberName] = [];
+                }
+                groupedByMember[memberName].push({ name: activityName, attendance });
             }
-            groupedByMember[memberName].push({ name: activityName, attendance });
           }
         });
 
