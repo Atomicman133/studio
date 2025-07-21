@@ -281,8 +281,22 @@ export function AttendanceReportGenerator() {
 
       checkPageBreak(lineSpacing);
       const percentageText = `Attendance Percentage: ${member.attendancePercentage.toFixed(2)}%`;
+      
+      // Apply color coding for percentage
+      const percentage = member.attendancePercentage;
+      if (percentage < 75) {
+        doc.setTextColor(239, 68, 68); // Red
+      } else if (percentage >= 75 && percentage <= 80) {
+        doc.setTextColor(234, 179, 8); // Yellow
+      } else {
+        doc.setTextColor(34, 197, 94); // Green
+      }
+      doc.setFont(undefined, 'bold');
       doc.text(percentageText, margin + indent, yPos);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(0, 0, 0); // Reset color to black
       yPos += lineSpacing;
+
 
       if (member.notAttended.length > 0) {
         checkPageBreak(lineSpacing);
