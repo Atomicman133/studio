@@ -20,13 +20,13 @@ const AttendanceClassificationSchema = z.object({
         ),
 });
 
-export const ClassifyAttendanceBatchInputSchema = z.object({
+const ClassifyAttendanceBatchInputSchema = z.object({
   texts: z.array(z.string()).describe('An array of attendance comment texts to classify.'),
 });
 export type ClassifyAttendanceBatchInput = z.infer<typeof ClassifyAttendanceBatchInputSchema>;
 
 
-export const ClassifyAttendanceBatchOutputSchema = z.object({
+const ClassifyAttendanceBatchOutputSchema = z.object({
     classifications: z.array(AttendanceClassificationSchema),
 });
 export type ClassifyAttendanceBatchOutput = z.infer<typeof ClassifyAttendanceBatchOutputSchema>;
