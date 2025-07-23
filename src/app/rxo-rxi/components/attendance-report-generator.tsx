@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { UploadCloud, FileDown, Loader2, BarChart2, Sparkles } from "lucide-react";
+import { UploadCloud, FileDown, Loader2, BarChart2, Sparkles, FileSpreadsheet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 import jsPDF from 'jspdf';
@@ -403,18 +403,28 @@ export function AttendanceReportGenerator() {
     setIsLoading(false);
   };
   
-   const handleDownloadDetailedPdf = async () => {
+  const handleDownloadDetailedCsv = () => {
     if (!detailedGridData) {
         toast({ variant: "destructive", title: "No data to export" });
         return;
     }
     
     setIsLoading(true);
-    const doc = new jsPDF('landscape');
-    resetLetterheadCache();
 
-    const head = [['Member', 'P', 'L', 'S', 'A', '%PLS', ...detailedGridData.uniqueActivities]];
-    const body = detailedGridData.memberRows.map(row => [
+    const escapeCsvField = (field: any): string => {
+        const str = String(field ?? '');
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    };
+    
+    const headerRow1 = [`Unit: ${detailedGridData.header.unit}`];
+    const headerRow2 = [`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`];
+    
+    const tableHeader = ['Member', 'P', 'L', 'S', 'A', '%PLS', ...detailedGridData.uniqueActivities].map(escapeCsvField);
+
+    const tableRows = detailedGridData.memberRows.map(row => [
         row.memberName,
         row.presentCount,
         row.leaveCount,
@@ -422,36 +432,29 @@ export function AttendanceReportGenerator() {
         row.absentCount,
         row.plsPercentage,
         ...detailedGridData.uniqueActivities.map(activity => row.activityMap[activity] || '')
-    ]);
+    ].map(escapeCsvField));
 
-    doc.setFontSize(14);
-    doc.text(`Unit: ${detailedGridData.header.unit}`, 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`, 14, 22);
+    const csvContent = [
+        headerRow1.join(','),
+        headerRow2.join(','),
+        '', // Blank line
+        tableHeader.join(','),
+        ...tableRows.map(row => row.join(','))
+    ].join('\n');
 
-    (doc as any).autoTable({
-        head: head,
-        body: body,
-        startY: 28, // Adjusted startY
-        theme: 'grid',
-        pageBreak: 'auto',
-        headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold', fontSize: 6 },
-        styles: { fontSize: 6, cellPadding: 1, overflow: 'linebreak' },
-        columnStyles: { 0: { cellWidth: 35 } },
-        didParseCell: (data: any) => {
-            const cellValue = data.cell.text[0];
-            if (data.section === 'body') {
-                if (cellValue === 'P') { data.cell.styles.fillColor = [200, 255, 200]; } // Green
-                if (cellValue === 'L') { data.cell.styles.fillColor = [255, 255, 200]; } // Yellow
-                if (cellValue === 'S') { data.cell.styles.fillColor = [200, 200, 255]; } // Blue
-                if (cellValue === 'A') { data.cell.styles.fillColor = [255, 200, 200]; } // Red
-            }
-        },
-    });
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const filename = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.csv`;
+    link.setAttribute("download", filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-    const filename = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.pdf`;
-    doc.save(filename);
     setIsLoading(false);
+    toast({ title: "CSV Exported", description: `${filename} has been downloaded.` });
   };
 
 
@@ -459,7 +462,7 @@ export function AttendanceReportGenerator() {
     <Card className="shadow-md">
       <CardHeader>
         <CardTitle>Attendance Reporting</CardTitle>
-        <CardDescription>Upload a CSV report to analyze and generate a simplified attendance PDF.</CardDescription>
+        <CardDescription>Upload a CSV report to analyze and generate attendance reports.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex flex-col items-center justify-center border-2 border-dashed border-muted rounded-lg p-8 text-center">
@@ -494,9 +497,9 @@ export function AttendanceReportGenerator() {
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
                   Download Summary Report (PDF)
                 </Button>
-                <Button onClick={handleDownloadDetailedPdf} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
-                  Download Detailed Report (PDF)
+                <Button onClick={handleDownloadDetailedCsv} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                  Download Detailed Report (CSV)
                 </Button>
               </div>
 
