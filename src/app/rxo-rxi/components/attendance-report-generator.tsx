@@ -425,17 +425,20 @@ export function AttendanceReportGenerator() {
     ]);
 
     doc.setFontSize(14);
-    doc.text(`Unit: ${detailedGridData.header.unit}`, 14, 20);
-    doc.text(`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`, 14, 28);
+    doc.text(`Unit: ${detailedGridData.header.unit}`, 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`, 14, 22);
 
     (doc as any).autoTable({
         head: head,
         body: body,
-        startY: 35,
+        startY: 28,
         theme: 'grid',
-        headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
-        styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
-        columnStyles: { 0: { cellWidth: 40 } },
+        pageBreak: 'auto',
+        headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold', fontSize: 6 },
+        styles: { fontSize: 6, cellPadding: 1, overflow: 'linebreak' },
+        columnStyles: { 0: { cellWidth: 35 } },
+        margin: { top: 28 },
         didParseCell: (data: any) => {
             const cellValue = data.cell.text[0];
             if (data.section === 'body') {
