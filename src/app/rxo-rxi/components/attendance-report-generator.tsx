@@ -250,7 +250,7 @@ export function AttendanceReportGenerator() {
                 
                 if (effectiveAttendance === 'P') {
                     p++;
-                } else if (effectiveAttendance === 'L') {
+                } else if (effectiveAttendance === 'L' || act.comment?.toLowerCase().includes('leave')) {
                     l++;
                 } else if (effectiveAttendance === 'A') {
                     a++;
@@ -403,28 +403,19 @@ export function AttendanceReportGenerator() {
     setIsLoading(false);
   };
   
-  const handleDownloadDetailedCsv = () => {
+ const handleDownloadDetailedPdf = async () => {
     if (!detailedGridData) {
         toast({ variant: "destructive", title: "No data to export" });
         return;
     }
-    
+
     setIsLoading(true);
+    // Use landscape mode for more horizontal space
+    const doc = new jsPDF({ orientation: 'landscape' });
+    resetLetterheadCache();
 
-    const escapeCsvField = (field: any): string => {
-        const str = String(field ?? '');
-        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-            return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-    };
-    
-    const headerRow1 = [`Unit: ${detailedGridData.header.unit}`];
-    const headerRow2 = [`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`];
-    
-    const tableHeader = ['Member', 'P', 'L', 'S', 'A', '%PLS', ...detailedGridData.uniqueActivities].map(escapeCsvField);
-
-    const tableRows = detailedGridData.memberRows.map(row => [
+    const head = [['Member', 'P', 'L', 'S', 'A', '%PLS', ...detailedGridData.uniqueActivities]];
+    const body = detailedGridData.memberRows.map(row => [
         row.memberName,
         row.presentCount,
         row.leaveCount,
@@ -432,30 +423,66 @@ export function AttendanceReportGenerator() {
         row.absentCount,
         row.plsPercentage,
         ...detailedGridData.uniqueActivities.map(activity => row.activityMap[activity] || '')
-    ].map(escapeCsvField));
+    ]);
 
-    const csvContent = [
-        headerRow1.join(','),
-        headerRow2.join(','),
-        '', // Blank line
-        tableHeader.join(','),
-        ...tableRows.map(row => row.join(','))
-    ].join('\n');
+    doc.setFontSize(14);
+    doc.text(`Unit: ${detailedGridData.header.unit}`, 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`, 14, 22);
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const filename = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.csv`;
-    link.setAttribute("download", filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    (doc as any).autoTable({
+        head: head,
+        body: body,
+        startY: 28,
+        theme: 'grid',
+        styles: {
+            fontSize: 6, // Use a smaller font size to fit more columns
+            cellPadding: 1,
+        },
+        headStyles: {
+            fillColor: [22, 163, 74], // Green header
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 7,
+        },
+        columnStyles: {
+            0: { cellWidth: 35 }, // Member name column
+        },
+        // This hook is called after each cell is drawn
+        didDrawCell: (data: any) => {
+            const cellText = String(data.cell.text).toUpperCase();
+            let fillColor;
 
+            if (data.section === 'body' && data.column.index >= 6) { // Only color activity cells
+                if (cellText.includes('P')) {
+                    fillColor = [34, 197, 94]; // Green for Present
+                } else if (cellText.includes('L')) {
+                    fillColor = [253, 224, 71]; // Yellow for Leave
+                } else if (cellText.includes('S')) {
+                    fillColor = [59, 130, 246]; // Blue for Sick
+                } else if (cellText.includes('A')) {
+                    fillColor = [239, 68, 68]; // Red for Absent
+                }
+
+                if (fillColor) {
+                    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+                    doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+                    // Redraw text on top of fill color
+                    doc.setTextColor(cellText.includes('L') ? '#000' : '#fff');
+                    doc.text(data.cell.text, data.cell.x + data.cell.padding('left'), data.cell.y + data.cell.height / 2, {
+                        baseline: 'middle'
+                    });
+                    doc.setTextColor('#000'); // Reset text color
+                }
+            }
+        },
+    });
+
+    const filename = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.pdf`;
+    doc.save(filename);
     setIsLoading(false);
-    toast({ title: "CSV Exported", description: `${filename} has been downloaded.` });
-  };
+    toast({ title: "Detailed PDF Exported", description: `${filename} has been downloaded.` });
+};
 
 
   return (
@@ -497,9 +524,9 @@ export function AttendanceReportGenerator() {
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
                   Download Summary Report (PDF)
                 </Button>
-                <Button onClick={handleDownloadDetailedCsv} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
+                <Button onClick={handleDownloadDetailedPdf} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
-                  Download Detailed Report (CSV)
+                  Download Detailed Report (PDF)
                 </Button>
               </div>
 
