@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview An AI flow to classify attendance records.
@@ -10,10 +11,12 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 
-export const AttendanceStatusInputSchema = z.string();
+const AttendanceStatusInputSchema = z.object({
+  text: z.string().describe('The attendance comment text to classify.'),
+});
 export type AttendanceStatusInput = z.infer<typeof AttendanceStatusInputSchema>;
 
-export const AttendanceStatusOutputSchema = z.object({
+const AttendanceStatusOutputSchema = z.object({
   status: z
     .enum(['Leave', 'Sick', 'Absent'])
     .describe(
@@ -23,9 +26,9 @@ export const AttendanceStatusOutputSchema = z.object({
 export type AttendanceStatusOutput = z.infer<typeof AttendanceStatusOutputSchema>;
 
 export async function classifyAttendanceStatus(
-  input: AttendanceStatusInput
+  input: string
 ): Promise<AttendanceStatusOutput> {
-  return classifyAttendanceFlow(input);
+  return classifyAttendanceFlow({text: input});
 }
 
 const prompt = ai.definePrompt({
@@ -39,7 +42,7 @@ const prompt = ai.definePrompt({
   - Use "Sick" for medical-related absences.
   - Use "Absent" for unexplained absences, "no show", or unapproved time off.
 
-  Classify the following attendance reason: {{{prompt}}}`,
+  Classify the following attendance reason: {{{text}}}`,
 });
 
 const classifyAttendanceFlow = ai.defineFlow(
@@ -48,8 +51,8 @@ const classifyAttendanceFlow = ai.defineFlow(
     inputSchema: AttendanceStatusInputSchema,
     outputSchema: AttendanceStatusOutputSchema,
   },
-  async (promptText) => {
-    const { output } = await prompt(promptText);
+  async (input) => {
+    const { output } = await prompt(input);
     if (!output) {
       throw new Error('Failed to get a classification from the AI model.');
     }
