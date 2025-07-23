@@ -6,12 +6,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { UploadCloud, FileDown, Loader2, BarChart2 } from "lucide-react";
+import { UploadCloud, FileDown, Loader2, BarChart2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { classifyAttendanceStatus } from "@/ai/flows/classify-attendance-flow";
+
 
 interface ReportHeader {
   unit: string;
@@ -135,7 +137,7 @@ export function AttendanceReportGenerator() {
   const processFile = (fileToProcess: File) => {
     setIsLoading(true);
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const text = e.target?.result as string;
         const allRows = robustCsvParser(text);
@@ -222,34 +224,57 @@ export function AttendanceReportGenerator() {
           };
         });
 
+        const memberRowsDataPromises = Object.entries(groupedByMember).map(async ([memberName, activities]) => {
+            let p = 0, l = 0, s = 0, a = 0;
+            const activityMap: { [activityName: string]: string } = {};
+
+            for (const act of activities) {
+                if (!uniqueActivities.has(act.name)) {
+                    activityMap[act.name] = '--';
+                    continue;
+                }
+                
+                let effectiveAttendance = act.attendance.toUpperCase();
+                
+                if (effectiveAttendance === 'P') {
+                    p++;
+                } else if (effectiveAttendance === 'L') {
+                    l++;
+                } else if (effectiveAttendance === 'A') {
+                    a++;
+                } else {
+                    // It's not P, L, or A, so it's free text. Use AI.
+                    const textToClassify = act.comment || effectiveAttendance;
+                    try {
+                        const classificationResult = await classifyAttendanceStatus(textToClassify);
+                        if (classificationResult.status === 'Leave') {
+                            l++; effectiveAttendance = 'L';
+                        } else if (classificationResult.status === 'Sick') {
+                            s++; effectiveAttendance = 'S';
+                        } else {
+                            a++; effectiveAttendance = 'A';
+                        }
+                    } catch (aiError) {
+                        console.warn(`AI classification failed for "${textToClassify}". Defaulting to Absent.`, aiError);
+                        a++; effectiveAttendance = 'A';
+                    }
+                }
+                activityMap[act.name] = effectiveAttendance;
+            }
+
+            const totalPls = p + l + s;
+            const totalEligible = p + l + s + a;
+            const plsPercentage = totalEligible > 0 ? ((totalPls / totalEligible) * 100).toFixed(2) + "%" : "0.00%";
+
+            return { memberName, presentCount: p, leaveCount: l, sickCount: s, absentCount: a, plsPercentage, activityMap };
+        });
+
+        const memberRowsData = await Promise.all(memberRowsDataPromises);
+
         const gridData: DetailedGridReportData = {
             header,
             uniqueActivities: sortedUniqueActivities,
-            memberRows: Object.entries(groupedByMember).map(([memberName, activities]) => {
-                let p = 0, l = 0, a = 0;
-                const activityMap: { [activityName: string]: string } = {};
-                
-                activities.forEach(act => {
-                    let effectiveAttendance = act.attendance;
-                    if (act.attendance === 'L' && act.comment.toLowerCase().includes("no leave")) {
-                        effectiveAttendance = 'A';
-                    }
-                    
-                    if (effectiveAttendance === 'P') p++;
-                    else if (effectiveAttendance === 'L') l++;
-                    else if (effectiveAttendance !== '--') a++;
-                    
-                    if(uniqueActivities.has(act.name)) {
-                       activityMap[act.name] = effectiveAttendance;
-                    }
-                });
-
-                const totalPls = p + l; // S is 0, so %PLS is just Present+Leave / (P+L+A)
-                const totalEligible = p + l + a;
-                const plsPercentage = totalEligible > 0 ? ((totalPls / totalEligible) * 100).toFixed(2) + "%" : "0.00%";
-                
-                return { memberName, presentCount: p, leaveCount: l, sickCount: 0, absentCount: a, plsPercentage, activityMap };
-            }).sort((a,b) => a.memberName.localeCompare(b.memberName))
+            memberRows: memberRowsData.sort((a,b) => a.memberName.localeCompare(b.memberName))
         };
         
         setDetailedGridData(gridData);
@@ -410,6 +435,7 @@ export function AttendanceReportGenerator() {
             if (data.section === 'body') {
                 if (cellValue === 'P') { data.cell.styles.fillColor = [200, 255, 200]; } // Green
                 if (cellValue === 'L') { data.cell.styles.fillColor = [255, 255, 200]; } // Yellow
+                if (cellValue === 'S') { data.cell.styles.fillColor = [200, 200, 255]; } // Blue
                 if (cellValue === 'A') { data.cell.styles.fillColor = [255, 200, 200]; } // Red
             }
         },
@@ -434,8 +460,8 @@ export function AttendanceReportGenerator() {
             {file ? `Selected: ${file.name}` : "Click button to select a CSV file"}
           </p>
           <Button onClick={() => csvInputRef.current?.click()} className="mt-4" disabled={isLoading}>
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
-            Select CSV File
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            Select CSV & Run AI Report
           </Button>
           <input
             ref={csvInputRef}
