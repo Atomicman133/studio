@@ -421,6 +421,16 @@ export function AttendanceReportGenerator() {
         }
     };
     
+    const formatActivityHeader = (activityName: string): string => {
+        const typeAbbrMatch = activityName.match(/^([^|]+)/);
+        const typeAbbr = typeAbbrMatch ? typeAbbrMatch[1].trim() : 'ACT';
+
+        const dateMatch = activityName.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
+        const startDate = dateMatch ? dateMatch[1] : '';
+
+        return `${typeAbbr} ${startDate}`.trim();
+    };
+
     // Create header row with activities rotated
     const headerRow = `
         <tr>
@@ -430,7 +440,7 @@ export function AttendanceReportGenerator() {
             <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">S</th>
             <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">A</th>
             <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">%PLS</th>
-            ${detailedGridData.uniqueActivities.map(activity => `<th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; padding: 8px; font-weight: bold; writing-mode: vertical-rl; text-orientation: mixed;">${activity}</th>`).join('')}
+            ${detailedGridData.uniqueActivities.map(activity => `<th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; padding: 8px; font-weight: bold; writing-mode: vertical-rl; text-orientation: mixed;">${formatActivityHeader(activity)}</th>`).join('')}
         </tr>
     `;
     
@@ -558,5 +568,3 @@ export function AttendanceReportGenerator() {
     </Card>
   );
 }
-
-    
