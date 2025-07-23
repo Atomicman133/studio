@@ -12,7 +12,7 @@ import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { classifyAttendanceStatus } from "@/ai/flows/classify-attendance-flow";
+import { classifyAttendanceBatch, type ClassifyAttendanceBatchOutput } from "@/ai/flows/classify-attendance-flow";
 
 
 interface ReportHeader {
@@ -186,6 +186,7 @@ export function AttendanceReportGenerator() {
         const memberDataLines = allRows.slice(3);
         const groupedByMember: Record<string, Activity[]> = {};
         const uniqueActivities = new Set<string>();
+        const uniqueCommentsToClassify = new Set<string>();
 
         memberDataLines.forEach(lineParts => {
           if (lineParts.length > Math.max(memberNameIndex, activityNameIndex, attendanceIndex)) {
@@ -202,10 +203,21 @@ export function AttendanceReportGenerator() {
                 if (attendance !== '--') {
                    uniqueActivities.add(activityName);
                 }
+                const upperAttendance = attendance.toUpperCase();
+                if (upperAttendance !== 'P' && upperAttendance !== 'L' && upperAttendance !== 'A' && upperAttendance !== '--') {
+                    const textToClassify = comment || attendance;
+                    if(textToClassify) uniqueCommentsToClassify.add(textToClassify);
+                }
             }
           }
         });
         
+        toast({ title: "AI Classification in Progress", description: `Found ${uniqueCommentsToClassify.size} unique comments to classify...` });
+
+        // Batch AI classification
+        const classificationResults = await classifyAttendanceBatch({ texts: Array.from(uniqueCommentsToClassify) });
+        const classificationMap = new Map(classificationResults.classifications.map(c => [c.text, c.status]));
+
         const sortedUniqueActivities = Array.from(uniqueActivities).sort((a,b) => new Date(a.split(' ')[0]).getTime() - new Date(b.split(' ')[0]).getTime());
 
         const reports: MemberReport[] = Object.entries(groupedByMember).map(([memberName, activities]) => {
@@ -224,7 +236,7 @@ export function AttendanceReportGenerator() {
           };
         });
 
-        const memberRowsDataPromises = Object.entries(groupedByMember).map(async ([memberName, activities]) => {
+        const memberRowsData = Object.entries(groupedByMember).map(([memberName, activities]) => {
             let p = 0, l = 0, s = 0, a = 0;
             const activityMap: { [activityName: string]: string } = {};
 
@@ -242,20 +254,15 @@ export function AttendanceReportGenerator() {
                     l++;
                 } else if (effectiveAttendance === 'A') {
                     a++;
-                } else {
-                    // It's not P, L, or A, so it's free text. Use AI.
-                    const textToClassify = act.comment || effectiveAttendance;
-                    try {
-                        const classificationResult = await classifyAttendanceStatus(textToClassify);
-                        if (classificationResult.status === 'Leave') {
-                            l++; effectiveAttendance = 'L';
-                        } else if (classificationResult.status === 'Sick') {
-                            s++; effectiveAttendance = 'S';
-                        } else {
-                            a++; effectiveAttendance = 'A';
-                        }
-                    } catch (aiError) {
-                        console.warn(`AI classification failed for "${textToClassify}". Defaulting to Absent.`, aiError);
+                } else if (effectiveAttendance !== '--') {
+                    const textToClassify = act.comment || act.attendance;
+                    const classifiedStatus = classificationMap.get(textToClassify);
+
+                    if (classifiedStatus === 'Leave') {
+                        l++; effectiveAttendance = 'L';
+                    } else if (classifiedStatus === 'Sick') {
+                        s++; effectiveAttendance = 'S';
+                    } else { // Includes 'Absent' or if classification failed
                         a++; effectiveAttendance = 'A';
                     }
                 }
@@ -269,7 +276,6 @@ export function AttendanceReportGenerator() {
             return { memberName, presentCount: p, leaveCount: l, sickCount: s, absentCount: a, plsPercentage, activityMap };
         });
 
-        const memberRowsData = await Promise.all(memberRowsDataPromises);
 
         const gridData: DetailedGridReportData = {
             header,
