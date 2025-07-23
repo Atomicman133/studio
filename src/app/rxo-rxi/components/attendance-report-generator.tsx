@@ -432,13 +432,12 @@ export function AttendanceReportGenerator() {
     (doc as any).autoTable({
         head: head,
         body: body,
-        startY: 28,
+        startY: 28, // Adjusted startY
         theme: 'grid',
         pageBreak: 'auto',
         headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold', fontSize: 6 },
         styles: { fontSize: 6, cellPadding: 1, overflow: 'linebreak' },
         columnStyles: { 0: { cellWidth: 35 } },
-        margin: { top: 28 },
         didParseCell: (data: any) => {
             const cellValue = data.cell.text[0];
             if (data.section === 'body') {
