@@ -403,85 +403,81 @@ export function AttendanceReportGenerator() {
     setIsLoading(false);
   };
   
- const handleDownloadDetailedPdf = async () => {
+ const handleDownloadDetailedXls = () => {
     if (!detailedGridData) {
-        toast({ variant: "destructive", title: "No data to export" });
-        return;
+      toast({ variant: "destructive", title: "No data to export" });
+      return;
     }
 
     setIsLoading(true);
-    // Use landscape mode for more horizontal space
-    const doc = new jsPDF({ orientation: 'landscape' });
-    resetLetterheadCache();
 
-    const head = [['Member', 'P', 'L', 'S', 'A', '%PLS', ...detailedGridData.uniqueActivities]];
-    const body = detailedGridData.memberRows.map(row => [
-        row.memberName,
-        row.presentCount,
-        row.leaveCount,
-        row.sickCount,
-        row.absentCount,
-        row.plsPercentage,
-        ...detailedGridData.uniqueActivities.map(activity => row.activityMap[activity] || '')
-    ]);
+    const getCellStyle = (status: string) => {
+        switch (status) {
+            case 'P': return 'background-color: #22c55e; color: #ffffff;'; // Green
+            case 'L': return 'background-color: #fde047;'; // Yellow
+            case 'S': return 'background-color: #3b82f6; color: #ffffff;'; // Blue
+            case 'A': return 'background-color: #ef4444; color: #ffffff;'; // Red
+            default: return '';
+        }
+    };
+    
+    // Create header row with activities rotated
+    const headerRow = `
+        <tr>
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">Member</th>
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">P</th>
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">L</th>
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">S</th>
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">A</th>
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">%PLS</th>
+            ${detailedGridData.uniqueActivities.map(activity => `<th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; padding: 8px; font-weight: bold; writing-mode: vertical-rl; text-orientation: mixed;">${activity}</th>`).join('')}
+        </tr>
+    `;
+    
+    // Create data rows
+    const bodyRows = detailedGridData.memberRows.map(row => `
+        <tr>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">${row.memberName}</td>
+            <td style="border: 1px solid #dddddd; text-align: center; padding: 8px;">${row.presentCount}</td>
+            <td style="border: 1px solid #dddddd; text-align: center; padding: 8px;">${row.leaveCount}</td>
+            <td style="border: 1px solid #dddddd; text-align: center; padding: 8px;">${row.sickCount}</td>
+            <td style="border: 1px solid #dddddd; text-align: center; padding: 8px;">${row.absentCount}</td>
+            <td style="border: 1px solid #dddddd; text-align: center; padding: 8px;">${row.plsPercentage}</td>
+            ${detailedGridData.uniqueActivities.map(activity => {
+                const status = row.activityMap[activity] || '';
+                return `<td style="border: 1px solid #dddddd; text-align: center; padding: 8px; ${getCellStyle(status)}">${status}</td>`;
+            }).join('')}
+        </tr>
+    `).join('');
 
-    doc.setFontSize(14);
-    doc.text(`Unit: ${detailedGridData.header.unit}`, 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`, 14, 22);
+    const htmlTable = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Attendance</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>
+        <body>
+            <table>
+                <tbody>
+                    <tr><td style="font-weight: bold; font-size: 14px;" colspan="${detailedGridData.uniqueActivities.length + 6}">Unit: ${detailedGridData.header.unit}</td></tr>
+                    <tr><td style="font-weight: bold; font-size: 14px;" colspan="${detailedGridData.uniqueActivities.length + 6}">Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}</td></tr>
+                    <tr><td colspan="${detailedGridData.uniqueActivities.length + 6}">&nbsp;</td></tr>
+                </tbody>
+                <thead>${headerRow}</thead>
+                <tbody>${bodyRows}</tbody>
+            </table>
+        </body></html>
+    `;
 
-    (doc as any).autoTable({
-        head: head,
-        body: body,
-        startY: 28,
-        theme: 'grid',
-        styles: {
-            fontSize: 6, // Use a smaller font size to fit more columns
-            cellPadding: 1,
-        },
-        headStyles: {
-            fillColor: [22, 163, 74], // Green header
-            textColor: [255, 255, 255],
-            fontStyle: 'bold',
-            fontSize: 7,
-        },
-        columnStyles: {
-            0: { cellWidth: 35 }, // Member name column
-        },
-        // This hook is called after each cell is drawn
-        didDrawCell: (data: any) => {
-            const cellText = String(data.cell.text).toUpperCase();
-            let fillColor;
-
-            if (data.section === 'body' && data.column.index >= 6) { // Only color activity cells
-                if (cellText.includes('P')) {
-                    fillColor = [34, 197, 94]; // Green for Present
-                } else if (cellText.includes('L')) {
-                    fillColor = [253, 224, 71]; // Yellow for Leave
-                } else if (cellText.includes('S')) {
-                    fillColor = [59, 130, 246]; // Blue for Sick
-                } else if (cellText.includes('A')) {
-                    fillColor = [239, 68, 68]; // Red for Absent
-                }
-
-                if (fillColor) {
-                    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
-                    doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-                    // Redraw text on top of fill color
-                    doc.setTextColor(cellText.includes('L') ? '#000' : '#fff');
-                    doc.text(data.cell.text, data.cell.x + data.cell.padding('left'), data.cell.y + data.cell.height / 2, {
-                        baseline: 'middle'
-                    });
-                    doc.setTextColor('#000'); // Reset text color
-                }
-            }
-        },
-    });
-
-    const filename = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.pdf`;
-    doc.save(filename);
+    const blob = new Blob([htmlTable], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
     setIsLoading(false);
-    toast({ title: "Detailed PDF Exported", description: `${filename} has been downloaded.` });
+    toast({ title: "Detailed XLS Exported", description: "Formatted spreadsheet has been downloaded." });
 };
 
 
@@ -524,9 +520,9 @@ export function AttendanceReportGenerator() {
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
                   Download Summary Report (PDF)
                 </Button>
-                <Button onClick={handleDownloadDetailedPdf} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
+                <Button onClick={handleDownloadDetailedXls} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
-                  Download Detailed Report (PDF)
+                  Download Detailed Report (XLS)
                 </Button>
               </div>
 
@@ -562,3 +558,5 @@ export function AttendanceReportGenerator() {
     </Card>
   );
 }
+
+    
