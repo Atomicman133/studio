@@ -19,14 +19,35 @@ interface ReportHeader {
   endDate: string;
 }
 
+interface Activity {
+    name: string;
+    attendance: string;
+    comment: string;
+}
+
 interface MemberReport {
   memberName: string;
-  activities: { name: string; attendance: string }[];
+  activities: Activity[];
   eligibleActivities: number;
   attendedActivities: number;
   attendancePercentage: number;
-  notAttended: { name: string; attendance: string }[];
+  notAttended: Activity[];
 }
+
+interface DetailedGridReportData {
+    header: ReportHeader;
+    uniqueActivities: string[];
+    memberRows: {
+        memberName: string;
+        presentCount: number;
+        leaveCount: number;
+        sickCount: number;
+        absentCount: number;
+        plsPercentage: string;
+        activityMap: { [activityName: string]: string };
+    }[];
+}
+
 
 const robustCsvParser = (csvText: string): string[][] => {
     const rows: string[][] = [];
@@ -89,6 +110,7 @@ export function AttendanceReportGenerator() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [reportHeader, setReportHeader] = React.useState<ReportHeader | null>(null);
   const [memberReports, setMemberReports] = React.useState<MemberReport[]>([]);
+  const [detailedGridData, setDetailedGridData] = React.useState<DetailedGridReportData | null>(null);
   const csvInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -105,6 +127,7 @@ export function AttendanceReportGenerator() {
       setFile(selectedFile);
       setReportHeader(null);
       setMemberReports([]);
+      setDetailedGridData(null);
       processFile(selectedFile);
     }
   };
@@ -121,7 +144,6 @@ export function AttendanceReportGenerator() {
           throw new Error("CSV file is missing required header or data rows.");
         }
 
-        // --- New Header Parsing Logic ---
         const headerRow = allRows[0];
         const headerDataRow = allRows[1];
         
@@ -147,36 +169,42 @@ export function AttendanceReportGenerator() {
           endDate: endDateValue,
         };
         setReportHeader(header);
-        // --- End New Header Parsing Logic ---
-
-
-        // Parse Member Data - find the correct column for member name and activity
+        
         const memberDataHeaderRow = allRows[2];
         const memberNameIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('member'));
         const activityNameIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('activity'));
         const attendanceIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('attendance'));
+        const commentIndex = memberDataHeaderRow.findIndex(h => h.toLowerCase().includes('comment'));
+
 
         if (memberNameIndex === -1 || activityNameIndex === -1 || attendanceIndex === -1) {
              throw new Error("Could not find 'Member', 'Activity', or 'Attendance' columns for the member data section.");
         }
 
         const memberDataLines = allRows.slice(3);
-        const groupedByMember: Record<string, { name: string; attendance: string }[]> = {};
+        const groupedByMember: Record<string, Activity[]> = {};
+        const uniqueActivities = new Set<string>();
 
         memberDataLines.forEach(lineParts => {
           if (lineParts.length > Math.max(memberNameIndex, activityNameIndex, attendanceIndex)) {
             const memberName = lineParts[memberNameIndex].trim();
             const activityName = lineParts[activityNameIndex].trim();
             const attendance = lineParts[attendanceIndex].trim();
+            const comment = commentIndex !== -1 ? lineParts[commentIndex].trim() : "";
 
-            if (memberName && activityName) { // Ensure member and activity names are not empty
+            if (memberName && activityName) {
                 if (!groupedByMember[memberName]) {
                   groupedByMember[memberName] = [];
                 }
-                groupedByMember[memberName].push({ name: activityName, attendance });
+                groupedByMember[memberName].push({ name: activityName, attendance, comment });
+                if (attendance !== '--') {
+                   uniqueActivities.add(activityName);
+                }
             }
           }
         });
+        
+        const sortedUniqueActivities = Array.from(uniqueActivities).sort((a,b) => new Date(a.split(' ')[0]).getTime() - new Date(b.split(' ')[0]).getTime());
 
         const reports: MemberReport[] = Object.entries(groupedByMember).map(([memberName, activities]) => {
           const eligibleActivities = activities.filter(act => act.attendance !== "--").length;
@@ -193,6 +221,38 @@ export function AttendanceReportGenerator() {
             notAttended
           };
         });
+
+        const gridData: DetailedGridReportData = {
+            header,
+            uniqueActivities: sortedUniqueActivities,
+            memberRows: Object.entries(groupedByMember).map(([memberName, activities]) => {
+                let p = 0, l = 0, a = 0;
+                const activityMap: { [activityName: string]: string } = {};
+                
+                activities.forEach(act => {
+                    let effectiveAttendance = act.attendance;
+                    if (act.attendance === 'L' && act.comment.toLowerCase().includes("no leave")) {
+                        effectiveAttendance = 'A';
+                    }
+                    
+                    if (effectiveAttendance === 'P') p++;
+                    else if (effectiveAttendance === 'L') l++;
+                    else if (effectiveAttendance !== '--') a++;
+                    
+                    if(uniqueActivities.has(act.name)) {
+                       activityMap[act.name] = effectiveAttendance;
+                    }
+                });
+
+                const totalPls = p + l; // S is 0, so %PLS is just Present+Leave / (P+L+A)
+                const totalEligible = p + l + a;
+                const plsPercentage = totalEligible > 0 ? ((totalPls / totalEligible) * 100).toFixed(2) + "%" : "0.00%";
+                
+                return { memberName, presentCount: p, leaveCount: l, sickCount: 0, absentCount: a, plsPercentage, activityMap };
+            }).sort((a,b) => a.memberName.localeCompare(b.memberName))
+        };
+        
+        setDetailedGridData(gridData);
         setMemberReports(reports);
         toast({ title: "Report Processed", description: `Found attendance data for ${reports.length} members.` });
       } catch (error: any) {
@@ -203,6 +263,7 @@ export function AttendanceReportGenerator() {
         });
         setReportHeader(null);
         setMemberReports([]);
+        setDetailedGridData(null);
       } finally {
         setIsLoading(false);
       }
@@ -216,7 +277,7 @@ export function AttendanceReportGenerator() {
     return 'text-green-500';
   };
 
-  const handleDownloadPdf = async () => {
+  const handleDownloadSummaryPdf = async () => {
     if (!reportHeader || memberReports.length === 0) {
       toast({ variant: "destructive", title: "No data to export" });
       return;
@@ -225,7 +286,7 @@ export function AttendanceReportGenerator() {
     setIsLoading(true);
     const doc = new jsPDF();
     resetLetterheadCache();
-    const filename = `Attendance_Report_${reportHeader.unit.replace(/\s+/g, '_')}_${reportHeader.startDate}_to_${reportHeader.endDate}.pdf`;
+    const filename = `Attendance_Summary_Report_${reportHeader.unit.replace(/\s+/g, '_')}_${reportHeader.startDate}_to_${reportHeader.endDate}.pdf`;
     
     const margin = 15;
     let yPos = margin;
@@ -248,10 +309,9 @@ export function AttendanceReportGenerator() {
         }
     };
 
-    // Main Header
     doc.setFontSize(16);
     doc.setFont(undefined, 'bold');
-    doc.text(`Attendance Report`, doc.internal.pageSize.getWidth() / 2, yPos, { align: 'center' });
+    doc.text(`Attendance Summary Report`, doc.internal.pageSize.getWidth() / 2, yPos, { align: 'center' });
     yPos += sectionSpacing;
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
@@ -260,7 +320,6 @@ export function AttendanceReportGenerator() {
     doc.text(`Reporting Period: ${reportHeader.startDate} - ${reportHeader.endDate}`, margin, yPos);
     yPos += sectionSpacing * 1.5;
 
-    // Member sections
     for (const member of memberReports) {
       checkPageBreak(sectionSpacing * 2);
       doc.setDrawColor(200);
@@ -282,21 +341,15 @@ export function AttendanceReportGenerator() {
       checkPageBreak(lineSpacing);
       const percentageText = `Attendance Percentage: ${member.attendancePercentage.toFixed(2)}%`;
       
-      // Apply color coding for percentage
       const percentage = member.attendancePercentage;
-      if (percentage < 75) {
-        doc.setTextColor(239, 68, 68); // Red
-      } else if (percentage >= 75 && percentage <= 80) {
-        doc.setTextColor(234, 179, 8); // Yellow
-      } else {
-        doc.setTextColor(34, 197, 94); // Green
-      }
+      if (percentage < 75) doc.setTextColor(239, 68, 68);
+      else if (percentage >= 75 && percentage <= 80) doc.setTextColor(234, 179, 8);
+      else doc.setTextColor(34, 197, 94);
       doc.setFont(undefined, 'bold');
       doc.text(percentageText, margin + indent, yPos);
       doc.setFont(undefined, 'normal');
-      doc.setTextColor(0, 0, 0); // Reset color to black
+      doc.setTextColor(0, 0, 0);
       yPos += lineSpacing;
-
 
       if (member.notAttended.length > 0) {
         checkPageBreak(lineSpacing);
@@ -318,6 +371,55 @@ export function AttendanceReportGenerator() {
     doc.save(filename);
     setIsLoading(false);
   };
+  
+   const handleDownloadDetailedPdf = async () => {
+    if (!detailedGridData) {
+        toast({ variant: "destructive", title: "No data to export" });
+        return;
+    }
+    
+    setIsLoading(true);
+    const doc = new jsPDF('landscape');
+    resetLetterheadCache();
+
+    const head = [['Member', 'P', 'L', 'S', 'A', '%PLS', ...detailedGridData.uniqueActivities]];
+    const body = detailedGridData.memberRows.map(row => [
+        row.memberName,
+        row.presentCount,
+        row.leaveCount,
+        row.sickCount,
+        row.absentCount,
+        row.plsPercentage,
+        ...detailedGridData.uniqueActivities.map(activity => row.activityMap[activity] || '')
+    ]);
+
+    doc.setFontSize(14);
+    doc.text(`Unit: ${detailedGridData.header.unit}`, 14, 20);
+    doc.text(`Reporting Period: ${detailedGridData.header.startDate} - ${detailedGridData.header.endDate}`, 14, 28);
+
+    (doc as any).autoTable({
+        head: head,
+        body: body,
+        startY: 35,
+        theme: 'grid',
+        headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
+        columnStyles: { 0: { cellWidth: 40 } },
+        didParseCell: (data: any) => {
+            const cellValue = data.cell.text[0];
+            if (data.section === 'body') {
+                if (cellValue === 'P') { data.cell.styles.fillColor = [200, 255, 200]; } // Green
+                if (cellValue === 'L') { data.cell.styles.fillColor = [255, 255, 200]; } // Yellow
+                if (cellValue === 'A') { data.cell.styles.fillColor = [255, 200, 200]; } // Red
+            }
+        },
+    });
+
+    const filename = `Attendance_Detailed_Report_${detailedGridData.header.unit.replace(/\s+/g, '_')}.pdf`;
+    doc.save(filename);
+    setIsLoading(false);
+  };
+
 
   return (
     <Card className="shadow-md">
@@ -353,10 +455,17 @@ export function AttendanceReportGenerator() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={handleDownloadPdf} disabled={isLoading} className="w-full">
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
-                Download Report as PDF
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button onClick={handleDownloadSummaryPdf} disabled={isLoading} className="w-full sm:w-auto flex-1">
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
+                  Download Summary Report (PDF)
+                </Button>
+                <Button onClick={handleDownloadDetailedPdf} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
+                  Download Detailed Report (PDF)
+                </Button>
+              </div>
+
               <ScrollArea className="h-96 mt-4 border rounded-md">
                 <div className="p-4 space-y-4">
                   {memberReports.map(member => (
