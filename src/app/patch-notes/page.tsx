@@ -12,8 +12,48 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.2",
+    version: "0.2.3",
     date: "Current",
+    title: "AI-Powered Attendance Reporting & Export Enhancements",
+    sections: [
+      {
+        title: "New Attendance Reporting Feature",
+        items: [
+          "Added a new 'Attendance Reporting' tab to the 'RXO / RXI' dashboard.",
+          "Users can upload a standard attendance CSV report for automated processing and analysis.",
+        ],
+      },
+      {
+        title: "AI-Powered Classification",
+        items: [
+          "Integrated a new Genkit AI flow to intelligently classify free-text attendance comments (e.g., 'Dr Appt', 'No Show').",
+          "The AI categorizes absences as 'Leave', 'Sick', or 'Absent', providing more accurate and nuanced reporting.",
+          "The AI processing is done in a single batch request, ensuring fast report generation even for large files.",
+        ],
+      },
+      {
+        title: "Enhanced Reporting & Export",
+        items: [
+          "Added a downloadable 'Summary Report' in PDF format, which includes color-coded attendance percentages for each member.",
+          "Added a downloadable 'Detailed Report' as a formatted Excel (.xls) file.",
+          "The detailed report provides a grid view of all activities, with cells color-coded for Present (Green), Leave (Yellow), Sick (Blue), and Absent (Red).",
+          "Report headers in the detailed export are now formatted to be more compact and are displayed vertically for improved readability.",
+          "Corrected the attendance percentage calculation in the detailed report to be based only on 'Present' status versus all other eligible activities.",
+        ],
+      },
+      {
+        title: "Bug Fixes",
+        items: [
+          "Fixed a runtime error in the attendance generator caused by a missing component import (`ScrollArea`).",
+          "Resolved several 'use server' runtime errors related to incorrect exports from the AI flow module.",
+          "Fixed multiple critical PDF generation errors ('Will not be able to print row 0', 'Maximum call stack size exceeded') by pivoting the detailed report export from PDF to a more robust and suitable Excel format.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.2",
+    date: "Previous Update",
     title: "Staff Status Management & OIC Calculation Refinements",
     sections: [
       {
