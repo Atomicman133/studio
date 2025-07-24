@@ -145,7 +145,7 @@ export function AttendanceReportGenerator() {
         if (allRows.length < 4) {
           throw new Error("CSV file is missing required header or data rows.");
         }
-
+        
         const headerRow = allRows[0];
         const headerDataRow = allRows[1];
         
@@ -204,7 +204,7 @@ export function AttendanceReportGenerator() {
                    uniqueActivities.add(activityName);
                 }
                 const upperAttendance = attendance.toUpperCase();
-                if (upperAttendance !== 'P' && upperAttendance !== 'L' && upperAttendance !== 'A' && upperAttendance !== '--') {
+                if (upperAttendance !== 'P' && upperAttendance !== 'L' && upperAttendance !== 'A' && upperAttendance !== 'S' && upperAttendance !== '--') {
                     const textToClassify = comment || attendance;
                     if(textToClassify) uniqueCommentsToClassify.add(textToClassify);
                 }
@@ -252,6 +252,8 @@ export function AttendanceReportGenerator() {
                     p++;
                 } else if (effectiveAttendance === 'L' || act.comment?.toLowerCase().includes('leave')) {
                     l++;
+                } else if (effectiveAttendance === 'S') {
+                    s++;
                 } else if (effectiveAttendance === 'A') {
                     a++;
                 } else if (effectiveAttendance !== '--') {
@@ -269,9 +271,8 @@ export function AttendanceReportGenerator() {
                 activityMap[act.name] = effectiveAttendance;
             }
 
-            const totalPls = p + l + s;
             const totalEligible = p + l + s + a;
-            const plsPercentage = totalEligible > 0 ? ((totalPls / totalEligible) * 100).toFixed(2) + "%" : "0.00%";
+            const plsPercentage = totalEligible > 0 ? ((p / totalEligible) * 100).toFixed(2) + "%" : "0.00%";
 
             return { memberName, presentCount: p, leaveCount: l, sickCount: s, absentCount: a, plsPercentage, activityMap };
         });
@@ -439,8 +440,8 @@ export function AttendanceReportGenerator() {
             <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">L</th>
             <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">S</th>
             <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">A</th>
-            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">%PLS</th>
-            ${detailedGridData.uniqueActivities.map(activity => `<th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; padding: 8px; font-weight: bold; writing-mode: vertical-rl; text-orientation: mixed;">${formatActivityHeader(activity)}</th>`).join('')}
+            <th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; text-align: left; padding: 8px; font-weight: bold;">% Present</th>
+            ${detailedGridData.uniqueActivities.map(activity => `<th style="background-color: #16a34a; color: #ffffff; border: 1px solid #dddddd; padding: 8px; font-weight: bold; writing-mode: vertical-rl; text-orientation: mixed; mso-rotate: 90;">${formatActivityHeader(activity)}</th>`).join('')}
         </tr>
     `;
     

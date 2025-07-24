@@ -62,7 +62,7 @@ async function cleanupDuplicateTrainingLogs() {
       const staffName = log.staffName;
       const courseName = log.courseName;
       const completionDate = log.completionDate;
-
+    
       if (!staffName || !courseName || !completionDate) {
          console.warn(`Skipping log with missing data: ID ${log.id}`);
          return; // Skip logs with missing essential data
@@ -70,19 +70,49 @@ async function cleanupDuplicateTrainingLogs() {
 
 
       // Create a unique key based on staffName, courseName, and completionDate
-       let dateString;
-       try {
-            dateString = completionDate instanceof Timestamp
-             ? completionDate.toDate().toISOString().split('T')[0] // YYYY-MM-DD
-             : new Date(completionDate).toISOString().split('T')[0]; // Attempt to parse other date formats
-       } catch (e) {
-           console.warn(`Skipping log with invalid completionDate: ID ${log.id}, Date: ${completionDate}`);
-           return; // Skip logs with invalid dates
-       }
-
-
+      let dateString;
+      try {
+          let date;
+          if (completionDate instanceof Timestamp) {
+              date = completionDate.toDate();
+          } else if (typeof completionDate === 'string') {
+               // Attempt to parse the string format "Month Day, Year at HH:MM:SS AM/PM UTC+/-Z"
+               // This is a more robust parsing for your specific format
+               const parts = completionDate.match(/(\w+ \d+, \d+) at (\d+:\d+:\d+) (\w+)/);
+               if (parts) {
+                   // Construct a date string that Date.parse can handle
+                   const datePart = parts[1];
+                   const timePart = parts[2];
+                   const ampm = parts[3]; // AM/PM/UTC+8 etc. - might need more complex handling for timezones if precision is needed
+                   // For simplicity, let's just parse the date part and ignore the time/timezone for grouping
+                   date = new Date(datePart);
+               } else {
+                   // Fallback to general Date parsing if the specific format doesn't match
+                   date = new Date(completionDate);
+               }
+          } else {
+              // Handle other potential date types if necessary
+              date = new Date(completionDate);
+          }
+    
+    
+          if (isNaN(date.getTime())) {
+               throw new Error("Invalid date"); // Throw to be caught by the catch block
+          }
+    
+    
+          // Extract only the YYYY-MM-DD part
+          dateString = date.toISOString().split('T')[0];
+    
+    
+      } catch (e) {
+          console.warn(`Skipping log with invalid completionDate: ID ${log.id}, Date: ${completionDate}, Error: ${e.message}`);
+          return; // Skip logs with invalid dates
+      }
+    
+    
       const uniqueKey = `${staffName.trim().toLowerCase()}|${courseName.trim().toLowerCase()}|${dateString}`;
-
+    
       if (!logsByKey.has(uniqueKey)) {
         logsByKey.set(uniqueKey, []);
       }
