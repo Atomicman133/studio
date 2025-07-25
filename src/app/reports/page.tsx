@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
+const WING_WIDE_OPTION = "All 7 Wing";
 
 type ReportType = "oicLevelByUnit" | "specificComplianceByUnit";
 
@@ -97,9 +98,17 @@ export default function ReportsPage() {
     setReportData(null);
 
     const isRegionSelected = REGIONS.includes(selectedUnitOrRegion);
-    const staffInScope = isRegionSelected
-      ? staffList.filter(staff => getRegionForSquadron(staff.squadron) === selectedUnitOrRegion)
-      : staffList.filter(staff => staff.squadron === selectedUnitOrRegion);
+    const isWingWide = selectedUnitOrRegion === WING_WIDE_OPTION;
+
+    let staffInScope: StaffMember[];
+
+    if (isWingWide) {
+        staffInScope = staffList;
+    } else if (isRegionSelected) {
+        staffInScope = staffList.filter(staff => getRegionForSquadron(staff.squadron) === selectedUnitOrRegion);
+    } else {
+        staffInScope = staffList.filter(staff => staff.squadron === selectedUnitOrRegion);
+    }
     
     if (staffInScope.length === 0) {
       toast({ title: "No Staff", description: `No staff members found for ${selectedUnitOrRegion}.` });
@@ -334,6 +343,11 @@ export default function ReportsPage() {
                   <SelectValue placeholder="Select Region or Squadron" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Wing Wide</SelectLabel>
+                    <SelectItem value={WING_WIDE_OPTION}>{WING_WIDE_OPTION}</SelectItem>
+                  </SelectGroup>
+                  <SelectSeparator />
                   <SelectGroup>
                     <SelectLabel>Regions</SelectLabel>
                     {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}

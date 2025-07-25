@@ -37,6 +37,14 @@ const db = getFirestore('dataset1'); // Assuming 'dataset1' as per your firebase
 console.log('Successfully connected to Firestore database "dataset1".');
 
 // --- Main Cleanup Logic ---
+
+interface TrainingLogData {
+  staffName: string;
+  courseName: string;
+  completionDate: string | Timestamp; // Adjust this type if needed
+  // Add other properties if needed
+}
+
 async function cleanupDuplicateTrainingLogs() {
   console.log('Starting cleanup of duplicate training logs...');
   const BATCH_SIZE = 490; // Firestore batch limit is 500
@@ -58,7 +66,7 @@ async function cleanupDuplicateTrainingLogs() {
 
     // Group logs by staffName, courseName, and completionDate
     logsSnapshot.docs.forEach(doc => {
-      const log = {id: doc.id, ...doc.data()};
+      const log = {id: doc.id, ...(doc.data() as TrainingLogData)};
       const staffName = log.staffName;
       const courseName = log.courseName;
       const completionDate = log.completionDate;
@@ -78,7 +86,7 @@ async function cleanupDuplicateTrainingLogs() {
           } else if (typeof completionDate === 'string') {
                // Attempt to parse the string format "Month Day, Year at HH:MM:SS AM/PM UTC+/-Z"
                // This is a more robust parsing for your specific format
-               const parts = completionDate.match(/(\w+ \d+, \d+) at (\d+:\d+:\d+) (\w+)/);
+               const parts = completionDate.match(/(w+ d+, d+) at (d+:d+:d+) (w+)/);
                if (parts) {
                    // Construct a date string that Date.parse can handle
                    const datePart = parts[1];
@@ -128,12 +136,14 @@ async function cleanupDuplicateTrainingLogs() {
     const logsToDeleteIds = new Set();
 
 
-    console.log('\n--- Analyzing for duplicate training logs ---');
+    console.log('
+--- Analyzing for duplicate training logs ---');
 
 
     for (const [key, logs] of logsByKey.entries()) {
       if (logs.length > 1) { // Potential duplicates
-         console.log(`\nFound ${logs.length} duplicate logs for key: ${key}`);
+         console.log(`
+Found ${logs.length} duplicate logs for key: ${key}`);
          // Keep the first log encountered, mark the rest for deletion
          const [firstLog, ...duplicateLogs] = logs;
 
@@ -150,12 +160,14 @@ async function cleanupDuplicateTrainingLogs() {
     }
 
      if (totalDuplicatesIdentified === 0) {
-      console.log('\nNo duplicate training logs found based on staff name, course name, and completion date.');
+      console.log('
+No duplicate training logs found based on staff name, course name, and completion date.');
       return;
     }
 
 
-    console.log(`\n--- Summary ---`);
+    console.log(`
+--- Summary ---`);
     console.log(`Identified ${totalDuplicatesIdentified} duplicate log(s) that would be deleted.`);
     console.log('To perform the actual deletion:');
     console.log('1. Review the "WOULD DELETE" logs above carefully.');
@@ -164,7 +176,8 @@ async function cleanupDuplicateTrainingLogs() {
     console.log('4. Uncomment the "await batch.commit();" lines where batches are committed.');
     console.log('5. Re-run the script.');
 
-    console.log('\n--- Queueing deletions (currently commented out) ---');
+    console.log('
+--- Queueing deletions (currently commented out) ---');
      for (const logId of logsToDeleteIds) {
          const logRef = db.collection('trainingLogs').doc(logId);
         // Uncomment the next line to enable deletion
@@ -194,14 +207,17 @@ async function cleanupDuplicateTrainingLogs() {
 
 
     if (logsToDeleteIds.size > 0) {
-         console.log('\nDeletion lines are currently commented out. No data has been changed.');
+         console.log('
+Deletion lines are currently commented out. No data has been changed.');
          console.log(`Identified ${logsToDeleteIds.size} logs for potential deletion.`);
     } else {
-         console.log('\nNo logs identified for deletion.');
+         console.log('
+No logs identified for deletion.');
     }
 
 
-    console.log('\nCleanup process finished (deletion was commented out).');
+    console.log('
+Cleanup process finished (deletion was commented out).');
 
   } catch (error) {
     console.error('An error occurred during the cleanup process:', error);
