@@ -17,6 +17,7 @@ export const trainingLogSchema = z.object({
   certificateFileName: z.string().optional(),
   certificateDataUrl: z.string().optional().describe("Base64 encoded file data with MIME type."),
   serviceNumber: z.string().optional(), // Added serviceNumber as it's used and expected
+  hash: z.string().optional(), // Added for de-duplication
 });
 
 export type TrainingLog = z.infer<typeof trainingLogSchema>;
@@ -66,5 +67,6 @@ export const convertLogTimestamps = (data: any): TrainingLog => {
     certificateFileName: data.certificateFileName,
     certificateDataUrl: data.certificateDataUrl,
     serviceNumber: data.serviceNumber,
+    hash: data.hash, // Include hash
   } as TrainingLog; // Add 'as TrainingLog' for type assertion if confident in properties
 };

@@ -89,6 +89,15 @@ const STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX = 'staffTrainingLogs';
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
 const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 
+// Hashing function for de-duplication
+async function createHash(input: string): Promise<string> {
+    const textAsBuffer = new TextEncoder().encode(input);
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', textAsBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+
 // Moved from training/page.tsx
 const FULL_RANK_TO_ABBREVIATION_MAP: Record<string, typeof RANKS[number]> = {
   "AIRCRAFTMAN (AAFC)": "AC(AAFC)",
@@ -1189,15 +1198,7 @@ export default function StaffPage() {
         const querySnapshot = await getDocs(query(collection(db, "trainingLogs")));
         return querySnapshot.docs.map(d => convertTrainingLogTimestamps(d.data()));
     }});
-    const logsByServiceNumber = new Map<string, TrainingLog[]>();
-    allTrainingLogs.forEach(log => {
-        if (log.serviceNumber) {
-            if (!logsByServiceNumber.has(log.serviceNumber)) {
-                logsByServiceNumber.set(log.serviceNumber, []);
-            }
-            logsByServiceNumber.get(log.serviceNumber)!.push(log);
-        }
-    });
+    const existingLogHashes = new Set(allTrainingLogs.map(log => log.hash).filter(Boolean));
 
 
     const reader = new FileReader();
@@ -1325,24 +1326,23 @@ export default function StaffPage() {
                   }
               } else {
                   if (!details) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Accomplishment missing 'Details'.`); continue; }
+                  
+                  const staffNameForHash = `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`;
+                  const completionDateForHash = format(effectiveDate, 'yyyy-MM-dd');
+                  const hashString = `${staffNameForHash}-${details}-${completionDateForHash}`;
+                  const recordHash = await createHash(hashString);
+
 
                   // --- DUPLICATION CHECK ---
-                  const existingLogsForStaff = logsByServiceNumber.get(matchedStaffFromMap.serviceNumber) || [];
-                  const isDuplicate = existingLogsForStaff.some(log =>
-                      log.courseName.toLowerCase() === details.toLowerCase() &&
-                      isValidDate(log.completionDate) &&
-                      startOfDay(log.completionDate).getTime() === startOfDay(effectiveDate).getTime()
-                  );
-
-                  if (isDuplicate) {
-                      skippedRecordsLog.push(`Row ${i + 1}: Skipped - Duplicate accomplishment for SN ${matchedStaffFromMap.serviceNumber} on ${format(effectiveDate, 'dd/MM/yy')}.`);
+                  if (existingLogHashes.has(recordHash)) {
+                      skippedRecordsLog.push(`Row ${i + 1}: Skipped - Duplicate record found via hash for SN ${matchedStaffFromMap.serviceNumber}.`);
                       continue;
                   }
                   // --- END DUPLICATION CHECK ---
 
                   const logPayload = {
                       rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
-                      staffName: `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`,
+                      staffName: staffNameForHash,
                       squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
                       currentRole: matchedStaffFromMap.role || "N/A",
                       courseName: details,
@@ -1351,13 +1351,10 @@ export default function StaffPage() {
                       instructorQualification: "",
                       achievementDetails: csvRowData["Comment"]?.trim() || "",
                       serviceNumber: matchedStaffFromMap.serviceNumber,
+                      hash: recordHash, // Add the new hash field
                   };
                   allOperations.push({ type: 'log', payload: logPayload });
-                   // Also add to the temporary map to prevent duplicates within the same import file
-                  const tempLogs = logsByServiceNumber.get(matchedStaffFromMap.serviceNumber) || [];
-                  tempLogs.push(logPayload as TrainingLog);
-                  logsByServiceNumber.set(matchedStaffFromMap.serviceNumber, tempLogs);
-
+                  existingLogHashes.add(recordHash); // Add to set to prevent duplicates within the same file
               }
               staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
