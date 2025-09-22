@@ -12,8 +12,33 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.3",
+    version: "0.2.4",
     date: "Current",
+    title: "Enhanced CSV Import & Data Integrity",
+    sections: [
+      {
+        title: "Accomplishment Import Overhaul",
+        items: [
+          "Re-engineered the 'Import Accomplishment' CSV function to use a hash-based de-duplication system.",
+          "A unique hash is now generated from the `staffName`, `courseName`, and `completionDate` for each training record.",
+          "The system now checks for the existence of this hash before creating a new training log, providing a much more accurate method for preventing duplicate entries.",
+          "Added a 'hash' field to the training log database schema to support this new system.",
+        ],
+      },
+      {
+        title: "Bug Fixes",
+        items: [
+          "Addressed and resolved a series of critical server-side `Firebase admin initialization failed` errors by implementing a robust, cached initialization pattern for the Firebase Admin SDK.",
+          "Fixed a JSX parsing error in the `training/page.tsx` component caused by a missing closing parenthesis in a toast notification.",
+          "Corrected a race condition on the `reporting/page.tsx` where compliance reports could be processed before all necessary data was loaded, leading to empty or incorrect results.",
+          "Removed obsolete AI assistant functionality and related files that were causing issues and were no longer required.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.3",
+    date: "Previous Update",
     title: "AI-Powered Attendance Reporting & Export Enhancements",
     sections: [
       {
