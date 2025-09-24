@@ -6,13 +6,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { UploadCloud, FileDown, Loader2, BarChart2, Sparkles, FileSpreadsheet } from "lucide-react";
+import { UploadCloud, FileDown, Loader2, BarChart2, Sparkles, FileSpreadsheet, Filter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from "@/lib/utils";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { classifyAttendanceBatch, type ClassifyAttendanceBatchOutput } from "@/ai/flows/classify-attendance-flow";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 
 interface ReportHeader {
@@ -113,6 +116,11 @@ export function AttendanceReportGenerator() {
   const [reportHeader, setReportHeader] = React.useState<ReportHeader | null>(null);
   const [memberReports, setMemberReports] = React.useState<MemberReport[]>([]);
   const [detailedGridData, setDetailedGridData] = React.useState<DetailedGridReportData | null>(null);
+  const [allProcessedReports, setAllProcessedReports] = React.useState<MemberReport[]>([]);
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = React.useState(false);
+  const [lowAttendanceMembers, setLowAttendanceMembers] = React.useState<MemberReport[]>([]);
+  const [excludedMemberNames, setExcludedMemberNames] = React.useState<Set<string>>(new Set());
+
   const csvInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,11 +135,55 @@ export function AttendanceReportGenerator() {
         return;
       }
       setFile(selectedFile);
+      // Reset all states
       setReportHeader(null);
       setMemberReports([]);
       setDetailedGridData(null);
+      setAllProcessedReports([]);
+      setLowAttendanceMembers([]);
+      setExcludedMemberNames(new Set());
+      setIsFilterDialogOpen(false);
+      // Process the new file
       processFile(selectedFile);
     }
+  };
+
+  const applyMemberFilter = (excludedNames: Set<string>) => {
+    const filteredReports = allProcessedReports.filter(
+      (report) => !excludedNames.has(report.memberName)
+    );
+    setMemberReports(filteredReports);
+
+    if (detailedGridData) {
+      const filteredGridData = {
+        ...detailedGridData,
+        memberRows: detailedGridData.memberRows.filter(
+          (row) => !excludedNames.has(row.memberName)
+        ),
+      };
+      setDetailedGridData(filteredGridData);
+    }
+    toast({
+      title: "Report Filtered",
+      description: `${excludedNames.size} member(s) have been excluded from the report.`,
+    });
+  };
+
+  const handleToggleExcludedMember = (memberName: string) => {
+    setExcludedMemberNames(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(memberName)) {
+            newSet.delete(memberName);
+        } else {
+            newSet.add(memberName);
+        }
+        return newSet;
+    });
+  };
+
+  const handleApplyFilterDialog = () => {
+    applyMemberFilter(excludedMemberNames);
+    setIsFilterDialogOpen(false);
   };
 
   const processFile = (fileToProcess: File) => {
@@ -217,10 +269,17 @@ export function AttendanceReportGenerator() {
         // Batch AI classification
         const classificationResults = await classifyAttendanceBatch({ texts: Array.from(uniqueCommentsToClassify) });
         const classificationMap = new Map(classificationResults.classifications.map(c => [c.text, c.status]));
+        
+        const parseActivityDate = (activityName: string) => {
+            const dateMatch = activityName.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
+            if (!dateMatch) return new Date(0); // Return an early date if no match
+            const [day, month, year] = dateMatch[1].split('/');
+            return new Date(`${year}-${month}-${day}`);
+        };
 
-        const sortedUniqueActivities = Array.from(uniqueActivities).sort((a,b) => new Date(a.split(' ')[0]).getTime() - new Date(b.split(' ')[0]).getTime());
+        const sortedUniqueActivities = Array.from(uniqueActivities).sort((a,b) => parseActivityDate(a).getTime() - parseActivityDate(b).getTime());
 
-        const reports: MemberReport[] = Object.entries(groupedByMember).map(([memberName, activities]) => {
+        const processedReports: MemberReport[] = Object.entries(groupedByMember).map(([memberName, activities]) => {
           const eligibleActivities = activities.filter(act => act.attendance !== "--").length;
           const attendedActivities = activities.filter(act => act.attendance === "P").length;
           const attendancePercentage = eligibleActivities > 0 ? (attendedActivities / eligibleActivities) * 100 : 0;
@@ -235,6 +294,8 @@ export function AttendanceReportGenerator() {
             notAttended
           };
         });
+        
+        setAllProcessedReports(processedReports); // Store all reports before filtering
 
         const memberRowsData = Object.entries(groupedByMember).map(([memberName, activities]) => {
             let p = 0, l = 0, s = 0, a = 0;
@@ -285,8 +346,17 @@ export function AttendanceReportGenerator() {
         };
         
         setDetailedGridData(gridData);
-        setMemberReports(reports);
-        toast({ title: "Report Processed", description: `Found attendance data for ${reports.length} members.` });
+        setMemberReports(processedReports);
+        
+        const lowAtt = processedReports.filter(r => r.attendancePercentage < 20);
+        setLowAttendanceMembers(lowAtt);
+
+        if (lowAtt.length > 0) {
+            setIsFilterDialogOpen(true);
+        } else {
+             toast({ title: "Report Processed", description: `Found attendance data for ${processedReports.length} members. No members with very low attendance detected.` });
+        }
+
       } catch (error: any) {
         toast({
           variant: "destructive",
@@ -423,13 +493,43 @@ export function AttendanceReportGenerator() {
     };
     
     const formatActivityHeader = (activityName: string): string => {
-        const typeAbbrMatch = activityName.match(/^([^|]+)/);
-        const typeAbbr = typeAbbrMatch ? typeAbbrMatch[1].trim() : 'ACT';
+        const nameLower = activityName.toLowerCase();
+        let code = "MISC";
+        let location = "";
 
+        // Extract date
         const dateMatch = activityName.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
-        const startDate = dateMatch ? dateMatch[1] : '';
+        const dateStr = dateMatch ? dateMatch[1] : "NO_DATE";
 
-        return `${typeAbbr} ${startDate}`.trim();
+        if (nameLower.includes('routine parade')) {
+            code = 'PDE';
+        } else if (nameLower.includes('fieldcraft')) {
+            code = 'FCE';
+        } else if (nameLower.startsWith('gen')) {
+            const genParts = activityName.split('|').map(p => p.trim());
+            location = genParts[genParts.length - 1]; // Last part is usually location
+            const typePart = genParts.find(p => p.toLowerCase().startsWith('gen')) || "";
+            const subType = genParts.find(p => ['low profile', 'eca'].includes(p.toLowerCase()));
+            
+            if (subType?.toLowerCase() === 'low profile') {
+                code = 'GLP';
+            } else if (subType?.toLowerCase() === 'eca') {
+                code = 'GEC';
+            } else {
+                code = 'GEN';
+            }
+        } else if (nameLower.startsWith('x_xxx')) {
+            code = 'MISC';
+        } else { // Fallback for other OPS etc.
+            const firstPart = activityName.split('|')[0].trim();
+            if (firstPart.length <= 4) code = firstPart.toUpperCase();
+        }
+
+        let header = `${code} - ${dateStr}`;
+        if (location && (code.startsWith('G') || code.startsWith('MISC'))) {
+            header += ` - ${location}`;
+        }
+        return header;
     };
 
     // Create header row with activities rotated
@@ -520,7 +620,7 @@ export function AttendanceReportGenerator() {
         {memberReports.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>Generated Report Preview</CardTitle>
+              <CardTitle>Generated Report</CardTitle>
               <CardDescription>
                 Unit: {reportHeader?.unit} | Period: {reportHeader?.startDate} - {reportHeader?.endDate}
               </CardDescription>
@@ -534,6 +634,10 @@ export function AttendanceReportGenerator() {
                 <Button onClick={handleDownloadDetailedXls} disabled={isLoading || !detailedGridData} className="w-full sm:w-auto flex-1">
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
                   Download Detailed Report (XLS)
+                </Button>
+                 <Button onClick={() => setIsFilterDialogOpen(true)} variant="outline" disabled={isLoading || allProcessedReports.length === 0} className="w-full sm:w-auto flex-1">
+                  <Filter className="mr-2 h-4 w-4" />
+                  Filter Members
                 </Button>
               </div>
 
@@ -565,7 +669,44 @@ export function AttendanceReportGenerator() {
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Filter Low Attendance Members</DialogTitle>
+                    <DialogDescription>
+                        The following members have less than 20% attendance. Select them to exclude from the report.
+                    </DialogDescription>
+                </DialogHeader>
+                <ScrollArea className="max-h-80 border rounded-md my-4">
+                    <div className="p-4 space-y-2">
+                    {lowAttendanceMembers.length > 0 ? (
+                        lowAttendanceMembers.map(member => (
+                            <div key={member.memberName} className="flex items-center space-x-2 p-2 rounded-md hover:bg-muted">
+                                <Checkbox
+                                    id={`exclude-${member.memberName}`}
+                                    checked={excludedMemberNames.has(member.memberName)}
+                                    onCheckedChange={() => handleToggleExcludedMember(member.memberName)}
+                                />
+                                <Label htmlFor={`exclude-${member.memberName}`} className="flex-1 cursor-pointer">
+                                    {member.memberName} ({member.attendancePercentage.toFixed(1)}%)
+                                </Label>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-sm text-muted-foreground text-center py-4">No members with less than 20% attendance found.</p>
+                    )}
+                    </div>
+                </ScrollArea>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsFilterDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleApplyFilterDialog}>Apply Filter</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
       </CardContent>
     </Card>
   );
 }
+
