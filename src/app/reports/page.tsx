@@ -25,7 +25,7 @@ const FOOTER_IMAGE_URL = "/AAFCLetterhead-Footer.png";
 const REGIONS = ['North', 'South', 'East', 'West', 'Headquarters'];
 const WING_WIDE_OPTION = "All 7 Wing";
 
-type ReportType = "oicLevelByUnit" | "specificComplianceByUnit";
+type ReportType = "oicLevelByUnit" | "specificComplianceByUnit" | "mandatoryTrainingCompliance";
 
 interface OICLevelReportItem {
   staffId: string;
@@ -45,7 +45,19 @@ interface SpecificComplianceReportItem {
   details: string;
 }
 
-type ReportData = OICLevelReportItem[] | SpecificComplianceReportItem[];
+interface MandatoryTrainingReport {
+    compliant: { staffId: string; staffName: string; rank: string; squadron: string }[];
+    nonCompliant: {
+        staffId: string;
+        staffName: string;
+        rank: string;
+        squadron: string;
+        checks: { name: string; isMet: boolean; details: string }[];
+    }[];
+}
+
+type ReportData = OICLevelReportItem[] | SpecificComplianceReportItem[] | MandatoryTrainingReport;
+
 
 async function fetchAllTrainingLogs(): Promise<TrainingLog[]> {
   const logsCollectionRef = collection(db, 'trainingLogs');
@@ -175,6 +187,53 @@ export default function ReportsPage() {
         };
       });
       setReportData(complianceReport);
+    } else if (selectedReportType === "mandatoryTrainingCompliance") {
+        const reportResult: MandatoryTrainingReport = { compliant: [], nonCompliant: [] };
+        
+        const accomplishmentKeywords = {
+            org: ["Organisational Understanding Workshop - Completed"],
+            initial: ["Initial Mandatory Training - Completed"],
+            uniform: ["Uniform Mandatory Training - Completed"],
+        };
+
+        staffInScope.forEach(staff => {
+            const memberLogs = trainingLogs?.filter(log => log.serviceNumber === staff.serviceNumber) || [];
+            
+            const findLatestLog = (keywords: string[]) => {
+                const relevantLogs = memberLogs
+                    .filter(log => keywords.some(kw => log.courseName.toLowerCase().includes(kw.toLowerCase())))
+                    .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
+                return relevantLogs.length > 0 ? relevantLogs[0] : null;
+            };
+
+            const orgLog = findLatestLog(accomplishmentKeywords.org);
+            const initialLog = findLatestLog(accomplishmentKeywords.initial);
+            const uniformLog = findLatestLog(accomplishmentKeywords.uniform);
+            
+            const isCompliant = !!orgLog || (!!initialLog && !!uniformLog);
+
+            if (isCompliant) {
+                reportResult.compliant.push({
+                    staffId: staff.id || staff.serviceNumber,
+                    staffName: `${staff.firstName} ${staff.lastName}`,
+                    rank: staff.rank,
+                    squadron: staff.squadron || "N/A",
+                });
+            } else {
+                 reportResult.nonCompliant.push({
+                    staffId: staff.id || staff.serviceNumber,
+                    staffName: `${staff.firstName} ${staff.lastName}`,
+                    rank: staff.rank,
+                    squadron: staff.squadron || "N/A",
+                    checks: [
+                        { name: "Organisational Understanding Workshop - Completed", isMet: !!orgLog, details: orgLog ? `Completed - ${format(new Date(orgLog.completionDate), "dd/MM/yyyy")}` : "NOT HELD" },
+                        { name: "Initial Mandatory Training - Completed", isMet: !!initialLog, details: initialLog ? `Completed - ${format(new Date(initialLog.completionDate), "dd/MM/yyyy")}` : "NOT HELD" },
+                        { name: "Uniform Mandatory Training - Completed", isMet: !!uniformLog, details: uniformLog ? `Completed - ${format(new Date(uniformLog.completionDate), "dd/MM/yyyy")}` : "NOT HELD" },
+                    ],
+                });
+            }
+        });
+        setReportData(reportResult);
     }
     setIsGeneratingReport(false);
     toast({title: "Report Generated", description: "Report data is now displayed below."});
@@ -186,15 +245,43 @@ export default function ReportsPage() {
       return;
     }
     
+    // Check if data is of type MandatoryTrainingReport
+    if (selectedReportType === 'mandatoryTrainingCompliance' && 'compliant' in (data as MandatoryTrainingReport)) {
+        const mandatoryReport = data as MandatoryTrainingReport;
+        const csvRows = [
+            ['Status', 'Rank', 'Name', 'Squadron', 'Accomplishment', 'Accomplishment Status'],
+            ...mandatoryReport.nonCompliant.flatMap(member => 
+                member.checks.map((check, index) => 
+                    index === 0 ? 
+                    ['Non-Compliant', member.rank, member.staffName, member.squadron, check.name, check.details] :
+                    ['', '', '', '', check.name, check.details]
+                )
+            ),
+            ...mandatoryReport.compliant.map(member => 
+                ['Compliant', member.rank, member.staffName, member.squadron, 'N/A', 'N/A']
+            )
+        ];
+        const csvString = csvRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+        const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.setAttribute("href", URL.createObjectURL(blob));
+        link.setAttribute("download", filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+    }
+
     const headers = Object.keys(data[0]);
-    const csvRows = [
+    const csvRowsData = [
       headers.join(','),
-      ...data.map(row => 
-        headers.map(header => JSON.stringify((row as any)[header], (_, value) => value === null ? '' : value)).join(',')
+      ...(data as Array<any>).map(row => 
+        headers.map(header => JSON.stringify(row[header], (_, value) => value === null ? '' : value)).join(',')
       )
     ];
     
-    const csvString = csvRows.join('\r\n');
+    const csvString = csvRowsData.join('\r\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     if (link.download !== undefined) {
@@ -216,22 +303,20 @@ export default function ReportsPage() {
       const complianceItem = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey);
       const itemName = complianceItem ? complianceItem.name.replace(/\s+/g, '_') : "compliance_item";
       filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
+    } else if (selectedReportType === "mandatoryTrainingCompliance" && selectedUnitOrRegion) {
+        filename = `mandatory_training_compliance_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
     }
     generateCsv(reportData, filename);
   };
   
   const handleExportPdf = async () => {
-    if (!reportData || reportData.length === 0) {
-        toast({variant: "destructive", title: "No Data", description: "No data to export for PDF."});
+    if (!reportData || !selectedUnitOrRegion || !selectedReportType) {
+        toast({variant: "destructive", title: "Context Missing", description: "Cannot generate PDF without full report context."});
         return;
     }
-    if (!selectedUnitOrRegion || !selectedReportType) {
-        toast({variant: "destructive", title: "Report Context Missing", description: "Cannot determine report context for PDF export."});
-        return;
-    }
-
+    
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable');
+    const autoTable = (await import('jspdf-autotable')).default;
 
     const doc = new jsPDF();
     resetLetterheadCache();
@@ -248,25 +333,24 @@ export default function ReportsPage() {
     footerHeight = fh;
     yPos = margin + headerHeight + 5;
 
-    const checkPageBreak = async (neededHeight: number = lineSpacing) => {
-        if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight - 10) {
-            addPageNumbers(doc, footerHeight, margin);
-            doc.addPage();
-            await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
-            yPos = margin + headerHeight + 5;
-        }
-    };
-    
-    doc.setFontSize(16);
-    doc.setFont(undefined, "bold");
     let reportTitle = "Report";
+    let filename = `report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
+    
     if (selectedReportType === "oicLevelByUnit") {
         reportTitle = `OIC Level Report for ${selectedUnitOrRegion}`;
+        filename = `oic_level_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     } else if (selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey) {
         const item = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey);
         reportTitle = `${item ? item.name : 'Compliance'} Report for ${selectedUnitOrRegion}`;
+        const itemName = item ? item.name.replace(/\s+/g, '_') : "compliance_item";
+        filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
+    } else if (selectedReportType === "mandatoryTrainingCompliance") {
+        reportTitle = `Mandatory Training Compliance for ${selectedUnitOrRegion}`;
+        filename = `mandatory_training_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     }
-    await checkPageBreak(sectionSpacing);
+
+    doc.setFontSize(16);
+    doc.setFont(undefined, "bold");
     doc.text(reportTitle, pageWidth / 2, yPos, { align: 'center' });
     yPos += lineSpacing * 1.5;
     doc.setFontSize(10);
@@ -274,48 +358,78 @@ export default function ReportsPage() {
     doc.text(`Generated on: ${format(new Date(), "PPP")}`, pageWidth / 2, yPos, { align: 'center' });
     yPos += sectionSpacing;
 
-    const tableHeaders: string[] = Object.keys(reportData[0]).filter(key => key !== 'staffId');
-    
-    const tableData = reportData.map(item => {
-        const row: any = {};
-        for(const key of tableHeaders){
-            if (key === 'isMet') row[key] = (item as any)[key] ? 'Met' : 'Not Met';
-            else row[key] = (item as any)[key] === null ? 'N/A' : (item as any)[key];
-        }
-        return Object.values(row);
-    });
-
-    (doc as any).autoTable({
-        startY: yPos,
-        head: [tableHeaders.map(h => h.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()))], // Format headers
-        body: tableData,
-        theme: 'striped',
-        headStyles: { fillColor: [0, 48, 143], textColor: 255 },
-        margin: { top: yPos + sectionSpacing },
-        didDrawPage: (data: any) => {},
-        willDrawCell: (data: any) => {
-            if (data.section === 'body' && data.column.dataKey === (tableHeaders.length -1) ) {
-                if (typeof data.cell.raw === 'string' && data.cell.raw.toLowerCase().includes("out of date")) {
-                    doc.setTextColor(255,0,0);
-                } else if (typeof data.cell.raw === 'string' && data.cell.raw.toLowerCase().includes("missing")) {
-                     doc.setTextColor(200,100,0);
-                }
+    if (Array.isArray(reportData)) {
+        const tableHeaders: string[] = Object.keys(reportData[0]).filter(key => key !== 'staffId');
+        const tableData = reportData.map(item => {
+            const row: any = {};
+            for(const key of tableHeaders){
+                if (key === 'isMet') row[key] = (item as any)[key] ? 'Met' : 'Not Met';
+                else row[key] = (item as any)[key] === null ? 'N/A' : (item as any)[key];
             }
-        },
-        didDrawCell: (data: any) => {
-            doc.setTextColor(0,0,0);
+            return Object.values(row);
+        });
+
+        autoTable(doc, {
+            startY: yPos,
+            head: [tableHeaders.map(h => h.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()))],
+            body: tableData,
+            theme: 'striped',
+            headStyles: { fillColor: [0, 48, 143], textColor: 255 },
+        });
+    } else if (selectedReportType === "mandatoryTrainingCompliance" && 'compliant' in (reportData as MandatoryTrainingReport)) {
+        const mandatoryReport = reportData as MandatoryTrainingReport;
+        
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        doc.text("Section 1: Members Not Meeting Requirement", margin, yPos);
+        yPos += lineSpacing * 1.5;
+
+        if (mandatoryReport.nonCompliant.length > 0) {
+            mandatoryReport.nonCompliant.forEach(member => {
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                doc.text(`${member.rank} ${member.staffName} (${member.squadron})`, margin, yPos);
+                yPos += lineSpacing;
+
+                doc.setFont(undefined, 'normal');
+                member.checks.forEach(check => {
+                    const statusColor = check.isMet ? [0, 128, 0] : [255, 0, 0];
+                    doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+                    doc.text(`- ${check.name}: ${check.details}`, margin + 5, yPos);
+                    yPos += lineSpacing * 0.8;
+                });
+                doc.setTextColor(0, 0, 0);
+                yPos += lineSpacing * 0.5;
+            });
+        } else {
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'italic');
+            doc.text("All members meet the mandatory training requirements.", margin, yPos);
+            yPos += lineSpacing;
         }
-    });
-    
-    addPageNumbers(doc, footerHeight, margin);
-    let filename = `report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
-     if (selectedReportType === "oicLevelByUnit") {
-      filename = `oic_level_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
-    } else if (selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey) {
-      const complianceItem = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey);
-      const itemName = complianceItem ? complianceItem.name.replace(/\s+/g, '_') : "compliance_item";
-      filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
+
+        yPos += sectionSpacing;
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        doc.text("Section 2: Compliant Members", margin, yPos);
+        yPos += lineSpacing;
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'italic');
+        const blurbLines = doc.splitTextToSize("All the below members have completed either Both Initial Mandatory Training, and Uniform Mandatory Training, or Organisation Understanding Workshop. For the purposes of this report they have been marked as compliant.", pageWidth - margin * 2);
+        doc.text(blurbLines, margin, yPos);
+        yPos += blurbLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.5);
+
+        const compliantTableHeaders = ["Rank", "Name", "Squadron"];
+        const compliantTableBody = mandatoryReport.compliant.map(m => [m.rank, m.staffName, m.squadron]);
+        autoTable(doc, {
+            startY: yPos,
+            head: [compliantTableHeaders],
+            body: compliantTableBody,
+            theme: 'striped',
+        });
     }
+
+    addPageNumbers(doc, footerHeight, margin);
     doc.save(filename);
   };
 
@@ -370,6 +484,7 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value="oicLevelByUnit">OIC Level by Unit</SelectItem>
                   <SelectItem value="specificComplianceByUnit">Specific Compliance Item by Unit</SelectItem>
+                  <SelectItem value="mandatoryTrainingCompliance">Mandatory Training Compliance</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -408,8 +523,8 @@ export default function ReportsPage() {
               </CardContent>
           </Card>
       )}
-
-      {reportData && !isGeneratingReport && (
+      
+      {reportData && !isGeneratingReport && Array.isArray(reportData) && (
         <Card className="mt-6 shadow-lg">
           <CardHeader>
             <CardTitle className="text-xl">Report Results</CardTitle>
@@ -476,6 +591,72 @@ export default function ReportsPage() {
             </Button>
           </CardFooter>
         </Card>
+      )}
+
+      {reportData && !isGeneratingReport && selectedReportType === "mandatoryTrainingCompliance" && (
+          <Card className="mt-6 shadow-lg">
+            <CardHeader>
+                <CardTitle className="text-xl">Report Results</CardTitle>
+                <CardDescription>Mandatory Training Compliance for {selectedUnitOrRegion}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                <div>
+                    <h3 className="text-lg font-semibold mb-2">Section 1: Members Not Meeting Requirement</h3>
+                    {(reportData as MandatoryTrainingReport).nonCompliant.length > 0 ? (
+                        <div className="space-y-4">
+                            {(reportData as MandatoryTrainingReport).nonCompliant.map(member => (
+                                <div key={member.staffId} className="border p-4 rounded-md">
+                                    <p className="font-bold">{member.rank} {member.staffName} <span className="font-normal text-muted-foreground">({member.squadron})</span></p>
+                                    <ul className="list-disc pl-5 mt-2 text-sm">
+                                        {member.checks.map(check => (
+                                            <li key={check.name} className={check.isMet ? 'text-green-600' : 'text-red-600'}>
+                                                {check.name}: {check.details}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-muted-foreground italic">All members in scope meet the mandatory training requirements.</p>
+                    )}
+                </div>
+                 <div>
+                    <h3 className="text-lg font-semibold mb-2">Section 2: Compliant Members</h3>
+                    <p className="text-sm text-muted-foreground mb-4">All the below members have completed either Both Initial Mandatory Training, and Uniform Mandatory Training, or Organisation Understanding Workshop. For the purposes of this report they have been marked as compliant.</p>
+                     {(reportData as MandatoryTrainingReport).compliant.length > 0 ? (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Rank</TableHead>
+                                    <TableHead>Name</TableHead>
+                                    <TableHead>Squadron</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {(reportData as MandatoryTrainingReport).compliant.map(member => (
+                                    <TableRow key={member.staffId}>
+                                        <TableCell>{member.rank}</TableCell>
+                                        <TableCell>{member.staffName}</TableCell>
+                                        <TableCell>{member.squadron}</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                     ) : (
+                        <p className="text-muted-foreground italic">No members in scope meet the compliance requirements.</p>
+                     )}
+                </div>
+            </CardContent>
+            <CardFooter className="flex justify-end gap-2">
+                <Button variant="outline" onClick={handleExportCsv} disabled={!reportData}>
+                    <FileSpreadsheet className="mr-2 h-4 w-4" /> Export CSV
+                </Button>
+                <Button variant="outline" onClick={handleExportPdf} disabled={!reportData}>
+                    <Download className="mr-2 h-4 w-4" /> Export PDF
+                </Button>
+            </CardFooter>
+          </Card>
       )}
     </div>
   );
