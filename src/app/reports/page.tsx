@@ -333,6 +333,16 @@ export default function ReportsPage() {
     footerHeight = fh;
     yPos = margin + headerHeight + 5;
 
+    const checkPageBreak = async (neededHeight: number) => {
+      if (yPos + neededHeight > doc.internal.pageSize.getHeight() - margin - footerHeight) {
+        doc.addPage();
+        await addLetterheadAndFooter(doc, HEADER_IMAGE_URL, FOOTER_IMAGE_URL, margin);
+        yPos = margin + headerHeight + 5;
+        return true;
+      }
+      return false;
+    };
+
     let reportTitle = "Report";
     let filename = `report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     
@@ -381,34 +391,45 @@ export default function ReportsPage() {
         
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
+        await checkPageBreak(lineSpacing * 1.5);
         doc.text("Section 1: Members Not Meeting Requirement", margin, yPos);
         yPos += lineSpacing * 1.5;
 
         if (mandatoryReport.nonCompliant.length > 0) {
-            mandatoryReport.nonCompliant.forEach(member => {
+            for (const member of mandatoryReport.nonCompliant) {
+                const neededHeight = (1 + member.checks.length) * lineSpacing + (lineSpacing * 0.5);
+                if (await checkPageBreak(neededHeight)) {
+                  doc.setFontSize(12); doc.setFont(undefined, 'bold');
+                  doc.text("Section 1: Members Not Meeting Requirement (Continued)", margin, yPos);
+                  yPos += lineSpacing * 1.5;
+                }
+
                 doc.setFontSize(10);
                 doc.setFont(undefined, 'bold');
                 doc.text(`${member.rank} ${member.staffName} (${member.squadron})`, margin, yPos);
                 yPos += lineSpacing;
 
                 doc.setFont(undefined, 'normal');
-                member.checks.forEach(check => {
+                for (const check of member.checks) {
                     const statusColor = check.isMet ? [0, 128, 0] : [255, 0, 0];
                     doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
                     doc.text(`- ${check.name}: ${check.details}`, margin + 5, yPos);
                     yPos += lineSpacing * 0.8;
-                });
+                }
                 doc.setTextColor(0, 0, 0);
                 yPos += lineSpacing * 0.5;
-            });
+            }
         } else {
+            await checkPageBreak(lineSpacing);
             doc.setFontSize(10);
             doc.setFont(undefined, 'italic');
-            doc.text("All members meet the mandatory training requirements.", margin, yPos);
+            doc.text("All members in scope meet the mandatory training requirements.", margin, yPos);
             yPos += lineSpacing;
         }
 
         yPos += sectionSpacing;
+        if (await checkPageBreak(sectionSpacing + lineSpacing * 3)) { /* New page if needed */ }
+
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         doc.text("Section 2: Compliant Members", margin, yPos);
