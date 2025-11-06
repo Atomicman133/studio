@@ -780,16 +780,6 @@ export default function CompliancePage() {
                    ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
                    : ` (checked for existence).`
                  }
-                 <br />
-                 <span className="text-xs italic">Identified if training log's course name or qualification contains keywords like:
-                 {
-                  criterion.key === 'firstAid' ? '"First Aid", "HLTAID"' :
-                  criterion.key === 'wwcc' ? '"Working With Children Check", "WWCC", "Working With Children - WA - Certified"' :
-                  criterion.key === 'codeOfConduct' ? '"Code of Conduct", "Behavioural Policy Acceptance", "CoC"' :
-                  criterion.key === 'policeClearance' ? '"National Police Clearance", "Police Check", "NPC"' :
-                  criterion.key === 'youthSafety' ? '"Defence Youth Safety", "DYSAT", "Youth Mental Health - Awareness - Completed", "Defence Youth Protection Awareness Course - Completed Online", "Defence Youth Safety Level 3 - Leader - Completed Online"' : ''
-                 }
-                 </span>
               </li>
             ))}
           </ul>

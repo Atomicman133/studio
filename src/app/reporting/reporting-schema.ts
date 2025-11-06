@@ -63,23 +63,13 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
   },
   {
     key: 'youthSafety',
-    name: 'Defence Youth Safety Annual Awareness Training',
+    name: 'Defence Youth Protection',
     yearsToExpire: 1,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, [
-        'defence youth safety',
-        'dysat',
-        'youth mental health - awareness - completed',
-        'defence youth protection awareness course - completed online',
-        'defence youth safety level 3 - leader - completed online',
-        'whs annual awareness - level 2' // Added this new keyword
+        "Defence Youth Protection Officers and Instructors - Completed Online"
       ]) || matchesKeywords(log.qualificationAchieved, [
-        'defence youth safety',
-        'dysat',
-        'youth mental health - awareness - completed',
-        'defence youth protection awareness course - completed online',
-        'defence youth safety level 3 - leader - completed online',
-        'whs annual awareness - level 2' // Added this new keyword
+        "Defence Youth Protection Officers and Instructors - Completed Online"
       ])
   },
 ] as const;
