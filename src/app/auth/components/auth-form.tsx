@@ -13,10 +13,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { emailPasswordSchema, signUpSchema, type EmailPasswordFormData, type SignUpFormData } from "../auth-schema";
 import { useAuth } from "@/contexts/auth-context";
 import { Loader2 } from "lucide-react";
-import Image from "next/image"; // For Google icon
-import { sendPasswordResetEmail } from "firebase/auth"; // Import for password reset
-import { auth } from "@/lib/firebase/config"; // Import auth instance
-import { useToast } from "@/hooks/use-toast"; // Import useToast
+import { sendPasswordResetEmail } from "firebase/auth"; 
+import { auth } from "@/lib/firebase/config"; 
+import { useToast } from "@/hooks/use-toast"; 
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,7 +34,7 @@ export function AuthForm() {
   const { toast } = useToast();
 
   const [isDisclaimerOpen, setIsDisclaimerOpen] = React.useState(false);
-  const [loginData, setLoginData] = React.useState<EmailPasswordFormData | null>(null);
+  const [pendingLoginMethod, setPendingLoginMethod] = React.useState<'email' | 'google' | null>(null);
 
   const loginForm = useForm<EmailPasswordFormData>({
     resolver: zodResolver(emailPasswordSchema),
@@ -47,32 +46,42 @@ export function AuthForm() {
     defaultValues: { email: "", password: "", confirmPassword: "" },
   });
 
-  const onLoginSubmit: SubmitHandler<EmailPasswordFormData> = (data) => {
-    setLoginData(data);
+  const onLoginSubmit: SubmitHandler<EmailPasswordFormData> = () => {
+    setPendingLoginMethod('email');
     setIsDisclaimerOpen(true);
   };
   
-  const handleAcceptAndLogin = async () => {
-    if (!loginData) return;
-    
+  const handleGoogleSignInClick = () => {
+    setPendingLoginMethod('google');
+    setIsDisclaimerOpen(true);
+  };
+
+  const handleAcceptAndProceed = async () => {
     setIsDisclaimerOpen(false);
     setIsSubmitting(true);
-    await signInWithEmail(loginData.email, loginData.password);
+
+    if (pendingLoginMethod === 'email') {
+        const data = loginForm.getValues();
+        await signInWithEmail(data.email, data.password);
+    } else if (pendingLoginMethod === 'google') {
+        await signInWithGoogle();
+    }
+
     setIsSubmitting(false);
-    setLoginData(null);
+    setPendingLoginMethod(null);
   };
+  
+  const handleCancelLogin = () => {
+    setPendingLoginMethod(null);
+    setIsDisclaimerOpen(false);
+  };
+
 
   const onSignUpSubmit: SubmitHandler<SignUpFormData> = async (data) => {
     setIsSubmitting(true);
     await signUpWithEmail(data.email, data.password);
     setIsSubmitting(false);
   };
-
-  const handleGoogleSignIn = async () => {
-    setIsSubmitting(true);
-    await signInWithGoogle();
-    setIsSubmitting(false);
-  }
 
   const handlePasswordReset = async () => {
     const email = loginForm.getValues("email");
@@ -226,8 +235,8 @@ export function AuthForm() {
               </span>
             </div>
           </div>
-          <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isSubmitting}>
-            {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> :
+          <Button variant="outline" className="w-full" onClick={handleGoogleSignInClick} disabled={isSubmitting}>
+            {isSubmitting && pendingLoginMethod === 'google' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> :
               <svg role="img" viewBox="0 0 24 24" className="mr-2 h-4 w-4"><path fill="currentColor" d="M12.48 10.92v3.28h7.84c-.24 1.84-.85 3.18-1.73 4.1-1.02 1.08-2.58 2.03-4.66 2.03-3.87 0-7.02-3.22-7.02-7.2s3.15-7.2 7.02-7.2c1.98 0 3.66.83 4.54 1.72l2.48-2.48C18.32.54 15.9.01 12.48.01 5.83.01 0 5.85 0 12.5s5.83 12.49 12.48 12.49c3.27 0 5.73-1.12 7.58-2.98 1.94-1.94 2.74-4.75 2.74-7.96v-.01c0-.8-.09-1.25-.24-1.61H12.48z"></path></svg>
             }
             Google
@@ -248,13 +257,13 @@ export function AuthForm() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setLoginData(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleAcceptAndLogin}>
+            <AlertDialogCancel onClick={handleCancelLogin}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleAcceptAndProceed}>
               Accept and Proceed
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
-}
+    
+    
