@@ -64,12 +64,12 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
   {
     key: 'youthSafety',
     name: 'Defence Youth Protection',
-    yearsToExpire: 1,
+    yearsToExpire: 3,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, [
-        "Defence Youth Protection Officers and Instructors - Completed Online"
+        "Defence Youth Protection Officers and Instructors"
       ]) || matchesKeywords(log.qualificationAchieved, [
-        "Defence Youth Protection Officers and Instructors - Completed Online"
+        "Defence Youth Protection Officers and Instructors"
       ])
   },
 ] as const;
