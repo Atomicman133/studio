@@ -247,15 +247,13 @@ export function AuthForm() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Attention</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-                <div className="space-y-4 text-sm text-muted-foreground">
-                    <p>Squadron Manager is a supplementary tool and is **not** an official Australian Air Force Cadets (AAFC) information system.</p>
-                    <p>Although it does not store sensitive or classified information, users must exercise care and sound judgement when accessing, entering, or using any information contained within this platform.</p>
-                    <p>Access is restricted to authorised members of the Australian Air Force Cadets who have been specifically granted permission. By proceeding, you acknowledge your responsibility to handle all information appropriately, maintain confidentiality where required, and comply with all relevant AAFC policies, directives, and expectations.</p>
-                    <p>Unauthorised access or misuse is strictly prohibited.</p>
-                </div>
-            </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-4 text-sm text-muted-foreground max-h-[60vh] overflow-y-auto pr-4">
+              <p>Squadron Manager is a supplementary tool and is <strong>not</strong> an official Australian Air Force Cadets (AAFC) information system.</p>
+              <p>Although it does not store sensitive or classified information, users must exercise care and sound judgement when accessing, entering, or using any information contained within this platform.</p>
+              <p>Access is restricted to authorised members of the Australian Air Force Cadets who have been specifically granted permission. By proceeding, you acknowledge your responsibility to handle all information appropriately, maintain confidentiality where required, and comply with all relevant AAFC policies, directives, and expectations.</p>
+              <p>Unauthorised access or misuse is strictly prohibited.</p>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={handleCancelLogin}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleAcceptAndProceed}>
