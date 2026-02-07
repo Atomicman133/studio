@@ -126,7 +126,7 @@ export default function CompliancePage() {
 
 
   const toggleCollapsible = (staffMemberId: string) => {
-    setOpenCollapsible(prev => (prev === staffMemberId ? null : staffMemberId));
+    setOpenCollapsible(prev => (prev === staffMemberId ? null : prevId));
   };
 
   const getDaysToExpiry = (completionDate: Date, yearsToExpire: number): number | null => {
@@ -331,7 +331,6 @@ export default function CompliancePage() {
 
     // --- Overall Compliance Counts ---
     const compliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Compliant").length;
-    const partiallyCompliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
     const nonCompliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Not Compliant").length;
 
     doc.setFontSize(14);
@@ -344,7 +343,6 @@ export default function CompliancePage() {
     await checkPageBreak(lineSpacing * 3);
     doc.text(`Total Active Staff: ${activeStaffReports.length}`, pageMargin, yPos); yPos += lineSpacing;
     doc.text(`Compliant: ${compliantCount}`, pageMargin, yPos); yPos += lineSpacing;
-    doc.text(`Partially Compliant: ${partiallyCompliantCount}`, pageMargin, yPos); yPos += lineSpacing;
     doc.text(`Not Compliant: ${nonCompliantCount}`, pageMargin, yPos);
     yPos += sectionSpacing;
 
@@ -701,7 +699,6 @@ export default function CompliancePage() {
                         <TableCell>
                           <Badge variant={report.complianceStatusVariant}>
                             {report.complianceStatusText === "Compliant" && <ShieldCheck className="inline h-4 w-4 mr-1" />}
-                            {report.complianceStatusText === "Partially Compliant" && <ShieldAlert className="inline h-4 w-4 mr-1" />}
                             {report.complianceStatusText === "Not Compliant" && <ShieldOff className="inline h-4 w-4 mr-1" />}
                             {report.complianceStatusText}
                           </Badge>

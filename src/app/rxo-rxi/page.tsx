@@ -58,7 +58,6 @@ async function fetchAllTrainingLogs(): Promise<TrainingLog[]> {
 
 const chartConfig = {
   compliant: { label: "Compliant", color: "hsl(var(--chart-1))" },
-  partiallyCompliant: { label: "Partially Compliant", color: "hsl(var(--chart-2))" },
   nonCompliant: { label: "Non-Compliant", color: "hsl(var(--destructive))" },
 } satisfies ChartConfig;
 
@@ -93,9 +92,9 @@ export default function RxoRxiPage() {
 
     const regionalData = React.useMemo(() => {
         const dataByRegion = REGIONS.reduce((acc, region) => {
-            acc[region] = { staff: [], reports: [], summary: { compliant: 0, partiallyCompliant: 0, nonCompliant: 0 } };
+            acc[region] = { staff: [], reports: [], summary: { compliant: 0, nonCompliant: 0 } };
             return acc;
-        }, {} as Record<string, { staff: StaffMember[], reports: StaffComplianceReport[], summary: { compliant: number, partiallyCompliant: number, nonCompliant: number } }>);
+        }, {} as Record<string, { staff: StaffMember[], reports: StaffComplianceReport[], summary: { compliant: number, nonCompliant: number } }>);
 
         // Filter for active staff first
         const activeReports = allProcessedReports.filter(report => report.status === 'Active');
@@ -109,7 +108,6 @@ export default function RxoRxiPage() {
         
         for (const region in dataByRegion) {
             dataByRegion[region].summary.compliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Compliant").length;
-            dataByRegion[region].summary.partiallyCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Partially Compliant").length;
             dataByRegion[region].summary.nonCompliant = dataByRegion[region].reports.filter(r => r.complianceStatusText === "Not Compliant").length;
         }
 
@@ -217,7 +215,6 @@ export default function RxoRxiPage() {
                             const totalStaff = data.reports.length;
                             const pieData = [
                                 { name: 'Compliant', value: data.summary.compliant, fill: chartConfig.compliant.color, statusText: 'Compliant' as const },
-                                { name: 'Partially Compliant', value: data.summary.partiallyCompliant, fill: chartConfig.partiallyCompliant.color, statusText: 'Partially Compliant' as const },
                                 { name: 'Non-Compliant', value: data.summary.nonCompliant, fill: chartConfig.nonCompliant.color, statusText: 'Not Compliant' as const },
                             ].filter(item => item.value > 0);
 

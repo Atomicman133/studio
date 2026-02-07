@@ -121,9 +121,6 @@ export function processComplianceReports(
     if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
       complianceStatusText = "Compliant";
       complianceStatusVariant = "default";
-    } else if (metCount >= 3) { // Assuming 3 or more but not all is "Partially Compliant"
-      complianceStatusText = "Partially Compliant";
-      complianceStatusVariant = "secondary";
     }
     // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
 

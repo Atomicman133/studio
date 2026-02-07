@@ -19,8 +19,8 @@ export interface StaffComplianceReport {
   squadron: string;
   email?: string | null;
   staffServiceNumberActual?: string; // Explicit field for the staff member's actual service number
-  complianceStatusText: "Compliant" | "Partially Compliant" | "Not Compliant";
-  complianceStatusVariant: "default" | "secondary" | "destructive";
+  complianceStatusText: "Compliant" | "Not Compliant";
+  complianceStatusVariant: "default" | "destructive";
   status: typeof STAFF_STATUSES[number];
 }
 

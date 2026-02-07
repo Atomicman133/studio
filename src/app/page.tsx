@@ -114,7 +114,6 @@ async function fetchDashboardScheduledMeetings(): Promise<ScheduledMeeting[]> {
 
 const chartConfig = {
   compliant: { label: "Compliant", color: "hsl(var(--chart-1))" },
-  partiallyCompliant: { label: "Partially Compliant", color: "hsl(var(--chart-2))" },
   nonCompliant: { label: "Non-Compliant", color: "hsl(var(--destructive))" },
 } satisfies ChartConfig;
 
@@ -172,13 +171,12 @@ export default function DashboardPage() {
     if (processedReports.length > 0) {
       const activeReports = processedReports.filter(r => r.status === 'Active');
       const compliant = activeReports.filter(r => r.complianceStatusText === "Compliant").length;
-      const partiallyCompliant = activeReports.filter(r => r.complianceStatusText === "Partially Compliant").length;
       const nonCompliant = activeReports.filter(r => r.complianceStatusText === "Not Compliant").length;
-      return { compliant, partiallyCompliant, nonCompliant, total: activeReports.length };
+      return { compliant, nonCompliant, total: activeReports.length };
     }
     const activeStaffCount = staffList.filter(s => (s.status || 'Active') === 'Active').length;
     if (activeStaffCount > 0) {
-       return { compliant: 0, partiallyCompliant: 0, nonCompliant: activeStaffCount, total: activeStaffCount };
+       return { compliant: 0, nonCompliant: activeStaffCount, total: activeStaffCount };
     }
     return null;
   }, [processedReports, staffList]);
@@ -200,9 +198,8 @@ export default function DashboardPage() {
 
   const pieData = complianceData
     ? [
-        { name: 'Compliant', value: complianceData.compliant, fill: chartConfig.compliant.color, statusText: 'Compliant' as StaffComplianceReport["complianceStatusText"] },
-        { name: 'Partially Compliant', value: complianceData.partiallyCompliant, fill: chartConfig.partiallyCompliant.color, statusText: 'Partially Compliant' as StaffComplianceReport["complianceStatusText"] },
-        { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: chartConfig.nonCompliant.color, statusText: 'Not Compliant' as StaffComplianceReport["complianceStatusText"] },
+        { name: 'Compliant', value: complianceData.compliant, fill: chartConfig.compliant.color, statusText: 'Compliant' as const },
+        { name: 'Non-Compliant', value: complianceData.nonCompliant, fill: chartConfig.nonCompliant.color, statusText: 'Not Compliant' as const },
       ].filter(item => item.value > 0)
     : [];
 
@@ -241,7 +238,7 @@ export default function DashboardPage() {
     yPos += sectionSpacing;
     
     const tableHeaders: string[] = ["Rank", "Name", "Squadron", "Service No."];
-    const showNonCompliantItems = selectedComplianceSegmentTitle.toLowerCase().includes("partially") || selectedComplianceSegmentTitle.toLowerCase().includes("non-compliant");
+    const showNonCompliantItems = selectedComplianceSegmentTitle.toLowerCase().includes("not compliant");
     if (showNonCompliantItems) {
       tableHeaders.push("Non-Compliant Items");
     }
@@ -362,9 +359,6 @@ export default function DashboardPage() {
                 <div className="flex flex-col items-center mb-1 text-center">
                   <div className="text-xl font-bold" style={{ color: chartConfig.compliant.color }}>
                     {complianceData.compliant} Compliant
-                  </div>
-                  <div className="text-xl font-bold" style={{ color: chartConfig.partiallyCompliant.color }}>
-                    {complianceData.partiallyCompliant} Partially Compliant
                   </div>
                   <div className="text-xl font-bold" style={{ color: chartConfig.nonCompliant.color }}>
                     {complianceData.nonCompliant} Non-Compliant
@@ -540,7 +534,7 @@ export default function DashboardPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Squadron</TableHead>
                     <TableHead>Service No.</TableHead>
-                    {(selectedComplianceSegmentTitle.includes("Partially Compliant") || selectedComplianceSegmentTitle.includes("Non-Compliant")) && (
+                    {(selectedComplianceSegmentTitle.includes("Non-Compliant")) && (
                        <TableHead>Non-Compliant Items</TableHead>
                     )}
                   </TableRow>
@@ -552,7 +546,7 @@ export default function DashboardPage() {
                       <TableCell>{staff.staffMemberName}</TableCell>
                       <TableCell>{staff.squadron}</TableCell>
                       <TableCell>{staff.staffServiceNumberActual || "N/A"}</TableCell>
-                       {(selectedComplianceSegmentTitle.includes("Partially Compliant") || selectedComplianceSegmentTitle.includes("Non-Compliant")) && (
+                       {(selectedComplianceSegmentTitle.includes("Non-Compliant")) && (
                         <TableCell>
                           {staff.criteriaChecks.filter(c => !c.isMet).map(c => c.name).join(", ") || "None"}
                         </TableCell>
