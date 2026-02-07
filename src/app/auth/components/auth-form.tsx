@@ -263,5 +263,5 @@ export function AuthForm() {
         </AlertDialogContent>
       </AlertDialog>
     </>
-    
-    
+  );
+}
