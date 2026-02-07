@@ -12,8 +12,45 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.4",
+    version: "0.2.5",
     date: "Current",
+    title: "Simplified Compliance & Enhanced Reporting",
+    sections: [
+      {
+        title: "Compliance System Overhaul",
+        items: [
+          "Simplified compliance status to be strictly binary: 'Compliant' or 'Not Compliant'. The 'Partially Compliant' category has been removed across all dashboards and reports for clarity.",
+          "Updated the 'Defence Youth Protection' requirement: its validity period is now 3 years, and the only recognized course is 'Defence Youth Protection Officers and Instructors'.",
+        ],
+      },
+      {
+        title: "Reporting Enhancements",
+        items: [
+          "Added a new 'Mandatory Training Compliance' report to the 'Generate Reports' section. This report checks for completion of 'Organisational Understanding Workshop' or both 'Initial & Uniform Mandatory Training'.",
+          "The Attendance Reporting feature on the 'RXO / RXI' page now includes a pop-up dialog to filter out members with less than 20% attendance, allowing for more relevant reports.",
+          "The detailed XLS attendance export format has been significantly improved with chronologically sorted, abbreviated, and more descriptive column headers for activities.",
+        ],
+      },
+      {
+        title: "Security & User Experience",
+        items: [
+          "Implemented a mandatory disclaimer dialog on the login screen. Users must read and accept the terms before proceeding to log in via email or Google.",
+        ],
+      },
+      {
+        title: "Bug Fixes & Stability",
+        items: [
+          "Resolved an issue where the PDF export for the new Mandatory Training report would be cut off on long lists.",
+          "Fixed a build failure caused by a missing closing brace in the authentication form component.",
+          "Addressed a bug where the login disclaimer would not appear for Google sign-in attempts.",
+          "Corrected several console errors related to invalid HTML structure and component rendering to improve stability.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.4",
+    date: "Previous Update",
     title: "Enhanced CSV Import & Data Integrity",
     sections: [
       {
