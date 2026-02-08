@@ -369,8 +369,6 @@ const StaffDetailsContent = ({
     let overallStatus: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
     if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
       overallStatus = "Compliant";
-    } else if (metCount >= 3) { 
-      overallStatus = "Partially Compliant";
     }
     return { criteriaChecks, overallStatus };
   };
@@ -590,7 +588,7 @@ const StaffDetailsContent = ({
                         const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, trainingLogs);
                         return (
                           <div className="space-y-2 p-2 border rounded-md">
-                            <p className="text-sm"><strong>Overall:</strong> <Badge variant={overallStatus === "Compliant" ? "default" : overallStatus === "Partially Compliant" ? "secondary" : "destructive"}>{overallStatus}</Badge></p>
+                            <p className="text-sm"><strong>Overall:</strong> <Badge variant={overallStatus === "Compliant" ? "default" : "destructive"}>{overallStatus}</Badge></p>
                             {overallStatus !== "Compliant" && (
                               <ul className="list-disc pl-5 text-xs">
                                 {criteriaChecks.filter(c => !c.isMet).map(c => (
@@ -1204,6 +1202,7 @@ export default function StaffPage() {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const skippedRecordsLog: string[] = [];
+      const staffToHardDelete = new Map<string, { id: string, serviceNumber: string, name: string }>();
       const BATCH_SIZE = 490;
       try {
         const text = e.target?.result as string;
@@ -1276,6 +1275,28 @@ export default function StaffPage() {
                   continue;
               }
 
+              const details = csvRowData["Details"]?.trim().toLowerCase();
+              const dischargeKeywords = ["discharged", "discharge", "resign", "cancellation of acceptance"];
+
+              if (details && dischargeKeywords.includes(details)) {
+                  const parsedNameRankUid = parseCompositeSurnameField(surnameField);
+                  if (parsedNameRankUid.memberUID) {
+                      const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
+                      if (matchedStaffFromMap) {
+                          if (!staffToHardDelete.has(matchedStaffFromMap.id!)) {
+                              staffToHardDelete.set(matchedStaffFromMap.id!, {
+                                  id: matchedStaffFromMap.id!,
+                                  serviceNumber: matchedStaffFromMap.serviceNumber,
+                                  name: `${matchedStaffFromMap.firstName} ${matchedStaffFromMap.lastName}`
+                              });
+                          }
+                      }
+                  }
+                  skippedRecordsLog.push(`Row ${i + 1}: Marked staff for deletion based on accomplishment "${csvRowData["Details"]}".`);
+                  continue;
+              }
+
+
               const parsedNameRankUid = parseCompositeSurnameField(surnameField);
               if (!parsedNameRankUid.memberUID) {
                   errors.push(`Row ${i + 1}: Could not parse MemberUID from "${surnameField}".`);
@@ -1303,33 +1324,33 @@ export default function StaffPage() {
               }
               
               const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
-              const details = csvRowData["Details"]?.trim();
+              const detailsText = csvRowData["Details"]?.trim();
 
               const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...JSON.parse(JSON.stringify(matchedStaffFromMap)) };
 
               if (changeType === "enrolment") {
                  staffUpdateData.joinDate = effectiveDate;
               } else if (changeType === "position" || changeType === "rank") {
-                  if (!details) {
+                  if (!detailsText) {
                       skippedRecordsLog.push(`Row ${i+1}: Skipped - '${changeType}' change missing 'Details'.`); continue;
                   }
                   if (changeType === "position") {
                       const endDateStr = csvRowData["EndDate"]?.trim();
                       const positionEndDate = endDateStr ? parseDateForAccomplishment(endDateStr) : null;
-                      staffUpdateData.serviceHistoryToAdd.push({ id: crypto.randomUUID(), type: "Position", item: details, effectiveDate: effectiveDate, endDate: positionEndDate, notes: csvRowData["Comment"]?.trim() });
-                      if (csvRowData["StatusName"]?.trim().toLowerCase() === "current") staffUpdateData.role = details;
+                      staffUpdateData.serviceHistoryToAdd.push({ id: crypto.randomUUID(), type: "Position", item: detailsText, effectiveDate: effectiveDate, endDate: positionEndDate, notes: csvRowData["Comment"]?.trim() });
+                      if (csvRowData["StatusName"]?.trim().toLowerCase() === "current") staffUpdateData.role = detailsText;
                   } else { // rank
-                      const parsedRank = parseFullRankNameToAbbreviation(details);
-                      if (!parsedRank) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Rank change invalid rank in 'Details' ("${details}").`); continue; }
+                      const parsedRank = parseFullRankNameToAbbreviation(detailsText);
+                      if (!parsedRank) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Rank change invalid rank in 'Details' ("${detailsText}").`); continue; }
                       staffUpdateData.serviceHistoryToAdd.push({ id: crypto.randomUUID(), type: "Rank", item: parsedRank, effectiveDate: effectiveDate, notes: csvRowData["Comment"]?.trim() });
                       if (csvRowData["StatusName"]?.trim().toLowerCase() === "current") staffUpdateData.rank = parsedRank;
                   }
               } else {
-                  if (!details) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Accomplishment missing 'Details'.`); continue; }
+                  if (!detailsText) { skippedRecordsLog.push(`Row ${i+1}: Skipped - Accomplishment missing 'Details'.`); continue; }
                   
                   const staffNameForHash = `${parsedNameRankUid.lastName || matchedStaffFromMap.lastName}, ${parsedNameRankUid.firstName || matchedStaffFromMap.firstName}`;
                   const completionDateForHash = format(effectiveDate, 'yyyy-MM-dd');
-                  const hashString = `${staffNameForHash}-${details}-${completionDateForHash}`;
+                  const hashString = `${staffNameForHash}-${detailsText}-${completionDateForHash}`;
                   const recordHash = await createHash(hashString);
 
 
@@ -1345,9 +1366,9 @@ export default function StaffPage() {
                       staffName: staffNameForHash,
                       squadron: csvRowData["Unit_1"] || matchedStaffFromMap.squadron || "N/A",
                       currentRole: matchedStaffFromMap.role || "N/A",
-                      courseName: details,
+                      courseName: detailsText,
                       completionDate: effectiveDate,
-                      qualificationAchieved: details,
+                      qualificationAchieved: detailsText,
                       instructorQualification: "",
                       achievementDetails: csvRowData["Comment"]?.trim() || "",
                       serviceNumber: matchedStaffFromMap.serviceNumber,
@@ -1359,12 +1380,13 @@ export default function StaffPage() {
               staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
         
-            staffUpdates.forEach((update, staffId) => {
-                allOperations.push({ type: 'staffUpdate', payload: { staffId, update } });
-            });
+          staffToHardDelete.forEach((_, staffId) => staffUpdates.delete(staffId));
+          staffUpdates.forEach((update, staffId) => {
+              allOperations.push({ type: 'staffUpdate', payload: { staffId, update } });
+          });
         }
 
-        if (errors.length === 0 && allOperations.length === 0) {
+        if (errors.length === 0 && allOperations.length === 0 && staffToHardDelete.size === 0) {
             toast({ title: "Import Information", description: "No new training logs or staff updates found to process in the CSV." });
             setIsImportingAccomplishments(false);
             if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
@@ -1425,6 +1447,46 @@ export default function StaffPage() {
             }
             await batch.commit();
         }
+
+        if (staffToHardDelete.size > 0) {
+            toast({
+                title: "Deletion Process Started",
+                description: `Deleting ${staffToHardDelete.size} staff member(s) and their associated data...`
+            });
+
+            try {
+                const staffArray = Array.from(staffToHardDelete.values());
+                const deletionBatch = writeBatch(db);
+                let deletedStaffNames: string[] = [];
+
+                const logDeletionPromises = staffArray.map(staff =>
+                    getDocs(query(collection(db, "trainingLogs"), where("serviceNumber", "==", staff.serviceNumber)))
+                );
+                const logSnapshots = await Promise.all(logDeletionPromises);
+
+                staffArray.forEach(staff => {
+                    deletedStaffNames.push(staff.name);
+                    deletionBatch.delete(doc(db, "staff", staff.id));
+                });
+                logSnapshots.forEach(snapshot => {
+                    snapshot.forEach(logDoc => deletionBatch.delete(logDoc.ref));
+                });
+
+                await deletionBatch.commit();
+
+                toast({
+                    title: "Deletion Successful",
+                    description: `Successfully deleted: ${deletedStaffNames.join(", ")}.`
+                });
+            } catch (deleteError: any) {
+                console.error("Error during hard deletion:", deleteError);
+                toast({
+                    variant: "destructive",
+                    title: "Deletion Error",
+                    description: `Failed to delete staff members: ${deleteError.message}`
+                });
+            }
+        }
         
         // Final Summary Toast
         let toastTitle = "Import Successful";
@@ -1446,7 +1508,7 @@ export default function StaffPage() {
         if (toastDescription.trim() === "" && allRows.length <= 1) {
             toastTitle = "Import Information";
             toastDescription = "CSV file has no data rows to import.";
-        } else if (toastDescription.trim() === "") {
+        } else if (toastDescription.trim() === "" && staffToHardDelete.size === 0) {
             toastTitle = "Import Information";
             toastDescription = "No new records or staff updates processed from the CSV.";
         }
@@ -1457,8 +1519,8 @@ export default function StaffPage() {
             duration: errors.length > 0 || skippedRecordsLog.length > 0 ? 20000 : 8000,
         });
 
-        if (allOperations.some(op => op.type === 'log')) queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-        if (allOperations.some(op => op.type === 'staffUpdate')) queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+        if (allOperations.some(op => op.type === 'log') || staffToHardDelete.size > 0) queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        if (allOperations.some(op => op.type === 'staffUpdate') || staffToHardDelete.size > 0) queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
 
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
@@ -1705,7 +1767,7 @@ export default function StaffPage() {
                     <li>"Enrolment": Updates the matched Staff Member's 'Join Date' with `EffectiveDate`.</li>
                     <li>"Position": Adds an entry to the Staff Member's 'Service History'. `Details` field is used as position title. If `StatusName` is "Current" and position differs from current staff role, updates staff role. `Comment` is used for notes.</li>
                     <li>"Rank": Adds an entry to Staff Member's 'Service History'. `Details` (e.g., "Actual - Flight Lieutenant (AAFC)") is parsed for the rank. If `StatusName` is "Current" and rank differs, updates staff rank. `Comment` is used for notes.</li>
-                    <li>Other values (e.g., "Accomplishment"): Creates a new Training Log entry. `Details` is Course Name & Qualification. `Comment` is Achievement Details.</li>
+                    <li>Other values (e.g., "Accomplishment"): Creates a new Training Log entry. `Details` is Course Name & Qualification. `Comment` is Achievement Details. If `Details` contains "Discharged", "Resign", or "Cancellation of Acceptance", the staff member and all their data will be deleted.</li>
                 </ul>
             </li>
             <li><code>StatusName</code>: (Text) If "Current" for Position/Rank, may update staff profile. If "Historical", record is still processed for service history.</li>
