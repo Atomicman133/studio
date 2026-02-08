@@ -1214,6 +1214,7 @@ export default function StaffPage() {
         if (!text) {
           toast({ variant: "destructive", title: "Import Error", description: "Could not read file content." });
           setIsImportingAccomplishments(false);
+          if (accomplishmentCsvInputRef.current) accomplishmentCsvInputRef.current.value = "";
           return;
         }
 
@@ -1280,10 +1281,9 @@ export default function StaffPage() {
                   continue;
               }
 
-              const details = csvRowData["Details"]?.trim().toLowerCase();
-              const dischargeKeywords = ["discharged", "discharge", "resign", "cancellation of acceptance"];
+              const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
 
-              if (details && dischargeKeywords.some(keyword => details.includes(keyword))) {
+              if (changeType === "resign" || changeType === "discharge") {
                   const parsedNameRankUid = parseCompositeSurnameField(surnameField);
                   if (parsedNameRankUid.memberUID) {
                       const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
@@ -1297,10 +1297,9 @@ export default function StaffPage() {
                           }
                       }
                   }
-                  skippedRecordsLog.push(`Row ${i + 1}: Marked staff for deletion based on accomplishment "${csvRowData["Details"]}".`);
-                  continue;
+                  skippedRecordsLog.push(`Row ${i + 1}: Marked staff for deletion based on ChangeType "${csvRowData["ChangeType"]}".`);
+                  continue; // Skip further processing for this row
               }
-
 
               const parsedNameRankUid = parseCompositeSurnameField(surnameField);
               if (!parsedNameRankUid.memberUID) {
@@ -1328,7 +1327,6 @@ export default function StaffPage() {
                   continue;
               }
               
-              const changeType = csvRowData["ChangeType"]?.trim().toLowerCase();
               const detailsText = csvRowData["Details"]?.trim();
 
               const staffUpdateData = staffUpdates.get(matchedStaffFromMap.id!) || { serviceHistoryToAdd: [], ...JSON.parse(JSON.stringify(matchedStaffFromMap)) };
@@ -1875,7 +1873,8 @@ export default function StaffPage() {
                     <li>"Enrolment": Updates the matched Staff Member's 'Join Date' with `EffectiveDate`.</li>
                     <li>"Position": Adds an entry to the Staff Member's 'Service History'. `Details` field is used as position title. If `StatusName` is "Current" and position differs from current staff role, updates staff role. `Comment` is used for notes.</li>
                     <li>"Rank": Adds an entry to Staff Member's 'Service History'. `Details` (e.g., "Actual - Flight Lieutenant (AAFC)") is parsed for the rank. If `StatusName` is "Current" and rank differs, updates staff rank. `Comment` is used for notes.</li>
-                    <li>Other values (e.g., "Accomplishment"): Creates a new Training Log entry. `Details` is Course Name & Qualification. `Comment` is Achievement Details. If `Details` contains "Discharged", "Resign", or "Cancellation of Acceptance", the staff member and all their data will be deleted.</li>
+                    <li><strong>"Resign" or "Discharge"</strong>: Marks the staff member for full deletion (profile and all data). No other processing occurs for this row.</li>
+                    <li>Other values (e.g., "Accomplishment"): Creates a new Training Log entry. `Details` is Course Name & Qualification. `Comment` is Achievement Details.</li>
                 </ul>
             </li>
             <li><code>StatusName</code>: (Text) If "Current" for Position/Rank, may update staff profile. If "Historical", record is still processed for service history.</li>
@@ -1883,7 +1882,7 @@ export default function StaffPage() {
             <li><code>Comment</code>: (Text) Populates 'notes' for service history entries or 'achievementDetails' for training logs.</li>
           </ul>
            <p className="mt-2 text-xs">
-            <strong>Important:</strong> Staff profiles must exist for each `MemberUID` for any processing to occur. The "Surname" field must be parsable for UID, Rank, and Name. If an accomplishment with the same course name and completion date already exists for a staff member, it will be ignored to prevent duplicates.
+            <strong>Important:</strong> Staff profiles must exist for each `MemberUID` for any processing to occur. A hash is generated from the staff name, course name, and completion date to prevent duplicate accomplishment entries.
           </p>
         </AlertDescription>
       </Alert>
