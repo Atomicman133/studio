@@ -126,7 +126,7 @@ export default function CompliancePage() {
 
 
   const toggleCollapsible = (staffMemberId: string) => {
-    setOpenCollapsible(prev => (prev === staffMemberId ? null : prevId));
+    setOpenCollapsible(prev => (prev === staffMemberId ? null : staffMemberId));
   };
 
   const getDaysToExpiry = (completionDate: Date, yearsToExpire: number): number | null => {
