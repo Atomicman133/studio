@@ -1295,10 +1295,14 @@ export default function StaffPage() {
                                   name: `${matchedStaffFromMap.firstName} ${matchedStaffFromMap.lastName}`
                               });
                           }
+                          skippedRecordsLog.push(`Row ${i + 1}: Queued staff for deletion (UID: ${parsedNameRankUid.memberUID}) based on ChangeType "${csvRowData["ChangeType"]}".`);
+                      } else {
+                          skippedRecordsLog.push(`Row ${i + 1}: Skipped deletion - Staff with UID "${parsedNameRankUid.memberUID}" not found in the system.`);
                       }
+                  } else {
+                       skippedRecordsLog.push(`Row ${i + 1}: Skipped deletion - Could not parse MemberUID from "${surnameField}".`);
                   }
-                  skippedRecordsLog.push(`Row ${i + 1}: Marked staff for deletion based on ChangeType "${csvRowData["ChangeType"]}".`);
-                  continue; // Skip further processing for this row
+                  continue; 
               }
 
               const parsedNameRankUid = parseCompositeSurnameField(surnameField);
