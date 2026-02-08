@@ -189,30 +189,43 @@ export default function ReportsPage() {
       setReportData(complianceReport);
     } else if (selectedReportType === "mandatoryTrainingCompliance") {
         const reportResult: MandatoryTrainingReport = { compliant: [], nonCompliant: [] };
-        
-        const accomplishmentKeywords = {
-            org: ["Organisational Understanding Workshop - Completed"],
-            initial: ["Initial Mandatory Training - Completed"],
-            uniform: ["Uniform Mandatory Training - Completed"],
-        };
 
         staffInScope.forEach(staff => {
             const memberLogs = trainingLogs?.filter(log => log.serviceNumber === staff.serviceNumber) || [];
             
-            const findLatestLog = (keywords: string[]) => {
-                const relevantLogs = memberLogs
-                    .filter(log => keywords.some(kw => log.courseName.toLowerCase().includes(kw.toLowerCase())))
-                    .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
-                return relevantLogs.length > 0 ? relevantLogs[0] : null;
-            };
+            const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
+              const relevantLogs = memberLogs
+                .filter(log => criterion.identifier(log))
+                .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
-            const orgLog = findLatestLog(accomplishmentKeywords.org);
-            const initialLog = findLatestLog(accomplishmentKeywords.initial);
-            const uniformLog = findLatestLog(accomplishmentKeywords.uniform);
-            
-            const isCompliant = !!orgLog || (!!initialLog && !!uniformLog);
+              let isMet = false;
+              let details = "Missing";
+              if (relevantLogs.length > 0) {
+                const completionDate = startOfDay(new Date(relevantLogs[0].completionDate));
+                if (!isValid(completionDate)) {
+                  details = "Invalid completion date in record.";
+                } else {
+                  const today = startOfDay(new Date());
+                  if (criterion.yearsToExpire) {
+                    const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
+                    isMet = isBefore(today, expiryDate);
+                    if (isMet) {
+                      details = `Completed: ${format(completionDate, "dd/MM/yyyy")}. Valid until ${format(addDays(expiryDate, -1), 'dd/MM/yyyy')}.`;
+                    } else {
+                      details = `Out of Date. Last completed: ${format(completionDate, 'dd/MM/yyyy')}. Expired on ${format(expiryDate, 'dd/MM/yyyy')}.`;
+                    }
+                  } else {
+                    isMet = true;
+                    details = `Completed: ${format(completionDate, "dd/MM/yyyy")}`;
+                  }
+                }
+              }
+              return { key: criterion.key, name: criterion.name, isMet, details } as ComplianceCriterionCheck;
+            });
 
-            if (isCompliant) {
+            const isOverallCompliant = criteriaChecks.every(c => c.isMet);
+
+            if (isOverallCompliant) {
                 reportResult.compliant.push({
                     staffId: staff.id || staff.serviceNumber,
                     staffName: `${staff.firstName} ${staff.lastName}`,
@@ -225,11 +238,7 @@ export default function ReportsPage() {
                     staffName: `${staff.firstName} ${staff.lastName}`,
                     rank: staff.rank,
                     squadron: staff.squadron || "N/A",
-                    checks: [
-                        { name: "Organisational Understanding Workshop - Completed", isMet: !!orgLog, details: orgLog ? `Completed - ${format(new Date(orgLog.completionDate), "dd/MM/yyyy")}` : "NOT HELD" },
-                        { name: "Initial Mandatory Training - Completed", isMet: !!initialLog, details: initialLog ? `Completed - ${format(new Date(initialLog.completionDate), "dd/MM/yyyy")}` : "NOT HELD" },
-                        { name: "Uniform Mandatory Training - Completed", isMet: !!uniformLog, details: uniformLog ? `Completed - ${format(new Date(uniformLog.completionDate), "dd/MM/yyyy")}` : "NOT HELD" },
-                    ],
+                    checks: criteriaChecks.map(c => ({ name: c.name, isMet: c.isMet, details: c.details })),
                 });
             }
         });
@@ -249,7 +258,7 @@ export default function ReportsPage() {
     if (selectedReportType === 'mandatoryTrainingCompliance' && 'compliant' in (data as MandatoryTrainingReport)) {
         const mandatoryReport = data as MandatoryTrainingReport;
         const csvRows = [
-            ['Status', 'Rank', 'Name', 'Squadron', 'Accomplishment', 'Accomplishment Status'],
+            ['Status', 'Rank', 'Name', 'Squadron', 'Item', 'Item Status'],
             ...mandatoryReport.nonCompliant.flatMap(member => 
                 member.checks.map((check, index) => 
                     index === 0 ? 
@@ -304,7 +313,7 @@ export default function ReportsPage() {
       const itemName = complianceItem ? complianceItem.name.replace(/\s+/g, '_') : "compliance_item";
       filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
     } else if (selectedReportType === "mandatoryTrainingCompliance" && selectedUnitOrRegion) {
-        filename = `mandatory_training_compliance_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
+        filename = `overall_compliance_${selectedUnitOrRegion.replace(/\s+/g, '_')}.csv`;
     }
     generateCsv(reportData, filename);
   };
@@ -355,8 +364,8 @@ export default function ReportsPage() {
         const itemName = item ? item.name.replace(/\s+/g, '_') : "compliance_item";
         filename = `${itemName}_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     } else if (selectedReportType === "mandatoryTrainingCompliance") {
-        reportTitle = `Mandatory Training Compliance for ${selectedUnitOrRegion}`;
-        filename = `mandatory_training_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
+        reportTitle = `Overall Compliance Report for ${selectedUnitOrRegion}`;
+        filename = `overall_compliance_report_${selectedUnitOrRegion.replace(/\s+/g, '_')}.pdf`;
     }
 
     doc.setFontSize(16);
@@ -392,7 +401,7 @@ export default function ReportsPage() {
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         await checkPageBreak(lineSpacing * 1.5);
-        doc.text("Section 1: Members Not Meeting Requirement", margin, yPos);
+        doc.text("Section 1: Non-Compliant Members", margin, yPos);
         yPos += lineSpacing * 1.5;
 
         if (mandatoryReport.nonCompliant.length > 0) {
@@ -400,7 +409,7 @@ export default function ReportsPage() {
                 const neededHeight = (1 + member.checks.length) * lineSpacing + (lineSpacing * 0.5);
                 if (await checkPageBreak(neededHeight)) {
                   doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                  doc.text("Section 1: Members Not Meeting Requirement (Continued)", margin, yPos);
+                  doc.text("Section 1: Non-Compliant Members (Continued)", margin, yPos);
                   yPos += lineSpacing * 1.5;
                 }
 
@@ -423,7 +432,7 @@ export default function ReportsPage() {
             await checkPageBreak(lineSpacing);
             doc.setFontSize(10);
             doc.setFont(undefined, 'italic');
-            doc.text("All members in scope meet the mandatory training requirements.", margin, yPos);
+            doc.text("All members in scope meet all mandatory compliance requirements.", margin, yPos);
             yPos += lineSpacing;
         }
 
@@ -436,7 +445,7 @@ export default function ReportsPage() {
         yPos += lineSpacing;
         doc.setFontSize(9);
         doc.setFont(undefined, 'italic');
-        const blurbLines = doc.splitTextToSize("All the below members have completed either Both Initial Mandatory Training, and Uniform Mandatory Training, or Organisation Understanding Workshop. For the purposes of this report they have been marked as compliant.", pageWidth - margin * 2);
+        const blurbLines = doc.splitTextToSize("All members listed below meet all current mandatory compliance requirements.", pageWidth - margin * 2);
         doc.text(blurbLines, margin, yPos);
         yPos += blurbLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.5);
 
@@ -505,7 +514,7 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value="oicLevelByUnit">OIC Level by Unit</SelectItem>
                   <SelectItem value="specificComplianceByUnit">Specific Compliance Item by Unit</SelectItem>
-                  <SelectItem value="mandatoryTrainingCompliance">Mandatory Training Compliance</SelectItem>
+                  <SelectItem value="mandatoryTrainingCompliance">Overall Compliance by Unit</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -553,6 +562,7 @@ export default function ReportsPage() {
               {selectedReportType === "oicLevelByUnit" ? `OIC Levels for ${selectedUnitOrRegion}` :
                selectedReportType === "specificComplianceByUnit" && selectedComplianceItemKey ?
                `${COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === selectedComplianceItemKey)?.name || 'Compliance Item'} Status for ${selectedUnitOrRegion}` :
+               selectedReportType === 'mandatoryTrainingCompliance' ? `Overall Compliance for ${selectedUnitOrRegion}` :
                "Generated Report"}
             </CardDescription>
           </CardHeader>
@@ -618,11 +628,11 @@ export default function ReportsPage() {
           <Card className="mt-6 shadow-lg">
             <CardHeader>
                 <CardTitle className="text-xl">Report Results</CardTitle>
-                <CardDescription>Mandatory Training Compliance for {selectedUnitOrRegion}</CardDescription>
+                <CardDescription>Overall Compliance for {selectedUnitOrRegion}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
                 <div>
-                    <h3 className="text-lg font-semibold mb-2">Section 1: Members Not Meeting Requirement</h3>
+                    <h3 className="text-lg font-semibold mb-2">Section 1: Non-Compliant Members</h3>
                     {(reportData as MandatoryTrainingReport).nonCompliant.length > 0 ? (
                         <div className="space-y-4">
                             {(reportData as MandatoryTrainingReport).nonCompliant.map(member => (
@@ -639,12 +649,12 @@ export default function ReportsPage() {
                             ))}
                         </div>
                     ) : (
-                        <p className="text-muted-foreground italic">All members in scope meet the mandatory training requirements.</p>
+                        <p className="text-muted-foreground italic">All members in scope meet all mandatory compliance requirements.</p>
                     )}
                 </div>
                  <div>
                     <h3 className="text-lg font-semibold mb-2">Section 2: Compliant Members</h3>
-                    <p className="text-sm text-muted-foreground mb-4">All the below members have completed either Both Initial Mandatory Training, and Uniform Mandatory Training, or Organisation Understanding Workshop. For the purposes of this report they have been marked as compliant.</p>
+                    <p className="text-sm text-muted-foreground mb-4">All members listed below meet all current mandatory compliance requirements.</p>
                      {(reportData as MandatoryTrainingReport).compliant.length > 0 ? (
                         <Table>
                             <TableHeader>
@@ -682,3 +692,5 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+    
