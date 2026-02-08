@@ -1593,7 +1593,13 @@ export default function StaffPage() {
     toast({ title: "Scanning Records...", description: "Looking for staff marked for discharge." });
 
     try {
-      const allLogs = await queryClient.fetchQuery<TrainingLog[], Error>({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+      const allLogs = await queryClient.fetchQuery<TrainingLog[], Error>({
+        queryKey: [TRAINING_LOGS_QUERY_KEY],
+        queryFn: async () => {
+            const querySnapshot = await getDocs(query(collection(db, "trainingLogs")));
+            return querySnapshot.docs.map(d => convertTrainingLogTimestamps(d.data()));
+        }
+      });
       const allStaff = await queryClient.fetchQuery<StaffMember[], Error>({ queryKey: [STAFF_QUERY_KEY] });
 
       if (!allLogs || !allStaff) {
