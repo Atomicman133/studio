@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet, Search, FileSearch } from "lucide-react";
+import { PlusCircle, MoreHorizontal, Pencil, Trash2, Users as UsersIconLucide, UploadCloud, Info, Edit3, Briefcase, FileText, GraduationCap, Gavel, ShieldCheck, ListChecks, User, Loader2, AlertTriangle, AlertCircle, MapPin, ChevronDown, ChevronUp, History, Download as DownloadIcon, FileSpreadsheet, Search, FileSearch, UserX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -67,7 +67,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, Timestamp, writeBatch, doc, arrayUnion, addDoc } from 'firebase/firestore';
 import jsPDF from 'jspdf';
@@ -758,6 +758,11 @@ export default function StaffPage() {
   const [openSquadrons, setOpenSquadrons] = React.useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = React.useState("");
 
+  const [isPurgeDialogOpen, setIsPurgeDialogOpen] = React.useState(false);
+  const [staffToPurge, setStaffToPurge] = React.useState<StaffMember[]>([]);
+  const [isFindingStaffToPurge, setIsFindingStaffToPurge] = React.useState(false);
+
+
   const toggleSquadron = (squadronName: string) => {
     setOpenSquadrons(prev => ({ ...prev, [squadronName]: !(prev[squadronName] ?? true) }));
   };
@@ -1278,7 +1283,7 @@ export default function StaffPage() {
               const details = csvRowData["Details"]?.trim().toLowerCase();
               const dischargeKeywords = ["discharged", "discharge", "resign", "cancellation of acceptance"];
 
-              if (details && dischargeKeywords.includes(details)) {
+              if (details && dischargeKeywords.some(keyword => details.includes(keyword))) {
                   const parsedNameRankUid = parseCompositeSurnameField(surnameField);
                   if (parsedNameRankUid.memberUID) {
                       const matchedStaffFromMap = staffMapByServiceNumber.get(parsedNameRankUid.memberUID);
@@ -1541,8 +1546,101 @@ export default function StaffPage() {
     };
     reader.readAsText(file);
   };
+  
+    const purgeStaffMutation = useMutation<void, Error, StaffMember[]>({
+        mutationFn: async (staffListToDelete: StaffMember[]) => {
+            if (staffListToDelete.length === 0) return;
+            const batch = writeBatch(db);
+            const serviceNumbersToDelete = staffListToDelete.map(s => s.serviceNumber).filter(Boolean);
+            
+            staffListToDelete.forEach(staff => {
+                if (staff.id) {
+                    batch.delete(doc(db, "staff", staff.id));
+                }
+            });
 
-  const isLoadingAnyMutation = updateStaffMutation.isPending || deleteStaffMutation.isPending || addStaffMutation.isPending;
+            if (serviceNumbersToDelete.length > 0) {
+                const logsCollectionRef = collection(db, "trainingLogs");
+                // Firestore 'in' queries are limited to 30 items. We need to batch this.
+                for (let i = 0; i < serviceNumbersToDelete.length; i += 30) {
+                    const chunk = serviceNumbersToDelete.slice(i, i + 30);
+                    const logsQuery = query(logsCollectionRef, where("serviceNumber", "in", chunk));
+                    const logsSnapshot = await getDocs(logsQuery);
+                    logsSnapshot.forEach(logDoc => {
+                        batch.delete(logDoc.ref);
+                    });
+                }
+            }
+
+            await batch.commit();
+        },
+        onSuccess: (_, variables) => {
+            toast({ title: "Success", description: `${variables.length} staff member(s) and their data have been deleted.` });
+            queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+            queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        },
+        onError: (error) => {
+            toast({ variant: "destructive", title: "Deletion Error", description: error.message });
+        },
+        onSettled: () => {
+            setStaffToPurge([]);
+            setIsPurgeDialogOpen(false);
+        }
+    });
+
+  const handleFindDischargedStaff = async () => {
+    setIsFindingStaffToPurge(true);
+    toast({ title: "Scanning Records...", description: "Looking for staff marked for discharge." });
+
+    try {
+      const allLogs = await queryClient.fetchQuery<TrainingLog[], Error>({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+      const allStaff = await queryClient.fetchQuery<StaffMember[], Error>({ queryKey: [STAFF_QUERY_KEY] });
+
+      if (!allLogs || !allStaff) {
+        throw new Error("Could not fetch data to perform scan.");
+      }
+
+      const dischargeKeywords = ["discharged", "discharge", "resign", "cancellation of acceptance"];
+      const staffIdsToDelete = new Set<string>();
+      
+      allLogs.forEach(log => {
+        const logDetailsLower = [log.courseName, log.achievementDetails, log.qualificationAchieved].filter(Boolean).join(' ').toLowerCase();
+        const isDischargeLog = dischargeKeywords.some(keyword => logDetailsLower.includes(keyword));
+
+        if (isDischargeLog && log.serviceNumber) {
+          const staffMember = allStaff.find(s => s.serviceNumber === log.serviceNumber);
+          if (staffMember?.id) {
+            staffIdsToDelete.add(staffMember.id);
+          }
+        }
+      });
+
+      const staffToDeleteList = allStaff.filter(s => s.id && staffIdsToDelete.has(s.id));
+      
+      setStaffToPurge(staffToDeleteList);
+
+      if (staffToDeleteList.length > 0) {
+        setIsPurgeDialogOpen(true);
+      } else {
+        toast({ title: "Scan Complete", description: "No staff members found with discharge-related accomplishments." });
+      }
+    } catch (err: any) {
+        toast({ variant: "destructive", title: "Scan Error", description: err.message });
+    } finally {
+        setIsFindingStaffToPurge(false);
+    }
+  };
+
+  const handleConfirmPurge = () => {
+    if (staffToPurge.length > 0) {
+        purgeStaffMutation.mutate(staffToPurge);
+    } else {
+        setIsPurgeDialogOpen(false);
+    }
+  };
+
+
+  const isLoadingAnyMutation = updateStaffMutation.isPending || deleteStaffMutation.isPending || addStaffMutation.isPending || purgeStaffMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -1581,6 +1679,10 @@ export default function StaffPage() {
                  <Button onClick={() => accomplishmentCsvInputRef.current?.click()} size="lg" variant="outline" className="w-full sm:w-auto shrink-0" disabled={isLoading || isImportingAccomplishments || addStaffMutation.isPending || updateStaffMutation.isPending || deleteStaffMutation.isPending || isImportingStaffCsv}>
                    {isImportingAccomplishments || isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GraduationCap className="mr-2 h-5 w-5" />}
                     Import Accomp.
+                </Button>
+                <Button onClick={handleFindDischargedStaff} size="lg" variant="destructive" className="w-full sm:w-auto shrink-0" disabled={isFindingStaffToPurge || isImportingAccomplishments || isLoading}>
+                    {isFindingStaffToPurge ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserX className="mr-2 h-5 w-5" />}
+                    Purge Discharged
                 </Button>
                 <input type="file" ref={staffCsvInputRef} onChange={handleStaffCsvImport} accept=".csv" style={{ display: 'none' }} />
                 <input type="file" ref={accomplishmentCsvInputRef} onChange={handleAccomplishmentCsvImport} accept=".csv" style={{ display: 'none' }} />
@@ -1843,6 +1945,33 @@ export default function StaffPage() {
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {isPurgeDialogOpen && (
+        <AlertDialog open={isPurgeDialogOpen} onOpenChange={setIsPurgeDialogOpen}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        The following {staffToPurge.length} staff member(s) have been identified for deletion based on their accomplishments. This action is irreversible and will delete their profile and all associated training logs.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <ScrollArea className="max-h-60 border rounded-md my-4">
+                    <ul className="p-4 space-y-1 text-sm">
+                        {staffToPurge.map(s => (
+                            <li key={s.id}>{s.rank} {s.firstName} {s.lastName} (SN: {s.serviceNumber})</li>
+                        ))}
+                    </ul>
+                </ScrollArea>
+                <AlertDialogFooter>
+                    <AlertDialogCancel disabled={purgeStaffMutation.isPending}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleConfirmPurge} disabled={purgeStaffMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                        {purgeStaffMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Confirm & Delete {staffToPurge.length} Member(s)
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
         </AlertDialog>
       )}
 
