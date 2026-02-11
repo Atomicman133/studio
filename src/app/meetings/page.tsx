@@ -46,6 +46,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { Meeting, MeetingFormData, ScheduledMeeting, AgendaFormData as FullAgendaFormData, AgendaItem } from "./meeting-schema";
 import { MeetingForm } from "./components/meeting-form";
 import { AgendaForm } from "./components/agenda-form"; // New form
@@ -473,6 +474,13 @@ export default function MeetingsPage() {
 
   return (
     <div className="space-y-6">
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Beta Feature</AlertTitle>
+        <AlertDescription>
+          This feature is still in beta and its functionality is currently limited. It will be refined and upgraded in future releases.
+        </AlertDescription>
+      </Alert>
       {/* Section for Creating Agendas and Scheduling New Meetings */}
       <Card className="shadow-lg">
         <CardHeader>
@@ -828,3 +836,6 @@ export default function MeetingsPage() {
   );
 }
 
+
+
+    
