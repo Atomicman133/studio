@@ -1294,8 +1294,8 @@ export default function StaffPage() {
                                   serviceNumber: matchedStaffFromMap.serviceNumber,
                                   name: `${matchedStaffFromMap.firstName} ${matchedStaffFromMap.lastName}`
                               });
+                              skippedRecordsLog.push(`Row ${i + 1}: Marked staff for deletion (UID: ${parsedNameRankUid.memberUID}) based on ChangeType "${csvRowData["ChangeType"]}".`);
                           }
-                          skippedRecordsLog.push(`Row ${i + 1}: Queued staff for deletion (UID: ${parsedNameRankUid.memberUID}) based on ChangeType "${csvRowData["ChangeType"]}".`);
                       } else {
                           skippedRecordsLog.push(`Row ${i + 1}: Skipped deletion - Staff with UID "${parsedNameRankUid.memberUID}" not found in the system.`);
                       }
@@ -1549,47 +1549,6 @@ export default function StaffPage() {
     reader.readAsText(file);
   };
   
-    const purgeStaffMutation = useMutation<void, Error, StaffMember[]>({
-        mutationFn: async (staffListToDelete: StaffMember[]) => {
-            if (staffListToDelete.length === 0) return;
-            const batch = writeBatch(db);
-            const serviceNumbersToDelete = staffListToDelete.map(s => s.serviceNumber).filter(Boolean);
-            
-            staffListToDelete.forEach(staff => {
-                if (staff.id) {
-                    batch.delete(doc(db, "staff", staff.id));
-                }
-            });
-
-            if (serviceNumbersToDelete.length > 0) {
-                const logsCollectionRef = collection(db, "trainingLogs");
-                // Firestore 'in' queries are limited to 30 items. We need to batch this.
-                for (let i = 0; i < serviceNumbersToDelete.length; i += 30) {
-                    const chunk = serviceNumbersToDelete.slice(i, i + 30);
-                    const logsQuery = query(logsCollectionRef, where("serviceNumber", "in", chunk));
-                    const logsSnapshot = await getDocs(logsQuery);
-                    logsSnapshot.forEach(logDoc => {
-                        batch.delete(logDoc.ref);
-                    });
-                }
-            }
-
-            await batch.commit();
-        },
-        onSuccess: (_, variables) => {
-            toast({ title: "Success", description: `${variables.length} staff member(s) and their data have been deleted.` });
-            queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
-            queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
-        },
-        onError: (error) => {
-            toast({ variant: "destructive", title: "Deletion Error", description: error.message });
-        },
-        onSettled: () => {
-            setStaffToPurge([]);
-            setIsPurgeDialogOpen(false);
-        }
-    });
-
   const handleFindDischargedStaff = async () => {
     setIsFindingStaffToPurge(true);
     toast({ title: "Scanning Records...", description: "Looking for staff marked for discharge." });
@@ -1604,22 +1563,32 @@ export default function StaffPage() {
       });
       const allStaff = await queryClient.fetchQuery<StaffMember[], Error>({ queryKey: [STAFF_QUERY_KEY] });
 
-      if (!allLogs || !allStaff) {
-        throw new Error("Could not fetch data to perform scan.");
+      if (!allStaff) {
+        throw new Error("Could not fetch staff data to perform scan.");
       }
 
       const dischargeKeywords = ["discharged", "discharge", "resign", "cancellation of acceptance"];
       const staffIdsToDelete = new Set<string>();
       
-      allLogs.forEach(log => {
-        const logDetailsLower = [log.courseName, log.achievementDetails, log.qualificationAchieved].filter(Boolean).join(' ').toLowerCase();
-        const isDischargeLog = dischargeKeywords.some(keyword => logDetailsLower.includes(keyword));
+      // 1. Find staff based on training log keywords
+      if (allLogs) {
+        allLogs.forEach(log => {
+          const logDetailsLower = [log.courseName, log.achievementDetails, log.qualificationAchieved].filter(Boolean).join(' ').toLowerCase();
+          const isDischargeLog = dischargeKeywords.some(keyword => logDetailsLower.includes(keyword));
 
-        if (isDischargeLog && log.serviceNumber) {
-          const staffMember = allStaff.find(s => s.serviceNumber === log.serviceNumber);
-          if (staffMember?.id) {
-            staffIdsToDelete.add(staffMember.id);
+          if (isDischargeLog && log.serviceNumber) {
+            const staffMember = allStaff.find(s => s.serviceNumber === log.serviceNumber);
+            if (staffMember?.id) {
+              staffIdsToDelete.add(staffMember.id);
+            }
           }
+        });
+      }
+
+      // 2. Find staff based on their status field
+      allStaff.forEach(staff => {
+        if (staff.status === 'Pending Discharge' && staff.id) {
+            staffIdsToDelete.add(staff.id);
         }
       });
 
@@ -1630,7 +1599,7 @@ export default function StaffPage() {
       if (staffToDeleteList.length > 0) {
         setIsPurgeDialogOpen(true);
       } else {
-        toast({ title: "Scan Complete", description: "No staff members found with discharge-related accomplishments." });
+        toast({ title: "Scan Complete", description: "No staff members found with a 'Pending Discharge' status or discharge-related accomplishments." });
       }
     } catch (err: any) {
         toast({ variant: "destructive", title: "Scan Error", description: err.message });
@@ -1963,7 +1932,7 @@ export default function StaffPage() {
                 <AlertDialogHeader>
                     <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
                     <AlertDialogDescription>
-                        The following {staffToPurge.length} staff member(s) have been identified for deletion based on their accomplishments. This action is irreversible and will delete their profile and all associated training logs.
+                        The following {staffToPurge.length} staff member(s) have been identified for deletion based on a 'Pending Discharge' status or discharge-related accomplishment. This action is irreversible and will delete their profile and all associated training logs.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <ScrollArea className="max-h-60 border rounded-md my-4">
