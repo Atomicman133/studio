@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -12,8 +11,40 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.5",
+    version: "0.2.6",
     date: "Current",
+    title: "Enhanced Data Integrity & Automated Staff Deletion",
+    sections: [
+      {
+        title: "Staff Management & Data Integrity",
+        items: [
+          "Introduced an automated deletion process during \"Accomplishment\" CSV imports. Staff members with a `ChangeType` of \"Resign\" or \"Discharge\" will now have their profile and all associated training records permanently removed from the system.",
+          "Added a \"Purge Discharged\" button to the Staff Management page. This allows for a manual scan and deletion of staff members who either have a \"Pending Discharge\" status or have a discharge-related accomplishment record.",
+          "Improved feedback during the Accomplishment import process to more accurately report when a staff member marked for deletion in the CSV could not be found in the database.",
+        ],
+      },
+      {
+        title: "Compliance Logic Updates",
+        items: [
+          "The compliance status has been simplified to be strictly binary: 'Compliant' or 'Not Compliant'. The 'Partially Compliant' category has been removed across all dashboards and reports.",
+          "Updated the 'Defence Youth Protection' requirement: its validity period is now 3 years, and the only recognized course is \"Defence Youth Protection Officers and Instructors\".",
+          "The \"Mandatory Training Compliance\" report in the 'Generate Reports' section has been renamed to \"Overall Compliance by Unit\" and now checks against all mandatory compliance criteria.",
+        ],
+      },
+      {
+        title: "Bug Fixes & Stability",
+        items: [
+          "Resolved a build failure caused by a missing closing brace in the authentication form component.",
+          "Fixed a runtime error (`prevId is not defined`) on the Compliance page that prevented the details section from expanding.",
+          "Corrected an issue where the manual \"Purge Discharged\" function would fail if the data cache had not been previously populated.",
+          "Addressed multiple console errors related to invalid HTML structure and component rendering to improve overall application stability.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.5",
+    date: "Previous Update",
     title: "Simplified Compliance & Enhanced Reporting",
     sections: [
       {
