@@ -762,6 +762,52 @@ export default function StaffPage() {
   const [staffToPurge, setStaffToPurge] = React.useState<StaffMember[]>([]);
   const [isFindingStaffToPurge, setIsFindingStaffToPurge] = React.useState(false);
 
+  const purgeStaffMutation = useMutation<string[], Error, StaffMember[]>({
+    mutationFn: async (staffToPurge: StaffMember[]): Promise<string[]> => {
+        if (staffToPurge.length === 0) return [];
+        
+        const batch = writeBatch(db);
+        const purgedStaffNames: string[] = [];
+
+        for (const staff of staffToPurge) {
+            if (!staff.id || !staff.serviceNumber) continue;
+
+            // Delete staff document
+            const staffDocRef = doc(db, "staff", staff.id);
+            batch.delete(staffDocRef);
+            purgedStaffNames.push(`${staff.firstName} ${staff.lastName}`);
+
+            // Find and delete associated training logs
+            const logsQuery = query(collection(db, "trainingLogs"), where("serviceNumber", "==", staff.serviceNumber));
+            const logSnapshots = await getDocs(logsQuery);
+            logSnapshots.forEach(logDoc => {
+                batch.delete(logDoc.ref);
+            });
+        }
+
+        await batch.commit();
+        return purgedStaffNames;
+    },
+    onSuccess: (purgedNames) => {
+        toast({
+            title: "Purge Complete",
+            description: `Successfully purged ${purgedNames.length} staff member(s): ${purgedNames.join(", ")}.`,
+        });
+        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+        queryClient.invalidateQueries({ queryKey: [TRAINING_LOGS_QUERY_KEY] });
+        setIsPurgeDialogOpen(false);
+        setStaffToPurge([]);
+    },
+    onError: (error) => {
+        toast({
+            variant: "destructive",
+            title: "Purge Failed",
+            description: error.message,
+        });
+        setIsPurgeDialogOpen(false);
+    },
+});
+
 
   const toggleSquadron = (squadronName: string) => {
     setOpenSquadrons(prev => ({ ...prev, [squadronName]: !(prev[squadronName] ?? true) }));
@@ -1294,7 +1340,6 @@ export default function StaffPage() {
                                   serviceNumber: matchedStaffFromMap.serviceNumber,
                                   name: `${matchedStaffFromMap.firstName} ${matchedStaffFromMap.lastName}`
                               });
-                              skippedRecordsLog.push(`Row ${i + 1}: Marked staff for deletion (UID: ${parsedNameRankUid.memberUID}) based on ChangeType "${csvRowData["ChangeType"]}".`);
                           }
                       } else {
                           skippedRecordsLog.push(`Row ${i + 1}: Skipped deletion - Staff with UID "${parsedNameRankUid.memberUID}" not found in the system.`);
