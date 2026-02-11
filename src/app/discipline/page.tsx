@@ -59,6 +59,7 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, quer
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from 'jspdf';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const ACTIONS_QUERY_KEY = 'disciplineActions';
 const CONVERSATIONS_QUERY_KEY = 'recordsOfConversation';
@@ -492,6 +493,13 @@ export default function DisciplinePage() {
 
   return (
     <div className="space-y-6">
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Beta Feature</AlertTitle>
+        <AlertDescription>
+          This feature is still in beta and its functionality is currently limited. It will be refined and upgraded in future releases.
+        </AlertDescription>
+      </Alert>
       <Tabs defaultValue="disciplineActions" className="w-full">
         <div className="flex justify-between items-start sm:items-center flex-col sm:flex-row gap-4 mb-4">
             <div className="flex items-center gap-3">
