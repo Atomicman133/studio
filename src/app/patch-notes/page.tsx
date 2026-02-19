@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -11,8 +12,45 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.6",
+    version: "0.2.7",
     date: "Current",
+    title: "Enhanced Compliance Logic & Automated Data Purging",
+    sections: [
+      {
+        title: "Staff Management & Data Integrity",
+        items: [
+          "Enhanced 'Accomplishment' CSV import to automatically delete staff members and all their associated records if the 'ChangeType' column is 'Resign' or 'Discharge'.",
+          "Added a 'Purge Discharged' button to the Staff Management page. This allows for a manual scan and deletion of staff who are either marked as 'Pending Discharge' or have a discharge-related accomplishment.",
+          "Improved feedback during imports to more accurately report why a record was skipped, especially for deletions where the staff member could not be found.",
+        ],
+      },
+      {
+        title: "Compliance & Reporting Overhaul",
+        items: [
+          "Split 'Code of Conduct' and 'Adult Behaviour Policy Training' into two separate compliance checks with distinct validity periods (3 years and 1 year, respectively).",
+          "Updated the 'Provide Cardiopulmonary Resuscitation' check to be an advisory item. It no longer marks a member as non-compliant but instead displays a specific warning if not met.",
+          "Refined 'Defence Youth Protection' logic to allow 'CIV' rank members to be compliant with the 'Awareness Course', while other ranks require the 'Officers and Instructors' course.",
+          "Renamed the 'Mandatory Training Compliance' report to 'Overall Compliance by Unit' and updated it to check against all current mandatory criteria.",
+        ],
+      },
+      {
+          title: "UI/UX Enhancements",
+          items: [
+              "Added a prominent 'Beta Feature' warning banner to the Meetings, Discipline Actions, Safety Audits, and Squadron Visits pages to inform users of their current development status.",
+          ],
+      },
+      {
+        title: "Bug Fixes & Stability",
+        items: [
+          "Resolved multiple critical runtime errors, including `purgeStaffMutation is not defined` and `prevId is not defined`, to improve application stability.",
+          "Fixed an issue where the manual 'Purge Discharged' function would fail if the training log data had not been previously loaded, by ensuring data is fetched on-demand.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.6",
+    date: "Previous Update",
     title: "Enhanced Data Integrity & Automated Staff Deletion",
     sections: [
       {
