@@ -52,7 +52,7 @@ export const COMPLIANCE_CRITERIA_CONFIG: readonly ComplianceCriterionConfigItem[
     key: 'cpr',
     name: 'Provide Cardiopulmonary Resuscitation',
     yearsToExpire: 1,
-    isAdvisory: true, // This check will not make a member non-compliant overall
+    isAdvisory: true,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['Cardiopulmonary Resuscitation', 'cpr', 'hltaid009']) || matchesKeywords(log.qualificationAchieved, ['Cardiopulmonary Resuscitation', 'cpr', 'hltaid009'])
   },
@@ -65,10 +65,17 @@ export const COMPLIANCE_CRITERIA_CONFIG: readonly ComplianceCriterionConfigItem[
   },
   {
     key: 'codeOfConduct',
-    name: 'Code of Conduct & Behavioural Policy Acceptance',
-    yearsToExpire: 1, // Changed from undefined to 1 year
+    name: 'Code of Conduct - Signed',
+    yearsToExpire: 3,
     identifier: (log: TrainingLog) =>
-       matchesKeywords(log.courseName, ['code of conduct', 'behavioural policy acceptance', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'behavioural policy acceptance', 'coc'])
+       matchesKeywords(log.courseName, ['code of conduct', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'coc'])
+  },
+  {
+    key: 'adultBehaviourPolicy',
+    name: 'Adult Behaviour Policy Training',
+    yearsToExpire: 1,
+    identifier: (log: TrainingLog) =>
+       matchesKeywords(log.courseName, ['Adult Behaviour Policy Training']) || matchesKeywords(log.qualificationAchieved, ['Adult Behaviour Policy Training'])
   },
   {
     key: 'policeClearance',
@@ -84,7 +91,6 @@ export const COMPLIANCE_CRITERIA_CONFIG: readonly ComplianceCriterionConfigItem[
     identifier: (log: TrainingLog, staff: StaffMember) => {
         const youthProtectionKeywords = ["Defence Youth Protection Officers and Instructors"];
         if (staff.rank === 'CIV') {
-            // For Civilian staff, also accept the awareness course
             youthProtectionKeywords.push("Defence Youth Protection Awareness Course");
         }
         return matchesKeywords(log.courseName, youthProtectionKeywords) || matchesKeywords(log.qualificationAchieved, youthProtectionKeywords);

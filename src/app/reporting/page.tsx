@@ -814,7 +814,8 @@ export default function CompliancePage() {
                 </p>
             </li>
             <li><strong>Working With Children Check</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
-            <li><strong>Code of Conduct &amp; Behavioural Policy Acceptance</strong> (valid if completed within the last 1 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
+            <li><strong>Code of Conduct - Signed</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
+            <li><strong>Adult Behaviour Policy Training</strong> (valid if completed within the last 1 year(s), check is exclusive of expiry date - expires *on* the date shown. Specific Accomplishment to look for is &quot;Adult Behaviour Policy Training&quot;).</li>
             <li><strong>National Police Clearance</strong> (valid if completed within the last 5 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
             <li>
                 <strong>Defence Youth Protection</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown Additionally if the members rank is &quot;CIV&quot; then they may be marked as compliant using the accomplishment &quot;Defence Youth Protection Awareness Course&quot; however any Rank other than &quot;CIV&quot; must have &quot;Defence Youth Protection Officers and Instructors&quot; in order to be compliant validity period for all accomplishments in this rule are the same).
