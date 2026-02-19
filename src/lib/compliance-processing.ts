@@ -47,27 +47,10 @@ export function processComplianceReports(
       return false;
     }) : [];
 
-    console.log(`[ComplianceDebug] Processing staff: ${staff.firstName} ${staff.lastName} (SN: ${staffServiceNumberActual || 'None'})`);
-    if (staffServiceNumberActual) {
-      console.log(`[ComplianceDebug] Found ${memberLogs.length} logs for SN: ${staffServiceNumberActual}.`);
-      if (memberLogs.length > 0) {
-        // console.log(`[ComplianceDebug] Sample memberLogs for ${staff.firstName} ${staff.lastName}:`, memberLogs.slice(0,1).map(l => ({course: l.courseName, date: l.completionDate, logSN: l.serviceNumber, logName: l.staffName })));
-      }
-    } else {
-      console.log(`[ComplianceDebug] Staff ${staff.firstName} ${staff.lastName} has no SN. Name/Rank matching found ${memberLogs.length} logs.`);
-    }
-
-
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
-      // console.log(`[ComplianceDebug]   Checking criterion: "${criterion.name}" for ${staff.firstName} ${staff.lastName}`);
       const relevantLogs = memberLogs
-        .filter(log => {
-            const isRelevant = criterion.identifier(log);
-            return isRelevant;
-        })
+        .filter(log => criterion.identifier(log, staff)) // Pass staff to identifier
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
-
-      // console.log(`[ComplianceDebug]     Found ${relevantLogs.length} relevant logs for "${criterion.name}".`);
 
       let isMet = false;
       let details = "Missing";
@@ -75,20 +58,18 @@ export function processComplianceReports(
 
       if (relevantLogs.length > 0) {
         selectedLog = relevantLogs[0];
-        // console.log(`[ComplianceDebug]       Using latest relevant log for "${criterion.name}": ${selectedLog.courseName}, completed: ${selectedLog.completionDate}`);
         const completionDate = startOfDay(new Date(selectedLog.completionDate));
 
         if (!isValidDate(completionDate)) {
           details = "Invalid completion date in record.";
-           // console.log(`[ComplianceDebug]       Invalid completion date for log ID ${selectedLog.id}: ${selectedLog.completionDate}`);
         } else {
           const today = startOfDay(new Date());
 
           if (criterion.yearsToExpire) {
             const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
-            isMet = isBefore(today, expiryDate); // Valid if today is *before* the calculated expiry date
+            isMet = isBefore(today, expiryDate);
 
-            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy'); // Last full day of validity
+            const validUntilDate = format(addDays(expiryDate, -1), 'dd/MM/yy');
             const expiredOnDateText = format(expiryDate, 'dd/MM/yy');
 
             if (isMet) {
@@ -101,10 +82,8 @@ export function processComplianceReports(
             details = `Completed: ${format(completionDate, 'dd/MM/yy')}`;
           }
         }
-      } else {
-        // console.log(`[ComplianceDebug]       No relevant logs found for "${criterion.name}", marking as Missing.`);
       }
-      // console.log(`[ComplianceDebug]     Criterion "${criterion.name}" result: isMet=${isMet}, details="${details}"`);
+      
       return {
         key: criterion.key,
         name: criterion.name,
@@ -113,24 +92,23 @@ export function processComplianceReports(
         relevantLog: selectedLog,
       };
     });
-
-    const metCount = criteriaChecks.filter(c => c.isMet).length;
-    let complianceStatusText: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
-    let complianceStatusVariant: StaffComplianceReport["complianceStatusVariant"] = "destructive";
-
-    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
-      complianceStatusText = "Compliant";
-      complianceStatusVariant = "default";
-    }
-    // console.log(`[ComplianceDebug] Overall compliance for ${staff.firstName} ${staff.lastName}: ${complianceStatusText}`);
+    
+    // Determine overall compliance based on non-advisory checks ONLY
+    const mandatoryChecks = criteriaChecks.filter(check => {
+        const config = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === check.key);
+        return !config?.isAdvisory;
+    });
+    const isOverallCompliant = mandatoryChecks.every(c => c.isMet);
+    const complianceStatusText: StaffComplianceReport["complianceStatusText"] = isOverallCompliant ? "Compliant" : "Not Compliant";
+    const complianceStatusVariant: StaffComplianceReport["complianceStatusVariant"] = isOverallCompliant ? "default" : "destructive";
 
     return {
       staffMemberId: staff.id || `${staff.lastName}, ${staff.firstName}_${staff.rank}_${staffServiceNumberActual || 'NO_SN'}`,
       staffMemberName: `${staff.firstName} ${staff.lastName}`,
       staffMemberRank: staff.rank,
       squadron: staff.squadron || "N/A",
-      isCompliant: complianceStatusText === "Compliant",
-      criteriaChecks,
+      isCompliant: isOverallCompliant, // Based on mandatory checks
+      criteriaChecks, // Return all checks for detailed view
       email: staff.email,
       staffServiceNumberActual: staffServiceNumberActual,
       complianceStatusText,
@@ -183,23 +161,23 @@ export function getExpiringAccomplishments(
     const activeStaff = staffList.filter(s => (s.status || 'Active') === 'Active');
 
     trainingLogs.forEach(log => {
+        const staffMember = activeStaff.find(s => s.serviceNumber === log.serviceNumber);
+        if (!staffMember) return; // Only process logs for active staff
+
         COMPLIANCE_CRITERIA_CONFIG.forEach(criterion => {
-            if (criterion.identifier(log) && criterion.yearsToExpire) {
+            if (criterion.identifier(log, staffMember) && criterion.yearsToExpire) {
                 const completionDate = startOfDay(new Date(log.completionDate));
                 if (!isValidDate(completionDate)) return;
                 const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
                 if (isAfter(expiryDate, today) && isBefore(expiryDate, thresholdDate)) {
-                    const staffMember = activeStaff.find(s => s.serviceNumber === log.serviceNumber);
-                    if (staffMember) { // Only add if the staff member is active
-                      expiring.push({
-                          staffName: `${staffMember.firstName} ${staffMember.lastName}`,
-                          staffRank: staffMember.rank,
-                          squadron: staffMember.squadron || "N/A",
-                          courseName: `${criterion.name} (${log.courseName})`,
-                          expiryDate: expiryDate,
-                          daysLeft: differenceInDays(expiryDate, today)
-                      });
-                    }
+                    expiring.push({
+                        staffName: `${staffMember.firstName} ${staff.lastName}`,
+                        staffRank: staffMember.rank,
+                        squadron: staffMember.squadron || "N/A",
+                        courseName: `${criterion.name} (${log.courseName})`,
+                        expiryDate: expiryDate,
+                        daysLeft: differenceInDays(expiryDate, today)
+                    });
                 }
             }
         });

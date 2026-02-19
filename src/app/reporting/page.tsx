@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
 
 const HEADER_IMAGE_URL = "/AAFCLetterhead-Header.png";
@@ -277,6 +278,9 @@ export default function CompliancePage() {
       return;
     }
 
+    const { default: jsPDF } = await import('jspdf');
+    const autoTable = (await import('jspdf-autotable')).default;
+
     const doc = new jsPDF('p', 'pt', 'a4'); // Use points for better control
     resetLetterheadCache();
     const currentDate = format(new Date(), "PPP");
@@ -432,7 +436,7 @@ export default function CompliancePage() {
       yPos += (Math.max(nameLines.length, itemLines.length, rankLines.length) * lineSpacing * 0.7) + (lineSpacing * 0.4);
     }
 
-    addPageNumbers(doc, footerImgHeight, pageMargin);
+    addPageNumbers(doc, footerHeight, pageMargin);
     doc.save(filename);
     toast({
       title: "PDF Exported",
@@ -724,21 +728,53 @@ export default function CompliancePage() {
                             <div className="p-4">
                               <h4 className="font-semibold mb-2 text-base">Compliance Details:</h4>
                               <ul className="space-y-2">
-                                {report.criteriaChecks.map(criterion => (
-                                  <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
-                                    <div className="flex items-center">
-                                      {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
-                                      <div>
-                                        <span>{criterion.name}:</span>
-                                        <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
-                                          {criterion.isMet ? "Met" : "Not Met"}
-                                        </span>
-                                        <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                {report.criteriaChecks.map(criterion => {
+                                  const criterionConfig = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === criterion.key);
+                                  
+                                  if (criterionConfig?.isAdvisory) {
+                                    if (!criterion.isMet) {
+                                      return (
+                                        <Alert key={criterion.key} className="border-amber-500/50 text-amber-700 dark:border-amber-500/60 dark:text-amber-400 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-500">
+                                          <ShieldAlert className="h-4 w-4" />
+                                          <AlertTitle>{criterion.name} - Advisory</AlertTitle>
+                                          <AlertDescription>
+                                            This member is not current with CPR Qualifications and is not eligible to act in the role of First Aid Officer (FAIDO) on any activity until such time as they have completed the qualification. ({criterion.details})
+                                          </AlertDescription>
+                                        </Alert>
+                                      );
+                                    } else {
+                                       return (
+                                         <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                            <div className="flex items-center">
+                                                <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" />
+                                                <div>
+                                                    <span>{criterion.name}:</span>
+                                                    <span className="ml-1 font-medium text-green-600">Met</span>
+                                                    <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                                </div>
+                                            </div>
+                                            {getExpiryWarningBadge(criterion)}
+                                        </li>
+                                       )
+                                    }
+                                  }
+
+                                  return (
+                                    <li key={criterion.key} className="flex items-center justify-between text-sm p-2 rounded-md border bg-background">
+                                      <div className="flex items-center">
+                                        {criterion.isMet ? <CheckCircle2 className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" /> : <XCircle className="h-5 w-5 text-destructive mr-3 flex-shrink-0" />}
+                                        <div>
+                                          <span>{criterion.name}:</span>
+                                          <span className={`ml-1 font-medium ${criterion.isMet ? 'text-green-600' : 'text-destructive'}`}>
+                                            {criterion.isMet ? "Met" : "Not Met"}
+                                          </span>
+                                          <p className="text-xs text-muted-foreground">{criterion.details}</p>
+                                        </div>
                                       </div>
-                                    </div>
-                                    {getExpiryWarningBadge(criterion)}
-                                  </li>
-                                ))}
+                                      {getExpiryWarningBadge(criterion)}
+                                    </li>
+                                  )
+                                })}
                               </ul>
                             </div>
                           </TableCell>
@@ -770,18 +806,23 @@ export default function CompliancePage() {
         </CardHeader>
         <CardContent>
           <ul className="list-disc pl-5 space-y-2 text-muted-foreground text-sm">
-            {COMPLIANCE_CRITERIA_CONFIG.map(criterion => (
-              <li key={criterion.key}>
-                <strong>{criterion.name}</strong>
-                 {criterion.yearsToExpire
-                   ? ` (valid if completed within the last ${criterion.yearsToExpire} year(s), check is exclusive of expiry date - expires *on* the date shown).`
-                   : ` (checked for existence).`
-                 }
-              </li>
-            ))}
-          </ul>
+            <li><strong>First Aid Certificate</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
+            <li>
+                <strong>Provide Cardiopulmonary Resuscitation</strong> (valid if completed within the last 1 year(s), check is exclusive of expiry date - expires *on* the date shown)
+                <p className="text-xs italic pl-2 mt-1">
+                    (*This one should not mark a member a fully non compliant but should display an orange notation on their profile that states &quot;This member is not current with CPR Qualifications and is not eligible to act in the role of First Aid Officer (FAIDO) on any activity until such time as they have completed the qualification&quot; once the member has that valid accomplishment the warning should be removed and the item marked as MET).
+                </p>
+            </li>
+            <li><strong>Working With Children Check</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
+            <li><strong>Code of Conduct &amp; Behavioural Policy Acceptance</strong> (valid if completed within the last 1 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
+            <li><strong>National Police Clearance</strong> (valid if completed within the last 5 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
+            <li>
+                <strong>Defence Youth Protection</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown Additionally if the members rank is &quot;CIV&quot; then they may be marked as compliant using the accomplishment &quot;Defence Youth Protection Awareness Course&quot; however any Rank other than &quot;CIV&quot; must have &quot;Defence Youth Protection Officers and Instructors&quot; in order to be compliant validity period for all accomplishments in this rule are the same).
+            </li>
+        </ul>
+
           <p className="mt-4 text-xs text-muted-foreground">
-            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date (normalized to start of day). Items without specified expiry are considered 'met' if any relevant log exists. Primary matching relies on the training log's Service Number matching the staff member's Service Number. If a log's Service Number is missing, name and rank matching is attempted as a fallback.
+            Note: For items with expiry, the system uses the completion date of the most recent relevant training log and compares it against the current date (normalized to start of day). Items without specified expiry are considered &apos;met&apos; if any relevant log exists. Primary matching relies on the training log&apos;s Service Number (CEA ID) matching the staff member&apos;s Service Number. If a log&apos;s Service Number is missing, name and rank matching is attempted as a fallback.
           </p>
         </CardContent>
       </Card>

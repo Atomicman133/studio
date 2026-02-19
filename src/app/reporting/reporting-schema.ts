@@ -14,7 +14,7 @@ export interface StaffComplianceReport {
   staffMemberId: string;
   staffMemberName: string;
   staffMemberRank: string;
-  isCompliant: boolean; // True if all criteria are met
+  isCompliant: boolean; // True if all non-advisory criteria are met
   criteriaChecks: ComplianceCriterionCheck[];
   squadron: string;
   email?: string | null;
@@ -31,14 +31,30 @@ const matchesKeywords = (text: string | undefined | null, keywords: string[]): b
   return keywords.some(keyword => lowerText.includes(keyword.toLowerCase()));
 };
 
+type ComplianceCriterionConfigItem = {
+    key: string;
+    name: string;
+    yearsToExpire?: number;
+    isAdvisory?: boolean; // New property to mark non-blocking compliance checks
+    identifier: (log: TrainingLog, staff: StaffMember) => boolean;
+};
+
 // Configuration for compliance criteria
-export const COMPLIANCE_CRITERIA_CONFIG = [
+export const COMPLIANCE_CRITERIA_CONFIG: readonly ComplianceCriterionConfigItem[] = [
   {
     key: 'firstAid',
     name: 'First Aid Certificate',
     yearsToExpire: 3,
     identifier: (log: TrainingLog) =>
       matchesKeywords(log.courseName, ['first aid', 'hltaid']) || matchesKeywords(log.qualificationAchieved, ['first aid', 'hltaid'])
+  },
+  {
+    key: 'cpr',
+    name: 'Provide Cardiopulmonary Resuscitation',
+    yearsToExpire: 1,
+    isAdvisory: true, // This check will not make a member non-compliant overall
+    identifier: (log: TrainingLog) =>
+      matchesKeywords(log.courseName, ['Cardiopulmonary Resuscitation', 'cpr', 'hltaid009']) || matchesKeywords(log.qualificationAchieved, ['Cardiopulmonary Resuscitation', 'cpr', 'hltaid009'])
   },
   {
     key: 'wwcc',
@@ -50,7 +66,7 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
   {
     key: 'codeOfConduct',
     name: 'Code of Conduct & Behavioural Policy Acceptance',
-    yearsToExpire: undefined, // No expiry, just checks for existence
+    yearsToExpire: 1, // Changed from undefined to 1 year
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['code of conduct', 'behavioural policy acceptance', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'behavioural policy acceptance', 'coc'])
   },
@@ -65,12 +81,14 @@ export const COMPLIANCE_CRITERIA_CONFIG = [
     key: 'youthSafety',
     name: 'Defence Youth Protection',
     yearsToExpire: 3,
-    identifier: (log: TrainingLog) =>
-      matchesKeywords(log.courseName, [
-        "Defence Youth Protection Officers and Instructors"
-      ]) || matchesKeywords(log.qualificationAchieved, [
-        "Defence Youth Protection Officers and Instructors"
-      ])
+    identifier: (log: TrainingLog, staff: StaffMember) => {
+        const youthProtectionKeywords = ["Defence Youth Protection Officers and Instructors"];
+        if (staff.rank === 'CIV') {
+            // For Civilian staff, also accept the awareness course
+            youthProtectionKeywords.push("Defence Youth Protection Awareness Course");
+        }
+        return matchesKeywords(log.courseName, youthProtectionKeywords) || matchesKeywords(log.qualificationAchieved, youthProtectionKeywords);
+    }
   },
 ] as const;
 
