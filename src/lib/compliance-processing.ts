@@ -171,7 +171,7 @@ export function getExpiringAccomplishments(
                 const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
                 if (isAfter(expiryDate, today) && isBefore(expiryDate, thresholdDate)) {
                     expiring.push({
-                        staffName: `${staffMember.firstName} ${staff.lastName}`,
+                        staffName: `${staffMember.firstName} ${staffMember.lastName}`,
                         staffRank: staffMember.rank,
                         squadron: staffMember.squadron || "N/A",
                         courseName: `${criterion.name} (${log.courseName})`,
