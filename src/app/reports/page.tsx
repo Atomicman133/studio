@@ -151,7 +151,7 @@ export default function ReportsPage() {
       const complianceReport: SpecificComplianceReportItem[] = staffInScope.map(staff => {
         const memberLogs = trainingLogs?.filter(log => log.serviceNumber === staff.serviceNumber) || [];
         const relevantLogs = memberLogs
-          .filter(log => criterionConfig.identifier(log))
+          .filter(log => criterionConfig.identifier(log, staff))
           .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
         let isMet = false;
@@ -195,7 +195,7 @@ export default function ReportsPage() {
             
             const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
               const relevantLogs = memberLogs
-                .filter(log => criterion.identifier(log))
+                .filter(log => criterion.identifier(log, staff))
                 .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
               let isMet = false;
