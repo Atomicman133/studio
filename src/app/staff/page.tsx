@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import * as React from "react";
@@ -307,7 +306,6 @@ function parseMemberNameAndRank(memberNameInput: string): { rank: typeof RANKS[n
   return { rank, firstName: null, lastName: namePart };
 }
 
-// *** THIS COMPONENT IS NOW DEFINED OUTSIDE StaffPage TO ENSURE A STABLE LIFECYCLE ***
 const StaffDetailsContent = ({
   staffMember,
   onEdit,
@@ -318,7 +316,6 @@ const StaffDetailsContent = ({
   isMutationPending: boolean;
 }) => {
   const { data: trainingLogs = [], isLoading: isLoadingLogs, error: errorLogs } = useQuery<TrainingLog[], Error>({
-      // The key now includes the staff member's ID to ensure it refetches for each user.
       queryKey: [`${STAFF_TRAINING_LOGS_QUERY_KEY_PREFIX}_${staffMember.id}`],
       queryFn: () => fetchTrainingLogsForStaff(staffMember),
       enabled: !!staffMember?.id,
@@ -334,7 +331,7 @@ const StaffDetailsContent = ({
   const calculateSingleStaffCompliance = (staffMember: StaffMember, memberLogs: TrainingLog[]): { criteriaChecks: ComplianceCriterionCheck[], overallStatus: StaffComplianceReport["complianceStatusText"] } => {
     const criteriaChecks: ComplianceCriterionCheck[] = COMPLIANCE_CRITERIA_CONFIG.map(criterion => {
       const relevantLogs = memberLogs
-        .filter(log => criterion.identifier(log))
+        .filter(log => criterion.identifier(log, staffMember))
         .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
 
       let isMet = false;
@@ -447,7 +444,6 @@ const StaffDetailsContent = ({
 
     await addSectionTitle("Basic Information");
     await addDetailLine("Service Number", staffMember.serviceNumber);
-    // Use the locally calculated OIC level for export
     if (oicLevel !== null) {
       await addDetailLine("OIC Level", oicLevel.toString());
     }
@@ -463,7 +459,6 @@ const StaffDetailsContent = ({
     yPos += sectionSpacing * 0.5;
 
     await addSectionTitle("Compliance Status");
-    // Use the correctly fetched logs for this calculation
     const { criteriaChecks, overallStatus } = calculateSingleStaffCompliance(staffMember, trainingLogs);
     await addDetailLine("Overall Status", overallStatus);
     if (overallStatus !== "Compliant") {
@@ -1242,7 +1237,6 @@ export default function StaffPage() {
     const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
     const staffMapByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
     
-    // Fetch all logs once for de-duplication check
     const allTrainingLogs: TrainingLog[] = queryClient.getQueryData([TRAINING_LOGS_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [TRAINING_LOGS_QUERY_KEY], queryFn: async () => {
         const querySnapshot = await getDocs(query(collection(db, "trainingLogs")));
         return querySnapshot.docs.map(d => convertTrainingLogTimestamps(d.data()));
@@ -1305,7 +1299,6 @@ export default function StaffPage() {
               return;
           }
 
-          // Step 1: Process all rows and prepare operations without writing to DB yet
           for (let i = 1; i < allRows.length; i++) {
               const values = allRows[i];
               if (values.every(val => val.trim() === "")) continue;
@@ -1406,12 +1399,10 @@ export default function StaffPage() {
                   const recordHash = await createHash(hashString);
 
 
-                  // --- DUPLICATION CHECK ---
                   if (existingLogHashes.has(recordHash)) {
                       skippedRecordsLog.push(`Row ${i + 1}: Skipped - Duplicate record found via hash for SN ${matchedStaffFromMap.serviceNumber}.`);
                       continue;
                   }
-                  // --- END DUPLICATION CHECK ---
 
                   const logPayload = {
                       rank: parsedNameRankUid.rank || matchedStaffFromMap.rank,
@@ -1424,10 +1415,10 @@ export default function StaffPage() {
                       instructorQualification: "",
                       achievementDetails: csvRowData["Comment"]?.trim() || "",
                       serviceNumber: matchedStaffFromMap.serviceNumber,
-                      hash: recordHash, // Add the new hash field
+                      hash: recordHash,
                   };
                   allOperations.push({ type: 'log', payload: logPayload });
-                  existingLogHashes.add(recordHash); // Add to set to prevent duplicates within the same file
+                  existingLogHashes.add(recordHash); 
               }
               staffUpdates.set(matchedStaffFromMap.id!, staffUpdateData);
           }
@@ -1445,7 +1436,6 @@ export default function StaffPage() {
             return;
         }
         
-        // Step 2: Commit operations in batches
         toast({ title: "Processing...", description: `Preparing to write ${allOperations.length} operations to the database...` });
         
         const totalBatches = Math.ceil(allOperations.length / BATCH_SIZE);
@@ -1540,7 +1530,6 @@ export default function StaffPage() {
             }
         }
         
-        // Final Summary Toast
         let toastTitle = "Import Successful";
         let toastVariant: "default" | "destructive" = "default";
         let toastDescription = `${allOperations.length} operations processed successfully.`;
@@ -1615,7 +1604,6 @@ export default function StaffPage() {
       const dischargeKeywords = ["discharged", "discharge", "resign", "cancellation of acceptance"];
       const staffIdsToDelete = new Set<string>();
       
-      // 1. Find staff based on training log keywords
       if (allLogs) {
         allLogs.forEach(log => {
           const logDetailsLower = [log.courseName, log.achievementDetails, log.qualificationAchieved].filter(Boolean).join(' ').toLowerCase();
@@ -1630,7 +1618,6 @@ export default function StaffPage() {
         });
       }
 
-      // 2. Find staff based on their status field
       allStaff.forEach(staff => {
         if (staff.status === 'Pending Discharge' && staff.id) {
             staffIdsToDelete.add(staff.id);
