@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useForm } from "react-hook-form";
@@ -22,14 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface RecordOfConversationFormProps {
@@ -124,23 +117,18 @@ export function RecordOfConversationForm({ onSubmit, defaultValues, onCancel, is
             render={({ field }) => (
               <FormItem className="flex flex-col">
                 <FormLabel>Date of Interview</FormLabel>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <FormControl>
-                      <Button
-                        variant={"outline"}
-                        className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                        disabled={isSubmitting}
-                      >
-                        {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </FormControl>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus disabled={isSubmitting}/>
-                  </PopoverContent>
-                </Popover>
+                <FormControl>
+                  <Input
+                    type="date"
+                    disabled={isSubmitting}
+                    className="w-full"
+                    value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      field.onChange(val ? new Date(val) : undefined);
+                    }}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
