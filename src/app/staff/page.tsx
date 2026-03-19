@@ -68,7 +68,7 @@ import { Badge } from "@/components/ui/badge";
 import { useStaff, useAddStaff, useUpdateStaff, useDeleteStaff } from '@/hooks/useStaffData';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, query, where, orderBy, Timestamp, writeBatch, doc, arrayUnion, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, Timestamp, writeBatch, doc, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import jsPDF from 'jspdf';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache, calculateOICLevel } from '@/lib/utils'; 
 import { COMPLIANCE_CRITERIA_CONFIG, type ComplianceCriterionCheck, type StaffComplianceReport } from "@/app/reporting/reporting-schema";
@@ -1530,6 +1530,12 @@ export default function StaffPage() {
             }
         }
         
+        // Update metadata for last accomplishment import time
+        if (allOperations.length > 0 || staffToHardDelete.size > 0) {
+            const metaRef = doc(db, 'systemMetadata', 'accomplishmentImport');
+            await setDoc(metaRef, { lastImportAt: Timestamp.now() }, { merge: true });
+        }
+        
         let toastTitle = "Import Successful";
         let toastVariant: "default" | "destructive" = "default";
         let toastDescription = `${allOperations.length} operations processed successfully.`;
@@ -1734,7 +1740,7 @@ export default function StaffPage() {
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <UsersIconLucide className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-muted-foreground mb-2">No Staff Members Found</h3>
-                <p className="text-muted-foreground mb-4">Add staff members manually or import a CSV file.</p>
+                <p className="text-muted-foreground">Add staff members manually or import a CSV file.</p>
             </CardContent>
         </Card>
       )}

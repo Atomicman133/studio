@@ -5,7 +5,7 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, UserCheck, Loader2, CalendarClock, Download } from "lucide-react";
+import { AlertTriangle, UserCheck, Loader2, CalendarClock, Download, Info, Clock } from "lucide-react";
 import { format, addDays } from "date-fns";
 
 import type { StaffMember } from "./staff/staff-schema";
@@ -22,7 +22,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { useStaff } from "@/hooks/useStaffData";
 import { useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, query, orderBy, Timestamp, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, Timestamp, where, doc, getDoc } from 'firebase/firestore';
 import { useAuth } from "@/contexts/auth-context";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
 // --- Fetch Training Logs ---
@@ -112,6 +113,19 @@ async function fetchDashboardScheduledMeetings(): Promise<ScheduledMeeting[]> {
   }) as ScheduledMeeting[];
 }
 
+// --- Fetch System Metadata (Last Import Time) ---
+async function fetchSystemMetadata() {
+  const docRef = doc(db, 'systemMetadata', 'accomplishmentImport');
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    const data = docSnap.data();
+    return {
+      lastImportAt: data.lastImportAt instanceof Timestamp ? data.lastImportAt.toDate() : null
+    };
+  }
+  return null;
+}
+
 const chartConfig = {
   compliant: { label: "Compliant", color: "hsl(var(--chart-1))" },
   nonCompliant: { label: "Non-Compliant", color: "hsl(var(--destructive))" },
@@ -146,6 +160,12 @@ export default function DashboardPage() {
   const { data: scheduledMeetings = [], isLoading: isLoadingScheduledMeetings, error: errorScheduledMeetings } = useQuery<ScheduledMeeting[], Error>({
     queryKey: ['dashboardScheduledMeetings'], 
     queryFn: fetchDashboardScheduledMeetings,
+    enabled: commonEnabledCondition,
+  });
+
+  const { data: systemMetadata, isLoading: isLoadingMetadata } = useQuery({
+    queryKey: ['systemMetadata'],
+    queryFn: fetchSystemMetadata,
     enabled: commonEnabledCondition,
   });
   
@@ -269,7 +289,7 @@ export default function DashboardPage() {
   };
 
 
-  const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits || isLoadingScheduledMeetings;
+  const isLoadingAnyData = isLoadingStaff || isLoadingLogs || isLoadingAudits || isLoadingVisits || isLoadingScheduledMeetings || isLoadingMetadata;
   const hasAnyError = errorStaff || errorLogs || errorAudits || errorVisits || errorScheduledMeetings;
   const isUserEmailInvalidForRules = user && !!user.email && !user.email.endsWith('@airforcecadets.gov.au');
 
@@ -345,6 +365,25 @@ export default function DashboardPage() {
           <CardTitle className="text-3xl font-bold">Squadron Manager Dashboard</CardTitle>
           <CardDescription>Overview of key operational metrics.</CardDescription>
         </CardHeader>
+        <CardContent>
+            {systemMetadata?.lastImportAt ? (
+                <Alert className="bg-primary/5 border-primary/20">
+                    <Clock className="h-4 w-4 text-primary" />
+                    <AlertTitle className="text-primary font-semibold">Data Currency Notice</AlertTitle>
+                    <AlertDescription className="text-sm">
+                        Accomplishments in this system were last uploaded on <strong>{format(systemMetadata.lastImportAt, "PPPP 'at' p")}</strong> using the upload accomplishments function.
+                    </AlertDescription>
+                </Alert>
+            ) : (
+                <Alert variant="secondary">
+                    <Info className="h-4 w-4" />
+                    <AlertTitle>No Upload History</AlertTitle>
+                    <AlertDescription>
+                        No record of accomplishment uploads found. Please use the "Import Accomp." function in Staff Management to populate records.
+                    </AlertDescription>
+                </Alert>
+            )}
+        </CardContent>
       </Card>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
