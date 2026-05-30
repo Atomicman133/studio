@@ -12,7 +12,7 @@
       ],
       "console": "integratedTerminal",
       "preLaunchTask": "npm-install",
-      "cwd": "${workspaceFolder}/studio-live-app-working-version"
+      "cwd": "${workspaceFolder}"
     }
   ]
 }

@@ -6,7 +6,7 @@
       "type": "shell",
       "command": "npm install",
       "options": {
-        "cwd": "${workspaceFolder}/studio-live-app-working-version"
+        "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
     }
