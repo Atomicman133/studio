@@ -12,8 +12,39 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.7",
+    version: "0.2.8",
     date: "Current",
+    title: "Transactional Compliance Emailing & Dynamic Advisory Guidelines",
+    sections: [
+      {
+        title: "Compliance Emailing Integration",
+        items: [
+          "Integrated complete transactional email sending using NodeMailer and secure SMTP (Gmail App Passwords), replacing manual clipboard copying.",
+          "Configured secure, zero-leak environment isolation using .env.local locally and apphosting.yaml + GCP Secret Manager in the production App Hosting environment.",
+          "Dynamically append personalized, step-by-step instructions into the email body based on which items are outstanding for a member (First Aid/CPR, WWCC, Code of Conduct, Adult Behaviour, Police Check).",
+          "Optimized workflow by removing the local PDF auto-download upon opening the dialog—generating the PDF report strictly in-memory and attaching it directly at the moment of sending.",
+        ],
+      },
+      {
+        title: "Compliance & Advisory Rules",
+        items: [
+          "Converted 'Provide Cardiopulmonary Resuscitation' (CPR) and 'Code of Conduct - Signed' to soft advisory requirements. Staff missing only these items are marked as Compliant overall.",
+          "Added yellow caution advisory badges (e.g., '⚠️ CPR') in the staff lists and detail panels to highlight missing advisory items without blocking compliance status.",
+          "Enabled compliance email dispatch buttons for staff members with only advisory warnings, allowing you to email them reminders.",
+        ],
+      },
+      {
+        title: "Dashboard Enhancements",
+        items: [
+          "Added real-time name search and squadron unit dropdown filters to the 'Expiring Accomplishments (Next 30 Days)' dashboard widget.",
+          "Wrapped the accomplishments table in a scrollable, max-height bound list to ensure clean scrolling for long lists of upcoming expirations.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.7",
+    date: "Previous Update",
     title: "Enhanced Compliance Logic & Automated Data Purging",
     sections: [
       {
