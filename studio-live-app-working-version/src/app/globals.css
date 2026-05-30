@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* White */
+    --foreground: 240 10% 3.9%; /* Dark Blue Grey */
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 221 100% 28%; /* #00308F */
+    --primary-foreground: 0 0% 100%; /* White */
+
+    --secondary: 0 0% 82.7%; /* #D3D3D3 */
+    --secondary-foreground: 240 10% 3.9%; /* Dark Blue Grey */
+
+    --muted: 0 0% 96.1%; /* Light Grey */
+    --muted-foreground: 240 5% 64.9%; 
+
+    --accent: 44 100% 70%; /* #FFDA63 */
+    --accent-foreground: 240 10% 3.9%; /* Dark Blue Grey for text on accent */
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 221 100% 28%; /* #00308F for focus rings */
+
+    --chart-1: 221 100% 28%;
+    --chart-2: 44 100% 70%;
+    --chart-3: 0 0% 82.7%;
+    --chart-4: 210 40% 96.1%;
+    --chart-5: 10 60% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 240 5% 96.1%; /* Light Grey for sidebar */
+    --sidebar-foreground: 240 10% 3.9%;
+    --sidebar-primary: 221 100% 28%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 44 100% 70%;
+    --sidebar-accent-foreground: 240 10% 3.9%;
+    --sidebar-border: 240 5.9% 85%;
+    --sidebar-ring: 221 100% 28%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%; /* Dark Blue Grey */
+    --foreground: 0 0% 98%; /* White */
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 221 100% 48%; /* A slightly lighter #00308F for dark mode */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 4% 15%; /* Darker Grey for dark mode */
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 4% 15%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 44 100% 70%; /* #FFDA63 - remains vibrant */
+    --accent-foreground: 240 10% 3.9%; 
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 221 100% 48%;
+
+    --chart-1: 221 100% 48%;
+    --chart-2: 44 100% 70%;
+    --chart-3: 240 4% 45%;
+    --chart-4: 210 40% 16.1%;
+    --chart-5: 10 60% 40%;
+
+    --sidebar-background: 240 8% 12%; /* Darker Grey for sidebar */
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 221 100% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 44 100% 70%;
+    --sidebar-accent-foreground: 240 10% 3.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 221 100% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}

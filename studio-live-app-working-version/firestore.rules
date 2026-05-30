@@ -1,0 +1,26 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // This rule set applies to ALL documents in your database.
+    match /{document=**} {
+
+      // Allow read, create, and update operations ONLY IF:
+      // 1. The user is authenticated (request.auth is not null).
+      // 2. The user's email exists in their auth token.
+      // 3. The user's email matches the pattern ending with "@airforcecadets.gov.au".
+      allow read, create, update: if
+        request.auth != null &&
+        request.auth.token.email != null &&
+        request.auth.token.email.matches(".*@airforcecadets\\.gov\\.au$");
+
+      // Allow delete operations ONLY IF:
+      // 1. The user is authenticated (request.auth is not null).
+      // 2. The authenticated user's UID matches the specific administrator UID.
+      allow delete: if
+        request.auth != null &&
+        request.auth.uid == "ffMi5SdBGHNFf4597ZTlM3q5dK23";
+    }
+  }
+}
