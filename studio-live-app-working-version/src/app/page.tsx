@@ -39,6 +39,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { addLetterheadAndFooter, addPageNumbers, resetLetterheadCache } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
 
 
 // --- Fetch Training Logs ---
@@ -201,12 +202,34 @@ export default function DashboardPage() {
     return null;
   }, [processedReports, staffList]);
 
-  const expiringAccomplishments = React.useMemo(() => {
+  const [expiringSearchQuery, setExpiringSearchQuery] = React.useState("");
+  const [expiringUnitFilter, setExpiringUnitFilter] = React.useState("all");
+
+  const rawExpiringAccomplishments = React.useMemo(() => {
     if (staffList.length > 0 && trainingLogs.length > 0) {
         return getExpiringAccomplishments(staffList, trainingLogs, 30);
     }
     return [];
   }, [staffList, trainingLogs]);
+
+  const expiringUnits = React.useMemo(() => {
+    const units = new Set<string>();
+    rawExpiringAccomplishments.forEach(item => {
+      if (item.squadron) {
+        units.add(item.squadron);
+      }
+    });
+    return Array.from(units).sort();
+  }, [rawExpiringAccomplishments]);
+
+  const expiringAccomplishments = React.useMemo(() => {
+    return rawExpiringAccomplishments.filter(item => {
+      const matchesSearch = item.staffName.toLowerCase().includes(expiringSearchQuery.toLowerCase()) ||
+                            item.staffRank.toLowerCase().includes(expiringSearchQuery.toLowerCase());
+      const matchesUnit = expiringUnitFilter === "all" || item.squadron === expiringUnitFilter;
+      return matchesSearch && matchesUnit;
+    });
+  }, [rawExpiringAccomplishments, expiringSearchQuery, expiringUnitFilter]);
 
   const upcomingActionItems = React.useMemo(() => {
     if(audits.length > 0 || visits.length > 0) {
@@ -449,36 +472,61 @@ export default function DashboardPage() {
             <CardTitle className="text-lg font-medium">Expiring Accomplishments (Next 30 Days)</CardTitle>
             <AlertTriangle className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3 mb-2">
+              <Input
+                placeholder="Search by staff name..."
+                value={expiringSearchQuery}
+                onChange={(e) => setExpiringSearchQuery(e.target.value)}
+                className="flex-1"
+              />
+              <select
+                value={expiringUnitFilter}
+                onChange={(e) => setExpiringUnitFilter(e.target.value)}
+                className="flex h-9 w-full sm:w-[200px] rounded-md border border-input bg-transparent dark:bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="all" className="bg-background text-foreground">All Squadrons</option>
+                {expiringUnits.map(unit => (
+                  <option key={unit} value={unit} className="bg-background text-foreground">{unit}</option>
+                ))}
+              </select>
+            </div>
+
             {expiringAccomplishments.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Staff Member</TableHead>
-                    <TableHead className="hidden sm:table-cell">Squadron</TableHead>
-                    <TableHead>Accomplishment</TableHead>
-                    <TableHead className="text-right">Expires In</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {expiringAccomplishments.map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <div className="font-medium">{item.staffRank} {item.staffName}</div>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">{item.squadron}</TableCell>
-                      <TableCell>{item.courseName}</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant={item.daysLeft <= 7 ? "destructive" : "secondary"}>
-                          {item.daysLeft} day(s)
-                        </Badge>
-                      </TableCell>
+              <div className="max-h-[300px] overflow-y-auto pr-2">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Staff Member</TableHead>
+                      <TableHead className="hidden sm:table-cell">Squadron</TableHead>
+                      <TableHead>Accomplishment</TableHead>
+                      <TableHead className="text-right">Expires In</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {expiringAccomplishments.map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <div className="font-medium">{item.staffRank} {item.staffName}</div>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell">{item.squadron}</TableCell>
+                        <TableCell>{item.courseName}</TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant={item.daysLeft <= 7 ? "destructive" : "secondary"}>
+                            {item.daysLeft} day(s)
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             ) : (
-              <p className="text-muted-foreground pt-4">No accomplishments expiring soon for active staff.</p>
+              <p className="text-muted-foreground pt-4 text-center">
+                {rawExpiringAccomplishments.length === 0
+                  ? "No accomplishments expiring soon for active staff."
+                  : "No matching accomplishments found."}
+              </p>
             )}
           </CardContent>
         </Card>
@@ -564,7 +612,7 @@ export default function DashboardPage() {
               List of staff members in the selected compliance category.
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[60vh] border rounded-md">
+          <div className="max-h-[60vh] overflow-y-auto border rounded-md">
             {selectedComplianceSegmentData.length > 0 ? (
               <Table>
                 <TableHeader>
@@ -597,7 +645,7 @@ export default function DashboardPage() {
             ) : (
               <p className="p-4 text-center text-muted-foreground">No staff members in this category.</p>
             )}
-          </ScrollArea>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsComplianceDetailOpen(false)}>Close</Button>
             <Button onClick={handleExportComplianceSegmentPdf} disabled={selectedComplianceSegmentData.length === 0}>

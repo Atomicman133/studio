@@ -362,11 +362,12 @@ const StaffDetailsContent = ({
       return { key: criterion.key, name: criterion.name, isMet, details, relevantLog: selectedLog };
     });
 
-    const metCount = criteriaChecks.filter(c => c.isMet).length;
-    let overallStatus: StaffComplianceReport["complianceStatusText"] = "Not Compliant";
-    if (metCount === COMPLIANCE_CRITERIA_CONFIG.length) {
-      overallStatus = "Compliant";
-    }
+    const mandatoryChecks = criteriaChecks.filter(check => {
+      const config = COMPLIANCE_CRITERIA_CONFIG.find(c => c.key === check.key);
+      return !config?.isAdvisory;
+    });
+    const isOverallCompliant = mandatoryChecks.every(c => c.isMet);
+    const overallStatus: StaffComplianceReport["complianceStatusText"] = isOverallCompliant ? "Compliant" : "Not Compliant";
     return { criteriaChecks, overallStatus };
   };
 
@@ -584,13 +585,42 @@ const StaffDetailsContent = ({
                         return (
                           <div className="space-y-2 p-2 border rounded-md">
                             <p className="text-sm"><strong>Overall:</strong> <Badge variant={overallStatus === "Compliant" ? "default" : "destructive"}>{overallStatus}</Badge></p>
-                            {overallStatus !== "Compliant" && (
-                              <ul className="list-disc pl-5 text-xs">
-                                {criteriaChecks.filter(c => !c.isMet).map(c => (
-                                  <li key={c.key} className="text-muted-foreground">{c.name}: {c.details}</li>
-                                ))}
-                              </ul>
-                            )}
+                            {(() => {
+                              const failedMandatory = criteriaChecks.filter(c => {
+                                const config = COMPLIANCE_CRITERIA_CONFIG.find(x => x.key === c.key);
+                                return !c.isMet && !config?.isAdvisory;
+                              });
+                              const failedAdvisory = criteriaChecks.filter(c => {
+                                const config = COMPLIANCE_CRITERIA_CONFIG.find(x => x.key === c.key);
+                                return !c.isMet && config?.isAdvisory;
+                              });
+                              return (
+                                <>
+                                  {failedMandatory.length > 0 && (
+                                    <div className="mt-2 text-xs">
+                                      <p className="font-semibold text-destructive">Missing/Expired Mandatory Requirements:</p>
+                                      <ul className="list-disc pl-5 mt-1">
+                                        {failedMandatory.map(c => (
+                                          <li key={c.key} className="text-muted-foreground">{c.name}: {c.details}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {failedAdvisory.length > 0 && (
+                                    <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-250 dark:border-yellow-900 rounded-md">
+                                      <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-400 flex items-center gap-1">
+                                        <AlertTriangle className="h-3.5 w-3.5" /> Caution (Advisory Notices):
+                                      </p>
+                                      <ul className="list-disc pl-5 text-[11px] text-yellow-700 dark:text-yellow-500 mt-1">
+                                        {failedAdvisory.map(c => (
+                                          <li key={c.key}>{c.name}: {c.details}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                         );
                       })()
@@ -740,6 +770,53 @@ export default function StaffPage() {
   const updateStaffMutation = useUpdateStaff();
   const deleteStaffMutation = useDeleteStaff();
   const queryClient = useQueryClient();
+
+  const { data: trainingLogs = [] } = useQuery<TrainingLog[], Error>({
+    queryKey: [TRAINING_LOGS_QUERY_KEY],
+    queryFn: async () => {
+      const querySnapshot = await getDocs(query(collection(db, "trainingLogs")));
+      return querySnapshot.docs.map(d => convertTrainingLogTimestamps(d.data()));
+    }
+  });
+
+  const getStaffAdvisoryWarnings = React.useCallback((staff: StaffMember) => {
+    const memberLogs = trainingLogs.filter(log => {
+      if (staff.serviceNumber && staff.serviceNumber.trim() !== "" && log.serviceNumber && log.serviceNumber.trim() !== "") {
+        return staff.serviceNumber.trim() === log.serviceNumber.trim();
+      }
+      return false;
+    });
+
+    const warnings: string[] = [];
+    const advisoryCriteria = COMPLIANCE_CRITERIA_CONFIG.filter(c => c.isAdvisory);
+
+    advisoryCriteria.forEach(criterion => {
+      const relevantLogs = memberLogs
+        .filter(log => criterion.identifier(log, staff))
+        .sort((a, b) => new Date(b.completionDate).getTime() - new Date(a.completionDate).getTime());
+
+      let isMet = false;
+      if (relevantLogs.length > 0) {
+        const selectedLog = relevantLogs[0];
+        const completionDate = startOfDay(new Date(selectedLog.completionDate));
+        if (isValidDate(completionDate)) {
+          const today = startOfDay(new Date());
+          if (criterion.yearsToExpire) {
+            const expiryDate = startOfDay(addYears(completionDate, criterion.yearsToExpire));
+            isMet = isBefore(today, expiryDate);
+          } else {
+            isMet = true;
+          }
+        }
+      }
+
+      if (!isMet) {
+        warnings.push(criterion.key === 'cpr' ? 'CPR' : 'Code of Conduct');
+      }
+    });
+
+    return warnings;
+  }, [trainingLogs]);
 
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editingStaff, setEditingStaff] = React.useState<StaffMember | null>(null);
@@ -1783,16 +1860,25 @@ export default function StaffPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {group.staffMembers.map((staff) => (
-                          <TableRow key={staff.id}>
-                            <TableCell>{staff.serviceNumber}</TableCell>
-                            <TableCell>{staff.rank}</TableCell>
-                            <TableCell className="font-medium">
-                              {`${staff.firstName} ${staff.lastName}`}
-                              {(staff.status === 'UAL' || staff.status === 'Pending Discharge') && (
-                                <Badge variant="destructive" className="ml-2">{staff.status}</Badge>
-                              )}
-                            </TableCell>
+                        {group.staffMembers.map((staff) => {
+                          const advisoryWarnings = getStaffAdvisoryWarnings(staff);
+                          return (
+                            <TableRow key={staff.id}>
+                              <TableCell>{staff.serviceNumber}</TableCell>
+                              <TableCell>{staff.rank}</TableCell>
+                              <TableCell className="font-medium">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{`${staff.firstName} ${staff.lastName}`}</span>
+                                  {(staff.status === 'UAL' || staff.status === 'Pending Discharge') && (
+                                    <Badge variant="destructive">{staff.status}</Badge>
+                                  )}
+                                  {advisoryWarnings.length > 0 && (
+                                    <Badge variant="outline" className="bg-yellow-50 dark:bg-yellow-950/30 text-yellow-600 dark:text-yellow-500 border-yellow-200 dark:border-yellow-800 flex items-center gap-1 py-0 h-5 text-[10px] font-semibold shrink-0">
+                                      <AlertTriangle className="h-3 w-3" /> {advisoryWarnings.join(", ")}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
                             <TableCell className="hidden md:table-cell max-w-xs truncate">{staff.role || "N/A"}</TableCell>
                             <TableCell className="hidden lg:table-cell">
                               {staff.joinDate && isValidDate(new Date(staff.joinDate)) ? format(new Date(staff.joinDate), "PP") : "N/A"}
@@ -1828,7 +1914,8 @@ export default function StaffPage() {
                               </DropdownMenu>
                             </TableCell>
                           </TableRow>
-                        ))}
+                        );
+                      })}
                       </TableBody>
                     </Table>
                   </div>

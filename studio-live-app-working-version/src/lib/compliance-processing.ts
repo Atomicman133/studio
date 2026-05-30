@@ -182,7 +182,7 @@ export function getExpiringAccomplishments(
             }
         });
     });
-    return expiring.sort((a, b) => a.daysLeft - b.daysLeft).slice(0, 5);
+    return expiring.sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
 interface UpcomingActionItem {

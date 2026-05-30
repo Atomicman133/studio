@@ -67,6 +67,7 @@ export const COMPLIANCE_CRITERIA_CONFIG: readonly ComplianceCriterionConfigItem[
     key: 'codeOfConduct',
     name: 'Code of Conduct - Signed',
     yearsToExpire: 3,
+    isAdvisory: true,
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['code of conduct', 'coc']) || matchesKeywords(log.qualificationAchieved, ['code of conduct', 'coc'])
   },
