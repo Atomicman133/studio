@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3, Search, Copy } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronDown, ChevronUp, UserCheck, FileSearch, AlertTriangle, ShieldCheck, ShieldOff, ShieldAlert, CalendarCheck2, Loader2, Mail, Download, Link as LinkIcon, RefreshCw, BarChart3, Search, Copy, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -98,6 +98,8 @@ export default function CompliancePage() {
   // State for email content dialog
   const [isEmailContentDialogOpen, setIsEmailContentDialogOpen] = React.useState(false);
   const [emailContent, setEmailContent] = React.useState<{ to: string, subject: string; body: string } | null>(null);
+  const [isSendingEmail, setIsSendingEmail] = React.useState(false);
+  const [selectedReportForEmail, setSelectedReportForEmail] = React.useState<StaffComplianceReport | null>(null);
 
 
   React.useEffect(() => {
@@ -485,12 +487,72 @@ export default function CompliancePage() {
       const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The attached report details the following items which require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
 
       // 3. Set state to open the dialog
+      setSelectedReportForEmail(report);
       setEmailContent({ to: report.email, subject, body });
       setIsEmailContentDialogOpen(true);
 
     } catch (error) {
       console.error("Error preparing compliance email content:", error);
       toast({ variant: "destructive", title: "Error", description: "Could not prepare the email content." });
+    }
+  };
+
+  const handleSendEmail = async () => {
+    if (!emailContent || !selectedReportForEmail) return;
+
+    setIsSendingEmail(true);
+
+    try {
+      // 1. Generate the PDF
+      const pdfDoc = await generateComplianceReportPdf(selectedReportForEmail);
+      const pdfFileName = `compliance_report_${selectedReportForEmail.staffMemberRank}_${selectedReportForEmail.staffMemberName.replace(/\s+/g, '_')}.pdf`;
+
+      // Convert PDF arraybuffer to base64
+      const pdfOutput = pdfDoc.output('arraybuffer');
+      const bytes = new Uint8Array(pdfOutput);
+      let binary = '';
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64Pdf = window.btoa(binary);
+
+      // 2. Post to Next.js API endpoint
+      const response = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: emailContent.to,
+          subject: emailContent.subject,
+          body: emailContent.body,
+          pdfBase64: base64Pdf,
+          filename: pdfFileName,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send email.');
+      }
+
+      toast({
+        title: "Email Sent Successfully",
+        description: `Compliance report has been emailed to ${emailContent.to}.`,
+      });
+
+      setIsEmailContentDialogOpen(false);
+    } catch (error: any) {
+      console.error("Failed to send email via API:", error);
+      toast({
+        variant: "destructive",
+        title: "Send Failed",
+        description: error.message || "Could not send email.",
+      });
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -853,7 +915,7 @@ export default function CompliancePage() {
             <DialogHeader>
               <DialogTitle>Suggested Email Content</DialogTitle>
               <DialogDescription>
-                The compliance PDF has been downloaded. You can use the content below to send an email to {emailContent.to}.
+                You can send this compliance email with the report PDF attached directly via your Gmail integration, or copy the content below.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -866,14 +928,18 @@ export default function CompliancePage() {
                 <Textarea id="email-body" readOnly value={emailContent.body} className="h-64 min-h-[200px] whitespace-pre-wrap" />
               </div>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEmailContentDialogOpen(false)}>Close</Button>
-              <Button onClick={() => {
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setIsEmailContentDialogOpen(false)} disabled={isSendingEmail}>Close</Button>
+              <Button variant="outline" disabled={isSendingEmail} onClick={() => {
                 const fullEmailText = `Subject: ${emailContent.subject}\n\n${emailContent.body}`;
                 navigator.clipboard.writeText(fullEmailText);
                 toast({ title: "Copied to Clipboard", description: "Email subject and body have been copied." });
               }}>
                 <Copy className="mr-2 h-4 w-4" /> Copy Content
+              </Button>
+              <Button onClick={handleSendEmail} disabled={isSendingEmail} className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                {isSendingEmail ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                Send Email via Gmail
               </Button>
             </DialogFooter>
           </DialogContent>
