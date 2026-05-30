@@ -1,0 +1,18 @@
+# apphosting.yaml
+# Firebase App Hosting configuration file
+# See https://firebase.google.com/docs/app-hosting/configure
+
+specVersion: v1beta1
+
+# Settings for the running server
+run:
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+# Environment variables and secrets
+env:
+  - variable: GMAIL_USER
+    value: "squadron.manager.7wing@gmail.com"
+  - variable: GMAIL_APP_PASSWORD
+    secret: GMAIL_APP_PASSWORD
