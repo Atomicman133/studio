@@ -459,8 +459,9 @@ export default function CompliancePage() {
 
 
   const handleEmailComplianceReport = async (report: StaffComplianceReport) => {
-    if (report.complianceStatusText === "Compliant") {
-      toast({ title: "Information", description: `${report.staffMemberName} is compliant. No email needed.` });
+    const hasUnmetCriteria = report.criteriaChecks.some(c => !c.isMet);
+    if (!hasUnmetCriteria) {
+      toast({ title: "Information", description: `${report.staffMemberName} is fully compliant and has no missing or expired items. No email needed.` });
       return;
     }
     if (!report.email) {
@@ -776,7 +777,7 @@ export default function CompliancePage() {
                           <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDownloadComplianceReport(report);}} title="Download Compliance Report" disabled={isBulkLinking}>
                               <Download className="h-4 w-4" />
                           </Button>
-                          {report.complianceStatusText !== "Compliant" && report.email && (
+                          {report.criteriaChecks.some(c => !c.isMet) && report.email && (
                             <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleEmailComplianceReport(report);}} title="Email Compliance Report" disabled={isBulkLinking}>
                               <Mail className="h-4 w-4" />
                             </Button>
