@@ -470,16 +470,7 @@ export default function CompliancePage() {
     }
 
     try {
-      // 1. Generate and download the PDF
-      const pdfDoc = await generateComplianceReportPdf(report);
-      const pdfFileName = `compliance_report_${report.staffMemberRank}_${report.staffMemberName.replace(/\s+/g, '_')}.pdf`;
-      pdfDoc.save(pdfFileName);
-      toast({
-        title: "PDF Downloaded",
-        description: `Compliance report "${pdfFileName}" has been downloaded.`,
-      });
-
-      // 2. Prepare email content
+      // 1. Prepare email content
       const nonCompliantItems = report.criteriaChecks.filter(c => !c.isMet)
         .map(c => `  - ${c.name}: ${c.details}`)
         .join("\n");
