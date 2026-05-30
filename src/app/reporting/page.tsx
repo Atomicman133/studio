@@ -916,7 +916,7 @@ export default function CompliancePage() {
             <DialogHeader>
               <DialogTitle>Suggested Email Content</DialogTitle>
               <DialogDescription>
-                You can send this compliance email with the report PDF attached directly via your Gmail integration, or copy the content below.
+                You can send this compliance email with the report PDF attached directly, or copy the content below.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -940,7 +940,7 @@ export default function CompliancePage() {
               </Button>
               <Button onClick={handleSendEmail} disabled={isSendingEmail} className="bg-primary hover:bg-primary/90 text-primary-foreground">
                 {isSendingEmail ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                Send Email via Gmail
+                Send Email
               </Button>
             </DialogFooter>
           </DialogContent>
