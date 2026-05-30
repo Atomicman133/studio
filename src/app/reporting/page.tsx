@@ -484,10 +484,67 @@ export default function CompliancePage() {
         .map(c => `  - ${c.name}: ${c.details}`)
         .join("\n");
 
-      const subject = `Action Required: Compliance Update for ${report.staffMemberRank} ${report.staffMemberName}`;
-      const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The attached report details the following items which require your attention:\n\n${nonCompliantItems}\n\nPlease take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+      // 3. Generate detailed instructions based on outstanding items
+      let instructionsText = "";
+      const unmetKeys = new Set(report.criteriaChecks.filter(c => !c.isMet).map(c => c.key));
 
-      // 3. Set state to open the dialog
+      if (unmetKeys.has("firstAid") || unmetKeys.has("cpr")) {
+        instructionsText += `--------------------------------------------------\n`;
+        instructionsText += `First Aid Certificate / Provide Cardiopulmonary Resuscitation:\n\n`;
+        instructionsText += `If you already hold a valid Provide First Aid qualification, ensure it is correctly displaying as an accomplishment in CEA. \n`;
+        instructionsText += `If it is not showing, and you have completed the qualification send the completion certificate via email to your CO, and CC in perso.7wg@airforcecadets.gov.au\n\n`;
+        instructionsText += `If you need to renew your first aid training first Log on to "https://www.stjohnwa.com.au/first-aid-training/first-aid-courses/details/6136-2/provide-first-aid-1-day" and then select your training centre location and date range, select a number of dates that are suitable and then send an email to perso.7wg@airforcecadets.gov.au ensuring to CC in your CO requesting booking of your first aid training at the selected training location on one of your specified dates.\n\n`;
+        instructionsText += `If this is your first time obtaining a first aid qualification you will be needed to self book and pay for this training. Training will only be at AAFC expense if it is a renewal.\n\n`;
+        instructionsText += `This qualification will also renew your CPR qualification at the same time.\n`;
+      }
+
+      if (unmetKeys.has("wwcc")) {
+        instructionsText += `--------------------------------------------------\n`;
+        instructionsText += `Working with Children Check:\n\n`;
+        instructionsText += `The process for Working with Children Check (WWCC) applications changes depending on how your account is set up with the Department of Communities WA, If you have an online account or WWCC already you can submit a renewal online through their portal here "https://www.workingwithchildren.wa.gov.au/online-services" A list of staff who can approve WWCC applications can be obtained through 7WG Personell Officers.\n\n`;
+        instructionsText += `Additional information on the process to apply for a WWCC in WA can be found at "https://www.wa.gov.au/organisation/department-of-communities/working-children-check-application-and-renewal-process"\n`;
+      }
+
+      if (unmetKeys.has("codeOfConduct")) {
+        instructionsText += `--------------------------------------------------\n`;
+        instructionsText += `Code of Conduct - Signed:\n\n`;
+        instructionsText += `Navigate to "https://www.defenceyouth.gov.au/media/xmuaz4fu/section_-2_chapter_2_annex-a_youth-safe-code-of-conduct-adult.pdf" and print the PDF Code of Conduct, ensure you read the document and then sign in the presence of a witness (it need not be a special designated witness just someone not related to you) scan and then email the completed Code Of Conduct to "perso.7wg@airforcecadets.gov.au" and CC in your CO.\n`;
+      }
+
+      if (unmetKeys.has("adultBehaviourPolicy") || unmetKeys.has("youthSafety")) {
+        instructionsText += `--------------------------------------------------\n`;
+        instructionsText += `Adult Behaviour Policy Training / Defence Youth Protection:\n\n`;
+        instructionsText += `On CEA, navigate to the online training section and complete the below courses (this can be reached from the "My Learning" Link under Quick Links on your CEA Home Page):\n\n`;
+        instructionsText += `- Behaviour Policy Training - Adult (BPT-A)\n`;
+        instructionsText += `- Defence Youth Protection Officer and Instructor of Cadets Course (DYPOIC)\n\n`;
+        instructionsText += `If you have any trouble accessing these courses please contact Staff Officer Cadet and Adult Development (SOCAD) at SOCAD.7WG@airforcecadets.gov.au\n`;
+      }
+
+      if (unmetKeys.has("policeClearance")) {
+        instructionsText += `--------------------------------------------------\n`;
+        instructionsText += `National Police Check:\n\n`;
+        instructionsText += `To apply for your National Police Check, obtain the form from CEA "https://cadetnetgovau.sharepoint.com.mcas.ms/sites/aafc-pers/Staff%20Documents/Forms/AllItems.aspx?id=%2Fsites%2Faafc%2Dpers%2FStaff%20Documents%2FDocuments%20required%20for%20acceptance%20as%20IOC%5FOOC%2FApplication%20Documentation%20%2D%20Member%2FNational%20Police%20Check%20Application%20Form%205021%20Dec%2023%2Epdf&parent=%2Fsites%2Faafc%2Dpers%2FStaff%20Documents%2FDocuments%20required%20for%20acceptance%20as%20IOC%5FOOC%2FApplication%20Documentation%20%2D%20Member"\n\n`;
+        instructionsText += `Ensure completion of all applicable sections of the form legibly and in full (type directly into the form electronically):\n`;
+        instructionsText += `a. Sections 3-5. Use Attachments B and C to the NPC form where necessary.\n`;
+        instructionsText += `b. Section 8. Only the check-box next to code number 28 should be selected.\n`;
+        instructionsText += `c. Section 9. This section is to be signed and dated to confirm consent to the NPC being conducted. If consent is not granted, refer to paragraph 16 below.\n`;
+        instructionsText += `d. Attachment A. Using the available check-boxes, select the relevant types of identification they will be providing as part of their NPC request.\n\n`;
+        instructionsText += `14. When saving NPC forms and copies of supporting identification, members are to use the PDF format and the file naming syntaxes as follows:\n`;
+        instructionsText += `a. NPC Form: Primary Unit - PMKeyS - First name Surname - NPC Form\n`;
+        instructionsText += `b. Identification documents: Primary Unit - PMKeyS - First name Surname - NPC ID 1 subsequent files should use sequential numbering (eg NPC ID 1, 2, 3 etc).\n\n`;
+        instructionsText += `15. Members are to email the completed NPC form with copies of their supporting identification to cb-af.policecheck.renewals@defence.gov.au, noting:\n`;
+        instructionsText += `a. the email subject heading syntax: Primary Unit - PMKeyS - First name Surname - NPC Submission (eg UAL - 8123456 - John Citizen - NPC Submission).\n`;
+        instructionsText += `b. it is important the size of their email does not exceed 50 MB, as this may not pass through to the Defence email system. If multiple emails are required, add sequential numbering to the end of the subject syntax of each email (eg UAL - 8123456 - John Citizen - NPC Submission 1, 2 etc).\n`;
+      }
+
+      if (instructionsText) {
+        instructionsText += `--------------------------------------------------\n\n`;
+      }
+
+      const subject = `Action Required: Compliance Update for ${report.staffMemberRank} ${report.staffMemberName}`;
+      const body = `Dear ${report.staffMemberName},\n\nThis email is to inform you about your current compliance status. The attached report details the following items which require your attention:\n\n${nonCompliantItems}\n\nHere are the instructions to address your outstanding items:\n\n${instructionsText}Please take the necessary measures to address these items.\n\nIf you require assistance or have any questions, please contact your direct supervisor.\n\nRegards,\nSquadron Management System`;
+
+      // 4. Set state to open the dialog
       setSelectedReportForEmail(report);
       setEmailContent({ to: report.email, subject, body });
       setIsEmailContentDialogOpen(true);
