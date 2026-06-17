@@ -19,7 +19,7 @@ export const RANKS = [
   "GPCAPT(AAFC)",
 ] as const;
 
-export const STAFF_STATUSES = ["Active", "UAL", "Pending Discharge"] as const;
+export const STAFF_STATUSES = ["Active", "UAL", "Pending Discharge", "Discharged"] as const;
 
 export const serviceHistoryEntrySchema = z.object({
   id: z.string().uuid().optional(), // IDs for these are generated as UUIDs

@@ -19,7 +19,9 @@ export function processComplianceReports(
      }
   }
 
-  return staffList.map((staff) => {
+  const nonDischargedStaff = staffList.filter((s) => s.status !== "Discharged");
+
+  return nonDischargedStaff.map((staff) => {
     const staffServiceNumberActual = staff.serviceNumber;
 
     if (!staffServiceNumberActual) {

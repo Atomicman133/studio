@@ -201,7 +201,7 @@ export default function CompliancePage() {
       await checkPageBreak(20);
       doc.setFontSize(48);
       doc.setTextColor(255, 0, 0);
-      doc.setFont(undefined, 'bold');
+      doc.setFont(undefined as any, 'bold');
       doc.text(report.status.toUpperCase(), pageWidth / 2, yPos + 10, {
         align: 'center',
       });
@@ -211,12 +211,12 @@ export default function CompliancePage() {
 
 
     doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(sectionSpacing);
     doc.text(`Compliance Report: ${report.staffMemberRank} ${report.staffMemberName}`, margin, yPos);
     yPos += lineSpacing;
     doc.setFontSize(12);
-    doc.setFont(undefined, 'normal');
+    doc.setFont(undefined as any, 'normal');
     await checkPageBreak(lineSpacing);
     doc.text(`Squadron: ${report.squadron}`, margin, yPos);
     yPos += lineSpacing;
@@ -228,7 +228,7 @@ export default function CompliancePage() {
     yPos += sectionSpacing * 1.5;
 
     doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(lineSpacing);
     doc.text("Compliance Details:", margin, yPos);
     yPos += lineSpacing * 1.2;
@@ -257,12 +257,12 @@ export default function CompliancePage() {
       const textMaxWidth = maxLineWidth - (iconSize + iconTextSpacing);
 
       doc.setFontSize(11);
-      doc.setFont(undefined, 'bold');
+      doc.setFont(undefined as any, 'bold');
       doc.text(criterion.name, textX, yPos);
       yPos += lineSpacing * 0.8;
 
       doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
+      doc.setFont(undefined as any, 'normal');
       const statusText = criterion.isMet ? "Met" : "Not Met";
       const detailLines = doc.splitTextToSize(`${statusText}. ${criterion.details}`, textMaxWidth - indent);
 
@@ -323,12 +323,12 @@ export default function CompliancePage() {
 
     // --- Report Title ---
     doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(lineSpacing * 2);
     doc.text("Full Staff Compliance Summary", pageWidth / 2, yPos, { align: "center" });
     yPos += lineSpacing;
     doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    doc.setFont(undefined as any, 'normal');
     await checkPageBreak();
     doc.text(`Generated on: ${currentDate}`, pageWidth / 2, yPos, { align: "center" });
     yPos += sectionSpacing * 1.5;
@@ -340,12 +340,12 @@ export default function CompliancePage() {
     const nonCompliantCount = activeStaffReports.filter(r => r.complianceStatusText === "Not Compliant").length;
 
     doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(lineSpacing);
     doc.text("Active Staff Compliance Status:", pageMargin, yPos);
     yPos += lineSpacing * 1.5;
     doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    doc.setFont(undefined as any, 'normal');
     await checkPageBreak(lineSpacing * 3);
     doc.text(`Total Active Staff: ${activeStaffReports.length}`, pageMargin, yPos); yPos += lineSpacing;
     doc.text(`Compliant: ${compliantCount}`, pageMargin, yPos); yPos += lineSpacing;
@@ -354,7 +354,7 @@ export default function CompliancePage() {
 
     // --- Non-Compliance by Category ---
     doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(lineSpacing);
     doc.text("Non-Compliance by Category (Active Staff):", pageMargin, yPos);
     yPos += lineSpacing * 1.5;
@@ -365,7 +365,7 @@ export default function CompliancePage() {
             !report.criteriaChecks.find(c => c.key === criterion.key)?.isMet
         ).length;
         if (await checkPageBreak()) {
-            doc.setFontSize(14); doc.setFont(undefined, 'bold');
+            doc.setFontSize(14); doc.setFont(undefined as any, 'bold');
             doc.text("Non-Compliance by Category (Continued):", pageMargin, yPos);
             yPos += lineSpacing * 1.5; doc.setFontSize(10);
         }
@@ -386,13 +386,13 @@ export default function CompliancePage() {
 
         currentSquadron = report.squadron;
         doc.setFontSize(12);
-        doc.setFont(undefined, 'bold');
+        doc.setFont(undefined as any, 'bold');
         doc.text(`Squadron: ${currentSquadron}`, pageMargin, yPos);
         yPos += lineSpacing * 1.5;
 
         // Table Headers for staff list
         doc.setFontSize(9);
-        doc.setFont(undefined, 'bold');
+        doc.setFont(undefined as any, 'bold');
         let headerX = pageMargin;
         doc.text("Rank", headerX, yPos);
         headerX += rankColWidth;
@@ -402,22 +402,22 @@ export default function CompliancePage() {
         yPos += lineSpacing * 0.8;
         doc.setDrawColor(180);
         doc.line(pageMargin, yPos - (lineSpacing / 3), pageWidth - pageMargin, yPos - (lineSpacing / 3));
-        doc.setFont(undefined, 'normal');
+        doc.setFont(undefined as any, 'normal');
       }
 
       if (await checkPageBreak(lineSpacing * 2)) { // Check if new page needed for this staff member
         // Redraw squadron and table headers if new page started
-        doc.setFontSize(12); doc.setFont(undefined, 'bold');
+        doc.setFontSize(12); doc.setFont(undefined as any, 'bold');
         doc.text(`Squadron: ${currentSquadron} (Continued)`, pageMargin, yPos);
         yPos += lineSpacing * 1.5;
-        doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        doc.setFontSize(9); doc.setFont(undefined as any, 'bold');
         let headerX = pageMargin;
         doc.text("Rank", headerX, yPos); headerX += rankColWidth;
         doc.text("Name", headerX, yPos); headerX += nameColWidth;
         doc.text("Non-Compliant Items", headerX, yPos);
         yPos += lineSpacing * 0.8;
         doc.setDrawColor(180); doc.line(pageMargin, yPos - (lineSpacing / 3), pageWidth - pageMargin, yPos - (lineSpacing / 3));
-        doc.setFont(undefined, 'normal');
+        doc.setFont(undefined as any, 'normal');
       }
 
       doc.setFontSize(8);
@@ -438,7 +438,7 @@ export default function CompliancePage() {
       yPos += (Math.max(nameLines.length, itemLines.length, rankLines.length) * lineSpacing * 0.7) + (lineSpacing * 0.4);
     }
 
-    addPageNumbers(doc, footerHeight, pageMargin);
+    addPageNumbers(doc, footerImgHeight, pageMargin);
     doc.save(filename);
     toast({
       title: "PDF Exported",

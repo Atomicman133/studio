@@ -405,7 +405,7 @@ const StaffDetailsContent = ({
       await checkPageBreak(20);
       doc.setFontSize(48);
       doc.setTextColor(255, 0, 0);
-      doc.setFont(undefined, 'bold');
+      doc.setFont(undefined as any, 'bold');
       doc.text(staffStatus.toUpperCase(), pageWidth / 2, yPos + 10, {
         align: 'center',
       });
@@ -417,20 +417,20 @@ const StaffDetailsContent = ({
     const addSectionTitle = async (title: string) => {
       await checkPageBreak(sectionSpacing + 14);
       doc.setFontSize(14);
-      doc.setFont(undefined, 'bold');
+      doc.setFont(undefined as any, 'bold');
       doc.text(title, margin, yPos);
       yPos += lineSpacing * 1.5;
       doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
+      doc.setFont(undefined as any, 'normal');
     };
 
     const addDetailLine = async (label: string, value?: string | null) => {
       if (value === undefined || value === null || value.trim() === "") return;
       await checkPageBreak(lineSpacing);
       const labelWidth = doc.getTextWidth(`${label}: `) + 2;
-      doc.setFont(undefined, 'bold');
+      doc.setFont(undefined as any, 'bold');
       doc.text(`${label}:`, margin, yPos);
-      doc.setFont(undefined, 'normal');
+      doc.setFont(undefined as any, 'normal');
       const valueLines = doc.splitTextToSize(value, maxLineWidth - labelWidth);
       await checkPageBreak(valueLines.length * (lineSpacing * 0.7));
       doc.text(valueLines, margin + labelWidth, yPos);
@@ -438,7 +438,7 @@ const StaffDetailsContent = ({
     };
 
     doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(sectionSpacing + 18);
     doc.text(`Staff Profile: ${staffMember.rank} ${staffMember.firstName} ${staffMember.lastName}`, margin, yPos);
     yPos += sectionSpacing;
@@ -464,10 +464,10 @@ const StaffDetailsContent = ({
     await addDetailLine("Overall Status", overallStatus);
     if (overallStatus !== "Compliant") {
         await checkPageBreak(lineSpacing);
-        doc.setFont(undefined, 'bold');
+        doc.setFont(undefined as any, 'bold');
         doc.text("Non-Compliant Items:", margin, yPos);
         yPos += lineSpacing * 0.8;
-        doc.setFont(undefined, 'normal');
+        doc.setFont(undefined as any, 'normal');
         for (const criterion of criteriaChecks) {
             if (!criterion.isMet) {
                 const itemText = `- ${criterion.name}: ${criterion.details}`;
@@ -846,6 +846,19 @@ export default function StaffPage() {
   const [staffToPurge, setStaffToPurge] = React.useState<StaffMember[]>([]);
   const [isFindingStaffToPurge, setIsFindingStaffToPurge] = React.useState(false);
 
+  const [pendingCsvData, setPendingCsvData] = React.useState<{
+    lines: string[];
+    csvHeader: string[];
+    headerIndices: Record<string, number>;
+  } | null>(null);
+
+  const [detectedDischargedStaff, setDetectedDischargedStaff] = React.useState<{
+    staffMember: StaffMember;
+    action: 'Active' | 'Discharged';
+  }[]>([]);
+
+  const [isDischargedDetectDialogOpen, setIsDischargedDetectDialogOpen] = React.useState(false);
+
   const purgeStaffMutation = useMutation<string[], Error, StaffMember[]>({
     mutationFn: async (staffToPurge: StaffMember[]): Promise<string[]> => {
         if (staffToPurge.length === 0) return [];
@@ -854,19 +867,12 @@ export default function StaffPage() {
         const purgedStaffNames: string[] = [];
 
         for (const staff of staffToPurge) {
-            if (!staff.id || !staff.serviceNumber) continue;
+            if (!staff.id) continue;
 
-            // Delete staff document
+            // Set status to Discharged
             const staffDocRef = doc(db, "staff", staff.id);
-            batch.delete(staffDocRef);
+            batch.update(staffDocRef, { status: 'Discharged' });
             purgedStaffNames.push(`${staff.firstName} ${staff.lastName}`);
-
-            // Find and delete associated training logs
-            const logsQuery = query(collection(db, "trainingLogs"), where("serviceNumber", "==", staff.serviceNumber));
-            const logSnapshots = await getDocs(logsQuery);
-            logSnapshots.forEach(logDoc => {
-                batch.delete(logDoc.ref);
-            });
         }
 
         await batch.commit();
@@ -918,10 +924,12 @@ export default function StaffPage() {
 
   const filteredStaffList = React.useMemo(() => {
     if (!staffList) return [];
-    if (!searchQuery) return staffList;
+    
+    const nonDischargedStaff = staffList.filter(s => s.status !== 'Discharged');
+    if (!searchQuery) return nonDischargedStaff;
 
     const lowercasedQuery = searchQuery.toLowerCase();
-    return staffList.filter(staff =>
+    return nonDischargedStaff.filter(staff =>
         `${staff.rank} ${staff.firstName} ${staff.lastName}`.toLowerCase().includes(lowercasedQuery) ||
         staff.serviceNumber.includes(lowercasedQuery) ||
         staff.squadron?.toLowerCase().includes(lowercasedQuery) ||
@@ -1046,6 +1054,220 @@ export default function StaffPage() {
     "SQNXI": "Squadron Executive Instructor",
   };
 
+  const executeStaffImport = async (
+    lines: string[],
+    csvHeader: string[],
+    headerIndices: Record<string, number>,
+    reinstatementChoices?: Map<string, 'Active' | 'Discharged'>
+  ) => {
+    setIsImportingStaffCsv(true);
+    const errors: string[] = [];
+    let importedCount = 0;
+    let updatedCount = 0;
+
+    try {
+      const expectedCsvHeaders = [
+        "PrimaryUnit", "MemberUID", "MemberName", "Appointment",
+        "EmailAddress", "PhoneNumber", "Address"
+      ];
+      const allRecognizedHeaders = [
+          ...expectedCsvHeaders,
+          "MemberType", "IsPrimary", "Active", "ContactEmail1", "ContactName",
+          "EmergencyContactEmail", "ParentalResponsiblity", "Relationship", "NextOfKin",
+          "PrimaryContact", "MemberContactPhoneNumber", "AboriginalTorresStraitIslander",
+          "FullTimeStudent", "EducationInstitution", "HighestEducationLevel", "Religion",
+          "Citizenship", "DefenceVendorNumber", "Name"
+      ];
+
+      let currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || staffList;
+      const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
+      const existingEmails = new Set(currentStaffList.map(s => s.email).filter(Boolean));
+
+      const addPromises: Promise<void>[] = [];
+      const updatePromises: Promise<void>[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const values: string[] = [];
+        let currentVal = '';
+        let inQuotes = false;
+        for (let charIndex = 0; charIndex < line.length; charIndex++) {
+          const char = line[charIndex];
+          if (char === '"' && (charIndex === 0 || line[charIndex - 1] !== '"')) {
+            if (inQuotes && charIndex + 1 < line.length && line[charIndex + 1] === '"') {
+              currentVal += '"';
+              charIndex++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === ',' && !inQuotes) {
+            values.push(currentVal.trim());
+            currentVal = '';
+          } else {
+            currentVal += char;
+          }
+        }
+        values.push(currentVal.trim());
+
+        if (values.length !== csvHeader.length) {
+          errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
+          continue;
+        }
+
+        const csvData: Record<string, string | undefined> = {};
+        allRecognizedHeaders.forEach(h => {
+            const index = headerIndices[h];
+            if (index !== undefined && index < values.length) {
+              csvData[h] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
+            } else {
+              csvData[h] = undefined;
+            }
+        });
+
+        const phoneValue = csvData.PhoneNumber?.trim();
+        if (!phoneValue) {
+          errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
+          continue;
+        }
+
+        const serviceNumber = csvData.MemberUID;
+        const email = csvData.EmailAddress?.trim();
+
+        if (!serviceNumber) {
+           errors.push(`Row ${i + 1}: MemberUID (Service Number) is blank. Skipping record.`);
+           continue;
+        }
+        if (!email) {
+           errors.push(`Row ${i + 1} (UID: ${serviceNumber}): EmailAddress is blank. Skipping record.`);
+           continue;
+        }
+
+        const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName || "");
+        if (!rank || !firstName || !lastName) {
+           errors.push(`Row ${i + 1} (UID: ${serviceNumber}): MemberName "${csvData.MemberName || ''}" could not be parsed into Rank, First Name, and Last Name. Skipping record.`);
+           continue;
+        }
+
+        let roleToSave = "Staff";
+        const rawAppointmentFromCsv = csvData.Appointment?.trim().toUpperCase();
+        if (rawAppointmentFromCsv && appointmentMapping[rawAppointmentFromCsv]) {
+            roleToSave = appointmentMapping[rawAppointmentFromCsv];
+        } else if (rawAppointmentFromCsv && rawAppointmentFromCsv.length > 0) {
+            roleToSave = csvData.Appointment!.trim();
+        }
+
+        const squadron = csvData.PrimaryUnit || undefined;
+        const address = csvData.Address || undefined;
+
+        const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
+
+        let statusToSet: "Active" | "UAL" | "Pending Discharge" | "Discharged" = "Active";
+        if (existingStaffMember) {
+          if (existingStaffMember.status === 'Discharged') {
+            statusToSet = reinstatementChoices?.get(serviceNumber) || 'Active';
+          } else {
+            statusToSet = existingStaffMember.status || "Active";
+          }
+        }
+
+        const memberDataPayload: Omit<StaffMember, 'id' | 'serviceHistory'> & { id?: string; serviceHistory?: ServiceHistoryEntry[] } = {
+          serviceNumber: serviceNumber,
+          rank: rank,
+          firstName: firstName,
+          lastName: lastName,
+          email: email,
+          phone: phoneValue,
+          role: roleToSave,
+          squadron: squadron,
+          address: address,
+          joinDate: existingStaffMember?.joinDate || null,
+          status: statusToSet,
+        };
+
+        if (existingStaffMember) {
+          memberDataPayload.id = existingStaffMember.id;
+          memberDataPayload.serviceHistory = existingStaffMember.serviceHistory || []; 
+          if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
+              errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
+              continue;
+          }
+          updatePromises.push(
+            updateStaffMutation.mutateAsync(memberDataPayload as StaffMember).then(() => {
+              updatedCount++;
+              if (email && email !== existingStaffMember.email) {
+                  existingEmails.delete(existingStaffMember.email);
+                  existingEmails.add(email);
+              }
+              existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberDataPayload });
+            }).catch((updateError: any) => {
+              let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`;
+              if (updateError.errors) {
+                errorMessage += ` Details: ${JSON.stringify(updateError.errors)}`;
+              }
+              errors.push(errorMessage);
+            })
+          );
+        } else {
+          memberDataPayload.serviceHistory = []; 
+          if (email && existingEmails.has(email)) {
+            errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
+            continue;
+          }
+          addPromises.push(
+            addStaffMutation.mutateAsync(memberDataPayload as Omit<StaffMember, 'id'>).then((newId) => {
+              importedCount++;
+              existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string, serviceHistory: [] });
+              if(email) existingEmails.add(email);
+            }).catch((addError: any) => {
+              let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`;
+              if (addError.errors) {
+                errorMessage += ` Details: ${JSON.stringify(addError.errors)}`;
+              }
+              errors.push(errorMessage);
+            })
+          );
+        }
+      }
+
+      await Promise.all([...addPromises, ...updatePromises]);
+
+      let toastMessage = "";
+      if (importedCount > 0) toastMessage += `${importedCount} new staff member(s) imported. `;
+      if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
+
+      if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
+          toast({ title: "Import Complete", description: "No new staff members were found to import or update based on provided UIDs." });
+      } else if (toastMessage !== "" && errors.length === 0) {
+          toast({ title: "Import Successful", description: toastMessage.trim() });
+      } else if (errors.length > 0) {
+          const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
+          const title = (importedCount > 0 || updatedCount > 0) ? "CSV Import Partially Successful" : "CSV Import Failed";
+          const descriptionPrefix = toastMessage !== "" ? toastMessage : "";
+
+          toast({
+              variant: (importedCount > 0 || updatedCount > 0) ? "default" : "destructive",
+              title: title,
+              description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}Errors:\n{errorMessages}</pre></ScrollArea> ),
+              duration: 15000,
+          });
+      } else if (lines.length <= 1) {
+         toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
+      }
+
+    } catch (error: any) {
+      console.error("Error during CSV import processing:", error);
+      toast({ variant: "destructive", title: "Import Error", description: error.message || "An unexpected error occurred during processing." });
+    } finally {
+      if (staffCsvInputRef.current) {
+        staffCsvInputRef.current.value = "";
+      }
+      setIsImportingStaffCsv(false);
+      queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
+    }
+  };
+
   const handleStaffCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -1062,10 +1284,6 @@ export default function StaffPage() {
         setIsImportingStaffCsv(false);
         return;
       }
-
-      const errors: string[] = [];
-      let importedCount = 0;
-      let updatedCount = 0;
 
       try {
         const lines = text.split(/\r\n|\n/).filter(line => line.trim());
@@ -1097,6 +1315,7 @@ export default function StaffPage() {
           }
         });
 
+        const errors: string[] = [];
         for (const expectedHeader of expectedCsvHeaders) {
             if (headerIndices[expectedHeader] === undefined) {
                  errors.push(`Missing required CSV header: "${expectedHeader}".`);
@@ -1106,18 +1325,10 @@ export default function StaffPage() {
             throw new Error(errors.join(" "));
         }
 
-        let currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || [];
-        if (currentStaffList.length === 0 && staffList.length > 0) {
-            currentStaffList = staffList;
-        } else if (currentStaffList.length === 0 && staffList.length === 0 && !isLoading) {
-            currentStaffList = await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
-        }
+        const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || staffList;
+        const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
 
-        const existingStaffByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s],));
-        const existingEmails = new Set(currentStaffList.map(s => s.email).filter(Boolean));
-
-        const addPromises: Promise<void>[] = [];
-        const updatePromises: Promise<void>[] = [];
+        const dischargedInCsv: { staffMember: StaffMember; action: 'Active' | 'Discharged' }[] = [];
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
@@ -1145,151 +1356,42 @@ export default function StaffPage() {
           values.push(currentVal.trim());
 
           if (values.length !== csvHeader.length) {
-            errors.push(`Row ${i + 1}: Column count mismatch. Expected ${csvHeader.length}, got ${values.length}. Line: "${line}"`);
             continue;
           }
 
-          const csvData: Record<string, string | undefined> = {};
-          allRecognizedHeaders.forEach(h => {
-              const index = headerIndices[h];
-              if (index !== undefined && index < values.length) {
-                csvData[h] = values[index].replace(/^"|"$/g, '').replace(/""/g, '"');
-              } else {
-                csvData[h] = undefined;
+          const serviceNumber = values[headerIndices.MemberUID]?.replace(/^"|"$/g, '').replace(/""/g, '"');
+          if (serviceNumber) {
+            const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
+            if (existingStaffMember && existingStaffMember.status === 'Discharged') {
+              if (!dischargedInCsv.some(item => item.staffMember.serviceNumber === serviceNumber)) {
+                dischargedInCsv.push({
+                  staffMember: existingStaffMember,
+                  action: 'Active'
+                });
               }
+            }
+          }
+        }
+
+        if (dischargedInCsv.length > 0) {
+          setDetectedDischargedStaff(dischargedInCsv);
+          setPendingCsvData({
+            lines,
+            csvHeader,
+            headerIndices
           });
-
-          const phoneValue = csvData.PhoneNumber?.trim();
-          if (!phoneValue) {
-            errors.push(`Row ${i + 1}: PhoneNumber is blank. Skipping record for UID "${csvData.MemberUID || 'UNKNOWN'}".`);
-            continue;
-          }
-
-          const serviceNumber = csvData.MemberUID;
-          const email = csvData.EmailAddress?.trim();
-
-          if (!serviceNumber) {
-             errors.push(`Row ${i + 1}: MemberUID (Service Number) is blank. Skipping record.`);
-             continue;
-          }
-          if (!email) {
-             errors.push(`Row ${i + 1} (UID: ${serviceNumber}): EmailAddress is blank. Skipping record.`);
-             continue;
-          }
-
-          const { rank, firstName, lastName } = parseMemberNameAndRank(csvData.MemberName || "");
-          if (!rank || !firstName || !lastName) {
-             errors.push(`Row ${i + 1} (UID: ${serviceNumber}): MemberName "${csvData.MemberName || ''}" could not be parsed into Rank, First Name, and Last Name. Skipping record.`);
-             continue;
-          }
-
-          let roleToSave = "Staff";
-          const rawAppointmentFromCsv = csvData.Appointment?.trim().toUpperCase();
-          if (rawAppointmentFromCsv && appointmentMapping[rawAppointmentFromCsv]) {
-              roleToSave = appointmentMapping[rawAppointmentFromCsv];
-          } else if (rawAppointmentFromCsv && rawAppointmentFromCsv.length > 0) {
-              roleToSave = csvData.Appointment!.trim();
-          }
-
-
-          const squadron = csvData.PrimaryUnit || undefined;
-          const address = csvData.Address || undefined;
-
-          const existingStaffMember = existingStaffByServiceNumber.get(serviceNumber);
-
-          const memberDataPayload: Omit<StaffMember, 'id' | 'serviceHistory'> & { id?: string; serviceHistory?: ServiceHistoryEntry[] } = {
-            serviceNumber: serviceNumber,
-            rank: rank,
-            firstName: firstName,
-            lastName: lastName,
-            email: email,
-            phone: phoneValue,
-            role: roleToSave,
-            squadron: squadron,
-            address: address,
-            joinDate: existingStaffMember?.joinDate || null,
-            status: existingStaffMember?.status || "Active",
-          };
-
-          if (existingStaffMember) {
-            memberDataPayload.id = existingStaffMember.id;
-            memberDataPayload.serviceHistory = existingStaffMember.serviceHistory || []; 
-            if (email && email !== existingStaffMember.email && existingEmails.has(email)) {
-                errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists for another staff member. Update for this UID skipped.`);
-                continue;
-            }
-            updatePromises.push(
-              updateStaffMutation.mutateAsync(memberDataPayload as StaffMember).then(() => {
-                updatedCount++;
-                if (email && email !== existingStaffMember.email) {
-                    existingEmails.delete(existingStaffMember.email);
-                    existingEmails.add(email);
-                }
-                existingStaffByServiceNumber.set(serviceNumber, { ...existingStaffMember, ...memberDataPayload });
-              }).catch((updateError: any) => {
-                let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to update: ${updateError.message}`;
-                if (updateError.errors) {
-                  errorMessage += ` Details: ${JSON.stringify(updateError.errors)}`;
-                }
-                errors.push(errorMessage);
-              })
-            );
-          } else {
-            memberDataPayload.serviceHistory = []; 
-            if (email && existingEmails.has(email)) {
-              errors.push(`Row ${i + 1} (UID: ${serviceNumber}): Email "${email}" already exists. New record skipped.`);
-              continue;
-            }
-            addPromises.push(
-              addStaffMutation.mutateAsync(memberDataPayload as Omit<StaffMember, 'id'>).then((newId) => {
-                importedCount++;
-                existingStaffByServiceNumber.set(serviceNumber, { ...memberDataPayload, id: newId as string, serviceHistory: [] });
-                if(email) existingEmails.add(email);
-              }).catch((addError: any) => {
-                let errorMessage = `Row ${i + 1} (UID: ${serviceNumber}): Failed to add: ${addError.message}`;
-                if (addError.errors) {
-                  errorMessage += ` Details: ${JSON.stringify(addError.errors)}`;
-                }
-                errors.push(errorMessage);
-              })
-            );
-          }
+          setIsDischargedDetectDialogOpen(true);
+          setIsImportingStaffCsv(false);
+          return;
         }
 
-        await Promise.all([...addPromises, ...updatePromises]);
-
-        let toastMessage = "";
-        if (importedCount > 0) toastMessage += `${importedCount} new staff member(s) imported. `;
-        if (updatedCount > 0) toastMessage += `${updatedCount} staff member(s) updated. `;
-
-        if (toastMessage === "" && errors.length === 0 && lines.length > 1) {
-            toast({ title: "Import Complete", description: "No new staff members were found to import or update based on provided UIDs." });
-        } else if (toastMessage !== "" && errors.length === 0) {
-            toast({ title: "Import Successful", description: toastMessage.trim() });
-        } else if (errors.length > 0) {
-            const errorMessages = errors.slice(0, 10).join("\n") + (errors.length > 10 ? "\n...and more errors." : "");
-            const title = (importedCount > 0 || updatedCount > 0) ? "CSV Import Partially Successful" : "CSV Import Failed";
-            const descriptionPrefix = toastMessage !== "" ? toastMessage : "";
-
-            toast({
-                variant: (importedCount > 0 || updatedCount > 0) ? "default" : "destructive",
-                title: title,
-                description: ( <ScrollArea className="max-h-40"><pre className="whitespace-pre-wrap text-xs">{descriptionPrefix}Errors:\n{errorMessages}</pre></ScrollArea> ),
-                duration: 15000,
-            });
-        } else if (lines.length <=1) {
-           toast({ variant: "destructive", title: "Import Error", description: "CSV file appears to be empty or has no data rows." });
-        }
+        // If no discharged staff detected, execute normal import
+        await executeStaffImport(lines, csvHeader, headerIndices);
 
       } catch (error: any) {
         console.error("Error during CSV import processing:", error);
         toast({ variant: "destructive", title: "Import Error", description: error.message || "An unexpected error occurred during processing." });
-      } finally {
-        if (staffCsvInputRef.current) {
-          staffCsvInputRef.current.value = "";
-        }
         setIsImportingStaffCsv(false);
-        queryClient.invalidateQueries({ queryKey: [STAFF_QUERY_KEY] });
       }
     };
     reader.onerror = () => {
@@ -1323,7 +1425,7 @@ export default function StaffPage() {
     }
     setIsImportingAccomplishments(true);
 
-    const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [STAFF_QUERY_KEY], queryFn: useStaff().queryFn as () => Promise<StaffMember[]> });
+    const currentStaffList: StaffMember[] = queryClient.getQueryData([STAFF_QUERY_KEY]) || staffList;
     const staffMapByServiceNumber = new Map(currentStaffList.map(s => [s.serviceNumber, s]));
     
     const allTrainingLogs: TrainingLog[] = queryClient.getQueryData([TRAINING_LOGS_QUERY_KEY]) || await queryClient.fetchQuery({queryKey: [TRAINING_LOGS_QUERY_KEY], queryFn: async () => {
@@ -1564,7 +1666,7 @@ export default function StaffPage() {
                     const uniqueNewEntries = update.serviceHistoryToAdd.filter((ne: ServiceHistoryEntry) => !existingHistoryIdentifiers.has(`${ne.type}-${ne.item}-${format(new Date(ne.effectiveDate), 'yyyy-MM-dd')}`));
 
                     if (uniqueNewEntries.length > 0) {
-                        updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries.map(entry => ({
+                        updatePayload.serviceHistory = arrayUnion(...uniqueNewEntries.map((entry: ServiceHistoryEntry) => ({
                             ...entry,
                             effectiveDate: Timestamp.fromDate(new Date(entry.effectiveDate)),
                             endDate: entry.endDate ? Timestamp.fromDate(new Date(entry.endDate)) : null
@@ -2067,9 +2169,9 @@ export default function StaffPage() {
         <AlertDialog open={isPurgeDialogOpen} onOpenChange={setIsPurgeDialogOpen}>
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+                    <AlertDialogTitle>Confirm Purge</AlertDialogTitle>
                     <AlertDialogDescription>
-                        The following {staffToPurge.length} staff member(s) have been identified for deletion based on a 'Pending Discharge' status or discharge-related accomplishment. This action is irreversible and will delete their profile and all associated training logs.
+                        The following {staffToPurge.length} staff member(s) have been identified for discharge based on a 'Pending Discharge' status or discharge-related accomplishment. This will update their status to 'Discharged'. They will remain in the database but will no longer appear in listed staff or compliance calculations.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <ScrollArea className="max-h-60 border rounded-md my-4">
@@ -2083,11 +2185,93 @@ export default function StaffPage() {
                     <AlertDialogCancel disabled={purgeStaffMutation.isPending}>Cancel</AlertDialogCancel>
                     <AlertDialogAction onClick={handleConfirmPurge} disabled={purgeStaffMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
                         {purgeStaffMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Confirm & Delete {staffToPurge.length} Member(s)
+                        Confirm & Purge {staffToPurge.length} Member(s)
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {isDischargedDetectDialogOpen && (
+        <Dialog open={isDischargedDetectDialogOpen} onOpenChange={setIsDischargedDetectDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Discharged Staff Detected</DialogTitle>
+              <DialogDescription>
+                The following staff member(s) in the upload are currently marked as "Discharged" in the database. Choose whether to reinstate them or retain their discharged status.
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="max-h-60 border rounded-md my-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Staff Member</TableHead>
+                    <TableHead>Service No.</TableHead>
+                    <TableHead>Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {detectedDischargedStaff.map((item, idx) => (
+                    <TableRow key={item.staffMember.id || idx}>
+                      <TableCell>
+                        <span className="font-semibold">{item.staffMember.rank} {item.staffMember.firstName} {item.staffMember.lastName}</span>
+                      </TableCell>
+                      <TableCell>{item.staffMember.serviceNumber}</TableCell>
+                      <TableCell>
+                        <select
+                          value={item.action}
+                          onChange={(e) => {
+                            const newAction = e.target.value as 'Active' | 'Discharged';
+                            setDetectedDischargedStaff(prev => 
+                              prev.map((p, pIdx) => pIdx === idx ? { ...p, action: newAction } : p)
+                            );
+                          }}
+                          className="flex h-9 w-full rounded-md border border-input bg-transparent dark:bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <option value="Active" className="bg-background text-foreground">Mark as Active</option>
+                          <option value="Discharged" className="bg-background text-foreground">Retain Status of Discharged</option>
+                        </select>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsDischargedDetectDialogOpen(false);
+                  setPendingCsvData(null);
+                  setDetectedDischargedStaff([]);
+                }}
+              >
+                Cancel Import
+              </Button>
+              <Button
+                onClick={() => {
+                  if (pendingCsvData) {
+                    const choicesMap = new Map<string, 'Active' | 'Discharged'>();
+                    detectedDischargedStaff.forEach(item => {
+                      choicesMap.set(item.staffMember.serviceNumber, item.action);
+                    });
+                    executeStaffImport(
+                      pendingCsvData.lines,
+                      pendingCsvData.csvHeader,
+                      pendingCsvData.headerIndices,
+                      choicesMap
+                    );
+                  }
+                  setIsDischargedDetectDialogOpen(false);
+                  setPendingCsvData(null);
+                  setDetectedDischargedStaff([]);
+                }}
+              >
+                Confirm & Import
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
     </div>

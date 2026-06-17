@@ -272,11 +272,11 @@ export default function DashboardPage() {
     yPos = margin + headerHeight + 5;
 
     doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     doc.text(selectedComplianceSegmentTitle, pageWidth / 2, yPos, { align: 'center' });
     yPos += sectionSpacing * 1.5;
     doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    doc.setFont(undefined as any, 'normal');
     doc.text(`Generated on: ${format(new Date(), "PPP")}`, pageWidth / 2, yPos, { align: 'center' });
     yPos += sectionSpacing;
     
@@ -398,7 +398,7 @@ export default function DashboardPage() {
                     </AlertDescription>
                 </Alert>
             ) : (
-                <Alert variant="secondary">
+                <Alert variant="default">
                     <Info className="h-4 w-4" />
                     <AlertTitle>No Upload History</AlertTitle>
                     <AlertDescription>
