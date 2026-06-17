@@ -75,6 +75,7 @@ export const COMPLIANCE_CRITERIA_CONFIG: readonly ComplianceCriterionConfigItem[
     key: 'adultBehaviourPolicy',
     name: 'Adult Behaviour Policy Training',
     yearsToExpire: 1,
+    isAdvisory: true,
     identifier: (log: TrainingLog) =>
        matchesKeywords(log.courseName, ['Adult Behaviour Policy Training']) || matchesKeywords(log.qualificationAchieved, ['Adult Behaviour Policy Training'])
   },

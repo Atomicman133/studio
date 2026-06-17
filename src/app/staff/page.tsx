@@ -613,7 +613,13 @@ const StaffDetailsContent = ({
                                       </p>
                                       <ul className="list-disc pl-5 text-[11px] text-yellow-700 dark:text-yellow-500 mt-1">
                                         {failedAdvisory.map(c => (
-                                          <li key={c.key}>{c.name}: {c.details}</li>
+                                          <li key={c.key}>
+                                            {c.key === 'adultBehaviourPolicy' ? (
+                                              <span><strong>{c.name}:</strong> Adult Behaviour Policy Training has now been deprecated. Members missing this accomplishment will be considered to have met the compliance requirements for this item until new training has been published within the online training system.</span>
+                                            ) : (
+                                              <span>{c.name}: {c.details}</span>
+                                            )}
+                                          </li>
                                         ))}
                                       </ul>
                                     </div>
@@ -811,7 +817,13 @@ export default function StaffPage() {
       }
 
       if (!isMet) {
-        warnings.push(criterion.key === 'cpr' ? 'CPR' : 'Code of Conduct');
+        warnings.push(
+          criterion.key === 'cpr'
+            ? 'CPR'
+            : criterion.key === 'adultBehaviourPolicy'
+            ? 'Adult Behaviour'
+            : 'Code of Conduct'
+        );
       }
     });
 

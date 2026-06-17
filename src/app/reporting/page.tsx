@@ -485,7 +485,6 @@ export default function CompliancePage() {
         instructionsText += `If you already hold a valid Provide First Aid qualification, ensure it is correctly displaying as an accomplishment in CEA. \n`;
         instructionsText += `If it is not showing, and you have completed the qualification send the completion certificate via email to your CO, and CC in perso.7wg@airforcecadets.gov.au\n\n`;
         instructionsText += `If you need to renew your first aid training first Log on to "https://www.stjohnwa.com.au/first-aid-training/first-aid-courses/details/6136-2/provide-first-aid-1-day" and then select your training centre location and date range, select a number of dates that are suitable and then send an email to perso.7wg@airforcecadets.gov.au ensuring to CC in your CO requesting booking of your first aid training at the selected training location on one of your specified dates.\n\n`;
-        instructionsText += `If this is your first time obtaining a first aid qualification you will be needed to self book and pay for this training. Training will only be at AAFC expense if it is a renewal.\n\n`;
         instructionsText += `This qualification will also renew your CPR qualification at the same time.\n`;
       }
 
@@ -502,13 +501,18 @@ export default function CompliancePage() {
         instructionsText += `Navigate to "https://www.defenceyouth.gov.au/media/xmuaz4fu/section_-2_chapter_2_annex-a_youth-safe-code-of-conduct-adult.pdf" and print the PDF Code of Conduct, ensure you read the document and then sign in the presence of a witness (it need not be a special designated witness just someone not related to you) scan and then email the completed Code Of Conduct to "perso.7wg@airforcecadets.gov.au" and CC in your CO.\n`;
       }
 
-      if (unmetKeys.has("adultBehaviourPolicy") || unmetKeys.has("youthSafety")) {
+      if (unmetKeys.has("adultBehaviourPolicy")) {
         instructionsText += `--------------------------------------------------\n`;
-        instructionsText += `Adult Behaviour Policy Training / Defence Youth Protection:\n\n`;
-        instructionsText += `On CEA, navigate to the online training section and complete the below courses (this can be reached from the "My Learning" Link under Quick Links on your CEA Home Page):\n\n`;
-        instructionsText += `- Behaviour Policy Training - Adult (BPT-A)\n`;
+        instructionsText += `Adult Behaviour Policy Training:\n\n`;
+        instructionsText += `Adult Behaviour Policy Training has now been deprecated. Members missing this accomplishment will be considered to have met the compliance requirements for this item until new training has been published within the online training system. No further actions are needed.\n`;
+      }
+
+      if (unmetKeys.has("youthSafety")) {
+        instructionsText += `--------------------------------------------------\n`;
+        instructionsText += `Defence Youth Protection:\n\n`;
+        instructionsText += `On CEA, navigate to the online training section and complete the below course (this can be reached from the "My Learning" Link under Quick Links on your CEA Home Page):\n\n`;
         instructionsText += `- Defence Youth Protection Officer and Instructor of Cadets Course (DYPOIC)\n\n`;
-        instructionsText += `If you have any trouble accessing these courses please contact Staff Officer Cadet and Adult Development (SOCAD) at SOCAD.7WG@airforcecadets.gov.au\n`;
+        instructionsText += `If you have any trouble accessing this course please contact Staff Officer Cadet and Adult Development (SOCAD) at SOCAD.7WG@airforcecadets.gov.au\n`;
       }
 
       if (unmetKeys.has("policeClearance")) {
@@ -844,12 +848,17 @@ export default function CompliancePage() {
                                   
                                   if (criterionConfig?.isAdvisory) {
                                     if (!criterion.isMet) {
+                                      const alertDescription = criterion.key === 'cpr'
+                                        ? `This member is not current with CPR Qualifications and is not eligible to act in the role of First Aid Officer (FAIDO) on any activity until such time as they have completed the qualification. (${criterion.details})`
+                                        : criterion.key === 'adultBehaviourPolicy'
+                                        ? `Adult Behaviour Policy Training has now been deprecated. Members missing this accomplishment will be considered to have met the compliance requirements for this item until new training has been published within the online training system.`
+                                        : `This member has not signed the Code of Conduct. (${criterion.details})`;
                                       return (
                                         <Alert key={criterion.key} className="border-amber-500/50 text-amber-700 dark:border-amber-500/60 dark:text-amber-400 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-500">
                                           <ShieldAlert className="h-4 w-4" />
                                           <AlertTitle>{criterion.name} - Advisory</AlertTitle>
                                           <AlertDescription>
-                                            This member is not current with CPR Qualifications and is not eligible to act in the role of First Aid Officer (FAIDO) on any activity until such time as they have completed the qualification. ({criterion.details})
+                                            {alertDescription}
                                           </AlertDescription>
                                         </Alert>
                                       );
@@ -926,7 +935,7 @@ export default function CompliancePage() {
             </li>
             <li><strong>Working With Children Check</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
             <li><strong>Code of Conduct - Signed</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
-            <li><strong>Adult Behaviour Policy Training</strong> (valid if completed within the last 1 year(s), check is exclusive of expiry date - expires *on* the date shown. Specific Accomplishment to look for is &quot;Adult Behaviour Policy Training&quot;).</li>
+            <li><strong>Adult Behaviour Policy Training</strong> (Deprecated. Members missing this accomplishment will be considered to have met the compliance requirements for this item until new training has been published within the online training system).</li>
             <li><strong>National Police Clearance</strong> (valid if completed within the last 5 year(s), check is exclusive of expiry date - expires *on* the date shown).</li>
             <li>
                 <strong>Defence Youth Protection</strong> (valid if completed within the last 3 year(s), check is exclusive of expiry date - expires *on* the date shown Additionally if the members rank is &quot;CIV&quot; then they may be marked as compliant using the accomplishment &quot;Defence Youth Protection Awareness Course&quot; however any Rank other than &quot;CIV&quot; must have &quot;Defence Youth Protection Officers and Instructors&quot; in order to be compliant validity period for all accomplishments in this rule are the same).

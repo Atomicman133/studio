@@ -12,8 +12,30 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.8",
+    version: "0.2.9",
     date: "Current",
+    title: "Adult Behaviour Policy Deprecation & First Aid Booking Updates",
+    sections: [
+      {
+        title: "Compliance Logic & UI Updates",
+        items: [
+          "Deprecated the 'Adult Behaviour Policy Training' requirement by converting it to a soft advisory check (similar to CPR). Missing this item will no longer block overall compliance status.",
+          "Added a custom yellow warning notification for the outstanding 'Adult Behaviour Policy Training' requirement in the compliance dashboard details.",
+          "Updated the staff profile page to display custom deprecation warning details for the 'Adult Behaviour Policy Training' and added a corresponding yellow caution badge to the staff list.",
+        ],
+      },
+      {
+        title: "Email Template Adjustments",
+        items: [
+          "Updated first aid instructions in compliance emails to remove the payment and booking restrictions for first-time qualifications, indicating both initial and renewals are covered by Defence.",
+          "Split 'Adult Behaviour Policy Training' and 'Defence Youth Protection' instructions in compliance emails. The email now explicitly alerts the user that the Adult Behaviour training is deprecated and requires no further action.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.8",
+    date: "Previous Update",
     title: "Transactional Compliance Emailing & Dynamic Advisory Guidelines",
     sections: [
       {
@@ -495,12 +517,12 @@ export default function PatchNotesPage() {
 
     // Report Title
     doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
+    doc.setFont(undefined as any, 'bold');
     await checkPageBreak(sectionSpacing);
     doc.text("Squadron Manager - Patch Notes", pageWidth / 2, yPos, { align: 'center' });
     yPos += sectionSpacing;
     doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    doc.setFont(undefined as any, 'normal');
     await checkPageBreak();
     doc.text(`Generated on: ${format(new Date(), "PPP")}`, pageWidth / 2, yPos, { align: 'center' });
     yPos += sectionSpacing * 1.5;
@@ -508,23 +530,23 @@ export default function PatchNotesPage() {
     for (const release of patchNotesData) {
       await checkPageBreak(sectionSpacing + 16);
       doc.setFontSize(16);
-      doc.setFont(undefined, 'bold');
+      doc.setFont(undefined as any, 'bold');
       doc.text(`Version ${release.version} (${release.date})`, margin, yPos);
       yPos += lineSpacing * 0.8;
       doc.setFontSize(12);
-      doc.setFont(undefined, 'italic');
+      doc.setFont(undefined as any, 'italic');
       doc.text(release.title, margin, yPos);
       yPos += sectionSpacing;
 
       for (const section of release.sections) {
         await checkPageBreak(lineSpacing + 12);
         doc.setFontSize(11);
-        doc.setFont(undefined, 'bold');
+        doc.setFont(undefined as any, 'bold');
         doc.text(section.title, margin + indent, yPos);
         yPos += lineSpacing * 0.9;
 
         doc.setFontSize(10);
-        doc.setFont(undefined, 'normal');
+        doc.setFont(undefined as any, 'normal');
         for (const item of section.items) {
           const itemLines = doc.splitTextToSize(`• ${item}`, maxLineWidth - (indent * 2));
           await checkPageBreak(itemLines.length * (lineSpacing * 0.7) + (lineSpacing * 0.3));

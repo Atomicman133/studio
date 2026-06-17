@@ -1,0 +1,6 @@
+{
+  "apphosting": {
+    "backendId": "squadron-manager",
+    "rootDir": "./"
+  }
+}
