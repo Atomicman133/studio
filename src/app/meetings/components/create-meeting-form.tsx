@@ -49,6 +49,7 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
 
   const [customName, setCustomName] = React.useState("");
   const [customEmail, setCustomEmail] = React.useState("");
+  const [isStaffOpen, setIsStaffOpen] = React.useState(false);
 
   const handleAddCustomInvitee = () => {
     if (customName && customEmail) {
@@ -152,7 +153,7 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
           <div className="flex flex-col md:flex-row gap-4 items-start">
             <div className="w-full md:w-1/2">
               <p className="text-sm font-medium mb-2">Select Staff</p>
-              <Popover>
+              <Popover open={isStaffOpen} onOpenChange={setIsStaffOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" role="combobox" className="w-full justify-between" disabled={isSubmitting || isLoadingStaff}>
                     {isLoadingStaff ? "Loading staff..." : "Select staff members..."}
