@@ -38,6 +38,7 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
       title: "",
       location: "",
       invitees: [],
+      meetingTime: "",
     },
   });
 
@@ -48,7 +49,6 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
 
   const [customName, setCustomName] = React.useState("");
   const [customEmail, setCustomEmail] = React.useState("");
-  const [isCalendarOpen, setIsCalendarOpen] = React.useState(false);
 
   const handleAddCustomInvitee = () => {
     if (customName && customEmail) {
@@ -95,32 +95,22 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
             render={({ field }) => (
               <FormItem className="flex flex-col">
                 <FormLabel>Meeting Date</FormLabel>
-                <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                  <PopoverTrigger asChild>
-                    <FormControl>
-                      <Button
-                        variant={"outline"}
-                        className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                        disabled={isSubmitting}
-                      >
-                        {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </FormControl>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar 
-                      mode="single" 
-                      selected={field.value} 
-                      onSelect={(date) => {
-                        field.onChange(date);
-                        setIsCalendarOpen(false);
-                      }} 
-                      initialFocus 
-                      disabled={isSubmitting} 
-                    />
-                  </PopoverContent>
-                </Popover>
+                <FormControl>
+                  <Input 
+                    type="date"
+                    value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        // Parse as local date at noon to avoid timezone shift issues
+                        const [year, month, day] = e.target.value.split('-').map(Number);
+                        field.onChange(new Date(year, month - 1, day, 12, 0, 0));
+                      } else {
+                        field.onChange(undefined);
+                      }
+                    }}
+                    disabled={isSubmitting}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
@@ -133,7 +123,7 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
               <FormItem>
                 <FormLabel>Meeting Time (24h)</FormLabel>
                 <FormControl>
-                  <Input type="time" placeholder="14:30" {...field} disabled={isSubmitting} />
+                  <Input type="time" placeholder="14:30" value={field.value || ""} onChange={field.onChange} disabled={isSubmitting} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -148,7 +138,7 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
             <FormItem>
               <FormLabel>Location / Link (Optional)</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., HQ Room 1 or Teams Link" {...field} disabled={isSubmitting} />
+                <Input placeholder="e.g., HQ Room 1 or Teams Link" value={field.value || ""} onChange={field.onChange} disabled={isSubmitting} />
               </FormControl>
               <FormMessage />
             </FormItem>
