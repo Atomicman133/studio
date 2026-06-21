@@ -16,3 +16,5 @@ env:
     value: "squadron.manager.7wing@gmail.com"
   - variable: GMAIL_APP_PASSWORD
     secret: GMAIL_APP_PASSWORD
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
