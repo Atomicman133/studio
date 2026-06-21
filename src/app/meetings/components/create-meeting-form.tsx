@@ -15,13 +15,10 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2, Plus, Trash2, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStaff } from "@/hooks/useStaffData";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 interface CreateMeetingFormProps {
   onSubmit: (data: CreateMeetingFormData) => void;
@@ -49,7 +46,32 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
 
   const [customName, setCustomName] = React.useState("");
   const [customEmail, setCustomEmail] = React.useState("");
-  const [isStaffOpen, setIsStaffOpen] = React.useState(false);
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [isOpen, setIsOpen] = React.useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const filteredStaff = React.useMemo(() => {
+    if (!searchTerm.trim()) return staffList;
+    const query = searchTerm.toLowerCase();
+    return staffList.filter((staff) => {
+      const fullName = `${staff.rank || ""} ${staff.firstName || ""} ${staff.lastName || ""}`.toLowerCase();
+      const email = (staff.email || "").toLowerCase();
+      return fullName.includes(query) || email.includes(query);
+    });
+  }, [staffList, searchTerm]);
 
   const handleAddCustomInvitee = () => {
     if (customName && customEmail) {
@@ -151,36 +173,50 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
           <FormDescription>Select staff members or add custom guests. They will receive an email invitation to the agenda page.</FormDescription>
           
           <div className="flex flex-col md:flex-row gap-4 items-start">
-            <div className="w-full md:w-1/2">
+            <div className="w-full md:w-1/2 relative" ref={dropdownRef}>
               <p className="text-sm font-medium mb-2">Select Staff</p>
-              <Popover open={isStaffOpen} onOpenChange={setIsStaffOpen}>
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="outline" role="combobox" className="w-full justify-between" disabled={isSubmitting || isLoadingStaff}>
-                    {isLoadingStaff ? "Loading staff..." : "Select staff members..."}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[300px] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search staff..." />
-                    <CommandList>
-                      <CommandEmpty>No staff found.</CommandEmpty>
-                      <CommandGroup>
-                        {staffList.map((staff) => {
-                          const isSelected = inviteeFields.some((i) => i.staffId === staff.id);
-                          return (
-                            <CommandItem key={staff.id} onSelect={() => handleToggleStaff(staff)}>
-                              <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
-                                <Check className={cn("h-4 w-4")} />
-                              </div>
-                              {staff.rank} {staff.firstName} {staff.lastName}
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <Input
+                type="text"
+                placeholder={isLoadingStaff ? "Loading staff..." : "Search staff members..."}
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setIsOpen(true);
+                }}
+                onFocus={() => setIsOpen(true)}
+                disabled={isSubmitting || isLoadingStaff}
+              />
+              {isOpen && !isLoadingStaff && (
+                <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                  {filteredStaff.length === 0 ? (
+                    <div className="py-6 text-center text-sm text-muted-foreground">No staff found.</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {filteredStaff.map((staff) => {
+                        const isSelected = inviteeFields.some((i) => i.staffId === staff.id);
+                        return (
+                          <button
+                            key={staff.id}
+                            type="button"
+                            className={cn(
+                              "relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground text-left transition-colors",
+                              isSelected && "bg-accent/50"
+                            )}
+                            onClick={() => {
+                              handleToggleStaff(staff);
+                            }}
+                          >
+                            <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", isSelected ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                              <Check className="h-4 w-4" />
+                            </div>
+                            <span>{staff.rank} {staff.firstName} {staff.lastName}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="w-full md:w-1/2 space-y-2">
