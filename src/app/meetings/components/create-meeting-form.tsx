@@ -155,7 +155,7 @@ export function CreateMeetingForm({ onSubmit, onCancel, isSubmitting }: CreateMe
               <p className="text-sm font-medium mb-2">Select Staff</p>
               <Popover open={isStaffOpen} onOpenChange={setIsStaffOpen}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" role="combobox" className="w-full justify-between" disabled={isSubmitting || isLoadingStaff}>
+                  <Button type="button" variant="outline" role="combobox" className="w-full justify-between" disabled={isSubmitting || isLoadingStaff}>
                     {isLoadingStaff ? "Loading staff..." : "Select staff members..."}
                   </Button>
                 </PopoverTrigger>
