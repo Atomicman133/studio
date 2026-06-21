@@ -15,6 +15,23 @@ import { Loader2, Plus, Users, Play, Send, Calendar, CheckSquare, ListTodo } fro
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
+const parseActionDueDate = (dueDate: any): string => {
+  if (!dueDate) return "";
+  let dateObj: Date;
+  if (dueDate instanceof Date) {
+    dateObj = dueDate;
+  } else if (dueDate && typeof dueDate.toDate === "function") {
+    dateObj = dueDate.toDate();
+  } else if (dueDate && dueDate.seconds !== undefined) {
+    dateObj = new Date(dueDate.seconds * 1000);
+  } else {
+    dateObj = new Date(dueDate);
+  }
+  
+  if (isNaN(dateObj.getTime())) return "";
+  return dateObj.toISOString().split('T')[0];
+};
+
 export default function ConductMeetingPage() {
   const params = useParams();
   const id = params.id as string;
@@ -343,7 +360,7 @@ export default function ConductMeetingPage() {
                               <div className="col-span-5 md:col-span-3">
                                 <Input 
                                   type="date"
-                                  value={action.dueDate ? (action.dueDate instanceof Date ? action.dueDate.toISOString().split('T')[0] : new Date(action.dueDate).toISOString().split('T')[0]) : ""} 
+                                  value={parseActionDueDate(action.dueDate)} 
                                   onChange={e => updateActionItem(i, ai, "dueDate", e.target.value ? new Date(e.target.value) : null)}
                                   className="h-8 text-xs"
                                 />
