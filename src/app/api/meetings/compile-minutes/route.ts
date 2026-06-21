@@ -3,6 +3,23 @@ import { db } from '@/lib/firebase/config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { format } from 'date-fns';
 
+const parseActionDueDate = (dueDate: any): string => {
+  if (!dueDate) return "";
+  let dateObj: Date;
+  if (dueDate instanceof Date) {
+    dateObj = dueDate;
+  } else if (dueDate && typeof dueDate.toDate === "function") {
+    dateObj = dueDate.toDate();
+  } else if (dueDate && dueDate.seconds !== undefined) {
+    dateObj = new Date(dueDate.seconds * 1000);
+  } else {
+    dateObj = new Date(dueDate);
+  }
+  
+  if (isNaN(dateObj.getTime())) return "";
+  return format(dateObj, "yyyy-MM-dd");
+};
+
 export async function POST(request: Request) {
   try {
     const { meetingId } = await request.json();
@@ -54,7 +71,7 @@ export async function POST(request: Request) {
       compiledText += `Action Items:\n`;
       if (item.actionItems && item.actionItems.length > 0) {
         item.actionItems.forEach((action: any) => {
-          const dueStr = action.dueDate ? format(new Date(action.dueDate), "yyyy-MM-dd") : "No due date";
+          const dueStr = parseActionDueDate(action.dueDate) || "No due date";
           compiledText += `   - ${action.description} (Assignee: ${action.assignee}, Due: ${dueStr})\n`;
         });
       } else {
