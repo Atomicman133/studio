@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase/config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { ai } from '@/ai/genkit';
+import { format } from 'date-fns';
 
 export async function POST(request: Request) {
   try {
@@ -25,30 +25,43 @@ export async function POST(request: Request) {
     const adhoc = meetingData.adhocAttendees || [];
     const allPresent = [...presentInvitees, ...adhoc];
 
-    const promptText = `
-You are an expert meeting secretary. Compile the following meeting notes into formal, professional meeting minutes.
+    const presentStr = allPresent.length > 0 ? allPresent.join(", ") : "None";
+    const absentStr = absentInvitees.length > 0 ? absentInvitees.join(", ") : "None";
+    const dateVal = meetingData.dateTime?.toDate ? meetingData.dateTime.toDate() : new Date(meetingData.dateTime);
+    const formattedDate = format(dateVal, "PPPP p");
 
-Meeting Details:
-Title: ${meetingData.title}
-Date: ${meetingData.dateTime.toDate().toLocaleString()}
-Location: ${meetingData.location || "TBA"}
+    let compiledText = `# MEETING MINUTES\n`;
+    compiledText += `====================\n\n`;
+    compiledText += `Meeting Title: ${meetingData.title}\n`;
+    compiledText += `Date & Time: ${formattedDate}\n`;
+    compiledText += `Location: ${meetingData.location || "N/A"}\n\n`;
 
-Attendance:
-Present: ${allPresent.length > 0 ? allPresent.join(", ") : "None recorded"}
-Absent: ${absentInvitees.length > 0 ? absentInvitees.join(", ") : "None recorded"}
+    compiledText += `# ATTENDANCE\n`;
+    compiledText += `Present: ${presentStr}\n`;
+    compiledText += `Absent: ${absentStr}\n\n`;
 
-Agenda Items & Notes:
-${(meetingData.agendaItems || []).map((item: any, i: number) => `
-${i + 1}. Topic: ${item.description} (Submitted by: ${item.submitterName})
-   Discussion Notes: ${item.notes || "No notes recorded."}
-   Action Items: ${item.actionItems?.length > 0 ? item.actionItems.map((a: any) => `- ${a.description} (Assignee: ${a.assignee}, Due: ${a.dueDate})`).join('\n   ') : "None"}
-`).join('\n')}
+    compiledText += `# DISCUSSION & ACTIONS\n`;
+    compiledText += `--------------------\n\n`;
 
-Please format the minutes clearly. Start with a header, list the attendance, then summarize each agenda item's discussion and any associated action items. Be concise but capture the key points. Output in plain text (not markdown formatting characters like ** or #, as this will be printed directly to a PDF).
-`;
+    (meetingData.agendaItems || []).forEach((item: any, index: number) => {
+      compiledText += `# Topic ${index + 1}: ${item.description}\n`;
+      compiledText += `Submitted by: ${item.submitterName}\n\n`;
+      
+      compiledText += `Discussion:\n`;
+      const notes = item.notes ? item.notes.trim() : "No notes recorded.";
+      compiledText += notes.split('\n').map((line: string) => `   ${line}`).join('\n') + `\n\n`;
 
-    const response = await ai.generate(promptText);
-    const compiledText = response.text;
+      compiledText += `Action Items:\n`;
+      if (item.actionItems && item.actionItems.length > 0) {
+        item.actionItems.forEach((action: any) => {
+          const dueStr = action.dueDate ? format(new Date(action.dueDate), "yyyy-MM-dd") : "No due date";
+          compiledText += `   - ${action.description} (Assignee: ${action.assignee}, Due: ${dueStr})\n`;
+        });
+      } else {
+        compiledText += `   - None assigned\n`;
+      }
+      compiledText += `\n`;
+    });
 
     // Save to Firestore
     await updateDoc(meetingRef, {

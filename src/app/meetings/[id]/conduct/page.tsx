@@ -86,6 +86,17 @@ export default function ConductMeetingPage() {
     setAgendaItems(updated);
   };
 
+  const handleAddOtherBusiness = () => {
+    const newItem: AgendaItem = {
+      id: crypto.randomUUID(),
+      description: "Other Business",
+      submitterName: "Meeting Chair",
+      notes: "",
+      actionItems: [],
+    };
+    setAgendaItems(prev => [...prev, newItem]);
+  };
+
   const addActionItem = (agendaIndex: number) => {
     const updated = [...agendaItems];
     const newAction: ActionItem = { id: crypto.randomUUID(), description: "", assignee: "", carriedForward: false, dueDate: null };
@@ -254,10 +265,13 @@ export default function ConductMeetingPage() {
 
         <div className="md:col-span-2 space-y-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
               <CardTitle className="text-xl flex items-center gap-2">
                 <CheckSquare className="h-5 w-5" /> Agenda & Notes
               </CardTitle>
+              <Button type="button" size="sm" onClick={handleAddOtherBusiness} variant="outline">
+                <Plus className="h-4 w-4 mr-1" /> Add Other Business
+              </Button>
             </CardHeader>
             <CardContent className="space-y-8">
               {agendaItems.length === 0 ? (
@@ -267,8 +281,21 @@ export default function ConductMeetingPage() {
                   <div key={item.id} className="p-4 border rounded-lg bg-card shadow-sm space-y-4">
                     <div className="flex gap-3 items-start">
                       <div className="font-bold text-xl text-primary">{i + 1}.</div>
-                      <div className="flex-1">
-                        <p className="font-semibold text-lg">{item.description}</p>
+                      <div className="flex-1 col-span-1">
+                        {item.description.startsWith("Other Business") || item.submitterName === "Meeting Chair" ? (
+                          <Input
+                            value={item.description}
+                            onChange={(e) => {
+                              const updated = [...agendaItems];
+                              updated[i] = { ...updated[i], description: e.target.value };
+                              setAgendaItems(updated);
+                            }}
+                            className="font-semibold text-lg h-9 mb-1"
+                            placeholder="Other Business Title"
+                          />
+                        ) : (
+                          <p className="font-semibold text-lg">{item.description}</p>
+                        )}
                         <p className="text-sm text-muted-foreground">Submitted by: {item.submitterName}</p>
                       </div>
                     </div>
