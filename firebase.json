@@ -1,7 +1,10 @@
 {
-  "firestore": {
-    "rules": "firestore.rules"
-  },
+  "firestore": [
+    {
+      "database": "dataset1",
+      "rules": "firestore.rules"
+    }
+  ],
   "apphosting": {
     "backendId": "squadron-manager",
     "rootDir": "./"
