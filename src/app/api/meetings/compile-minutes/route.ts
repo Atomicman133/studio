@@ -37,8 +37,16 @@ export async function POST(request: Request) {
     
     const meetingData = docSnap.data() as any;
 
-    const presentInvitees = meetingData.invitees?.filter((i: any) => meetingData.attendeesPresentEmails?.includes(i.email)).map((i: any) => i.name) || [];
-    const absentInvitees = meetingData.invitees?.filter((i: any) => !meetingData.attendeesPresentEmails?.includes(i.email)).map((i: any) => i.name) || [];
+    const presentEmailsNormalized = (meetingData.attendeesPresentEmails || []).map((e: string) => e.trim().toLowerCase());
+
+    const presentInvitees = meetingData.invitees?.filter((i: any) => 
+      i.email && presentEmailsNormalized.includes(i.email.trim().toLowerCase())
+    ).map((i: any) => i.name) || [];
+
+    const absentInvitees = meetingData.invitees?.filter((i: any) => 
+      i.email && !presentEmailsNormalized.includes(i.email.trim().toLowerCase())
+    ).map((i: any) => i.name) || [];
+
     const adhoc = meetingData.adhocAttendees || [];
     const allPresent = [...presentInvitees, ...adhoc];
 
