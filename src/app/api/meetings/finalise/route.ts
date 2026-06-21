@@ -38,20 +38,57 @@ export async function POST(request: Request) {
           encoding: 'base64'
         };
 
+        const agendaItems = meetingData.agendaItems || [];
+        let agendaItemsHtml = "";
+        
+        if (agendaItems.length === 0) {
+          agendaItemsHtml = "<p><em>No items were submitted to the agenda for this meeting.</em></p>";
+        } else {
+          agendaItemsHtml = `
+            <div style="margin-top: 15px; margin-bottom: 20px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <thead>
+                  <tr style="background-color: #f3f4f6; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 8px; text-align: left; font-weight: bold; width: 60px;">No.</th>
+                    <th style="padding: 8px; text-align: left; font-weight: bold;">Description</th>
+                    <th style="padding: 8px; text-align: left; font-weight: bold; width: 150px;">Submitter</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${agendaItems.map((item: any, index: number) => `
+                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                      <td style="padding: 8px; vertical-align: top;">${index + 1}</td>
+                      <td style="padding: 8px; vertical-align: top;">
+                        <strong>${item.description}</strong>
+                        ${item.notes ? `<div style="font-size: 12px; color: #555; margin-top: 4px; font-style: italic;">Notes: ${item.notes}</div>` : ''}
+                      </td>
+                      <td style="padding: 8px; vertical-align: top; color: #4b5563;">${item.submitterName}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+
         const emailHtml = `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2>Meeting Agenda Finalised</h2>
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1f2937; line-height: 1.5;">
+            <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 8px; margin-bottom: 20px;">Meeting Agenda Finalised</h2>
             <p>The agenda for the upcoming meeting <strong>${meetingData.title}</strong> has been finalised.</p>
-            <p>Please find the final agenda attached to this email as a PDF.</p>
-            <br/>
+            <p>Please find the final agenda attached to this email as a PDF, or review the agenda details below:</p>
+            
             <p><strong>Meeting Details:</strong></p>
-            <ul>
+            <ul style="padding-left: 20px;">
               <li><strong>Date & Time:</strong> ${meetingData.dateTime.toDate().toLocaleString()}</li>
               <li><strong>Location:</strong> ${meetingData.location || "TBA"}</li>
             </ul>
+            
+            <h3 style="color: #1e3a8a; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; margin-top: 25px;">Agenda Items</h3>
+            ${agendaItemsHtml}
+            
             <br/>
             <p>Thank you,</p>
-            <p>Squadron Manager System</p>
+            <p><strong>Squadron Manager System</strong></p>
           </div>
         `;
 

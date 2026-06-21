@@ -7,6 +7,7 @@ export async function sendEmail({
   html,
   pdfBase64,
   filename,
+  attachments,
 }: {
   to: string | string[];
   subject: string;
@@ -14,6 +15,7 @@ export async function sendEmail({
   html?: string;
   pdfBase64?: string;
   filename?: string;
+  attachments?: any[];
 }) {
   const gmailUser = process.env.GMAIL_USER;
   const gmailPass = process.env.GMAIL_APP_PASSWORD;
@@ -47,6 +49,8 @@ export async function sendEmail({
         contentType: "application/pdf",
       },
     ];
+  } else if (attachments) {
+    mailOptions.attachments = attachments;
   }
 
   await transporter.sendMail(mailOptions);
