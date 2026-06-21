@@ -12,8 +12,18 @@ import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, addDoc, Timestamp, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, addDoc, Timestamp, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CreateMeetingForm } from "./components/create-meeting-form";
 import type { Meeting, CreateMeetingFormData } from "./meeting-schema";
 import { getAuth } from "firebase/auth";
@@ -51,6 +61,37 @@ export default function MeetingsPage() {
 
   const [isCreateOpen, setIsCreateOpen] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
+  const [meetingToDelete, setMeetingToDelete] = React.useState<Meeting | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
+  const handleDeleteMeeting = async () => {
+    if (!meetingToDelete || !meetingToDelete.id) return;
+    setIsDeleting(true);
+    try {
+      const meetingId = meetingToDelete.id;
+      // 1. Call API to send cancel emails
+      const res = await fetch("/api/meetings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meetingId }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to send cancellation emails.");
+      }
+
+      // 2. Delete document from Firestore
+      await deleteDoc(doc(db, 'meetings', meetingId));
+
+      toast({ title: "Meeting Cancelled", description: "Meeting has been deleted and cancellation emails sent to invitees." });
+      queryClient.invalidateQueries({ queryKey: [MEETINGS_QUERY_KEY] });
+      setMeetingToDelete(null);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message || "Failed to delete meeting." });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateMeeting = async (formData: CreateMeetingFormData) => {
     setIsCreating(true);
@@ -175,7 +216,12 @@ export default function MeetingsPage() {
                              </DropdownMenuItem>
                            )}
                            <DropdownMenuSeparator />
-                           <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
+                           <DropdownMenuItem
+                             className="text-destructive"
+                             onClick={() => setMeetingToDelete(meeting)}
+                           >
+                             Delete
+                           </DropdownMenuItem>
                          </DropdownMenuContent>
                        </DropdownMenu>
                      </TableCell>
@@ -200,6 +246,34 @@ export default function MeetingsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!meetingToDelete} onOpenChange={(open) => !open && setMeetingToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" /> Cancel & Delete Meeting
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to cancel and delete the meeting <strong>"{meetingToDelete?.title}"</strong>?
+              This action cannot be undone. All invitees will receive an email notifying them of the cancellation.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteMeeting();
+              }}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+            >
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Yes, Cancel Meeting
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
