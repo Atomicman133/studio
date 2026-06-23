@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "No invitees to email", success: true });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const agendaUrl = `${baseUrl}/meetings/${meetingId}/agenda`;
+    const origin = req.nextUrl.origin;
+    const agendaUrl = `${origin}/meetings/${meetingId}/agenda`;
 
     const emails = invitees.map((i: any) => i.email).filter(Boolean);
 
