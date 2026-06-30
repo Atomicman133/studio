@@ -40,6 +40,7 @@ export const meetingSchema = z.object({
   adhocAttendees: z.array(z.string()).default([]), // Names of adhoc attendees
   otherBusinessNotes: z.string().optional(),
   minutesCompiled: z.boolean().default(false),
+  minutesCompiledText: z.string().optional(),
 });
 
 export type Meeting = z.infer<typeof meetingSchema>;

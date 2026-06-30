@@ -27,7 +27,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "No invitees to email", success: true });
     }
 
-    const origin = req.nextUrl.origin;
+    let host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+    const proto = req.headers.get("x-forwarded-proto") || "https";
+
+    if (process.env.NODE_ENV === "production") {
+      host = "studio--squadron-manager-ekm3y.us-central1.hosted.app";
+    }
+
+    const origin = host ? `${proto}://${host}` : "https://studio--squadron-manager-ekm3y.us-central1.hosted.app";
     const agendaUrl = `${origin}/meetings/${meetingId}/agenda`;
 
     const emails = invitees.map((i: any) => i.email).filter(Boolean);

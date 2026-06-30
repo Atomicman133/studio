@@ -5,7 +5,7 @@ import { sendEmail } from '@/lib/email-utils';
 
 export async function POST(request: Request) {
   try {
-    const { meetingId, pdfBase64, pdfFilename } = await request.json();
+    const { meetingId, pdfBase64, pdfFilename, resend } = await request.json();
 
     if (!meetingId) {
       return NextResponse.json({ error: "meetingId is required" }, { status: 400 });
@@ -20,12 +20,14 @@ export async function POST(request: Request) {
       }
       
       const meetingData = docSnap.data() as any;
-      if (meetingData.status !== "Draft") {
+      if (meetingData.status !== "Draft" && !resend) {
         return NextResponse.json({ success: true, message: "Already finalised" });
       }
 
-      // Update status to Agenda Finalised
-      transaction.update(meetingRef, { status: "Agenda Finalised" });
+      // Update status to Agenda Finalised only if it is currently Draft
+      if (meetingData.status === "Draft") {
+        transaction.update(meetingRef, { status: "Agenda Finalised" });
+      }
 
       // If we have invitees, send them the email with the agenda attached
       const invitees = meetingData.invitees || [];

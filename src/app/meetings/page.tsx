@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { PlusCircle, MoreHorizontal, CalendarPlus, FileText, Loader2, AlertTriangle, Users, Settings } from "lucide-react";
+import { PlusCircle, MoreHorizontal, CalendarPlus, FileText, Loader2, AlertTriangle, Users, Settings, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +63,8 @@ export default function MeetingsPage() {
   const [isCreating, setIsCreating] = React.useState(false);
   const [meetingToDelete, setMeetingToDelete] = React.useState<Meeting | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [selectedMeetingForMinutes, setSelectedMeetingForMinutes] = React.useState<Meeting | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = React.useState(false);
 
   const handleDeleteMeeting = async () => {
     if (!meetingToDelete || !meetingToDelete.id) return;
@@ -215,6 +217,13 @@ export default function MeetingsPage() {
                                <Link href={`/meetings/${meeting.id}/conduct`}>Conduct Meeting</Link>
                              </DropdownMenuItem>
                            )}
+                           {meeting.status === "Completed" && (
+                             <DropdownMenuItem
+                               onClick={() => setSelectedMeetingForMinutes(meeting)}
+                             >
+                               View Minutes
+                             </DropdownMenuItem>
+                           )}
                            <DropdownMenuSeparator />
                            <DropdownMenuItem
                              className="text-destructive"
@@ -274,6 +283,92 @@ export default function MeetingsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* View Minutes Dialog */}
+      <Dialog open={!!selectedMeetingForMinutes} onOpenChange={(open) => !open && setSelectedMeetingForMinutes(null)}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl flex items-center gap-2">
+              <FileText className="h-6 w-6 text-primary" /> Meeting Minutes
+            </DialogTitle>
+            <DialogDescription>
+              {selectedMeetingForMinutes && (
+                <span>
+                  Finalised minutes for <strong>{selectedMeetingForMinutes.title}</strong>, conducted on{" "}
+                  {format(selectedMeetingForMinutes.dateTime, "PPPP")}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            {selectedMeetingForMinutes?.minutesCompiledText ? (
+              <div className="bg-muted/30 p-6 rounded-lg max-h-96 overflow-y-auto border space-y-3 font-sans text-foreground">
+                {selectedMeetingForMinutes.minutesCompiledText.split('\n').map((line: string, idx: number) => {
+                  const trimmed = line.trim();
+                  if (trimmed.startsWith('#')) {
+                    const depth = (line.match(/^#+/) || ['#'])[0].length;
+                    const text = trimmed.replace(/^#+\s*/, '');
+                    if (depth === 1) {
+                      return <h2 key={idx} className="text-xl font-bold text-primary border-b pb-2 mt-4 first:mt-0">{text}</h2>;
+                    }
+                    return <h3 key={idx} className="text-lg font-semibold text-primary mt-3">{text}</h3>;
+                  }
+                  if (trimmed.startsWith('==') || trimmed.startsWith('--')) {
+                    return <hr key={idx} className="my-2 border-muted" />;
+                  }
+                  if (trimmed.startsWith('-')) {
+                    return <li key={idx} className="ml-4 list-disc text-sm text-muted-foreground">{trimmed.substring(1).trim()}</li>;
+                  }
+                  if (trimmed) {
+                    return <p key={idx} className="text-sm leading-relaxed">{line}</p>;
+                  }
+                  return <div key={idx} className="h-2" />;
+                })}
+              </div>
+            ) : (
+              <p className="text-muted-foreground italic text-center py-6">No minutes recorded for this meeting.</p>
+            )}
+          </div>
+          <DialogFooter className="flex justify-between items-center sm:justify-between w-full border-t pt-4">
+            <Button variant="ghost" onClick={() => setSelectedMeetingForMinutes(null)}>
+              Close
+            </Button>
+            {selectedMeetingForMinutes?.minutesCompiledText && (
+              <Button
+                onClick={async () => {
+                  setIsDownloadingPdf(true);
+                  try {
+                    const { generateMinutesPdfBase64 } = await import('@/lib/pdf-utils');
+                    const { base64, filename } = await generateMinutesPdfBase64(
+                      selectedMeetingForMinutes,
+                      selectedMeetingForMinutes.minutesCompiledText!
+                    );
+                    
+                    const link = document.createElement("a");
+                    link.href = `data:application/pdf;base64,${base64}`;
+                    link.download = filename;
+                    link.click();
+                    
+                    toast({ title: "Download Started", description: "Meeting minutes PDF download has started." });
+                  } catch (e: any) {
+                    toast({ variant: "destructive", title: "Download Failed", description: e.message });
+                  } finally {
+                    setIsDownloadingPdf(false);
+                  }
+                }}
+                disabled={isDownloadingPdf}
+              >
+                {isDownloadingPdf ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                Download PDF
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

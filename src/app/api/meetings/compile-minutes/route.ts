@@ -5,19 +5,24 @@ import { format } from 'date-fns';
 
 const parseActionDueDate = (dueDate: any): string => {
   if (!dueDate) return "";
-  let dateObj: Date;
-  if (dueDate instanceof Date) {
-    dateObj = dueDate;
-  } else if (dueDate && typeof dueDate.toDate === "function") {
-    dateObj = dueDate.toDate();
-  } else if (dueDate && dueDate.seconds !== undefined) {
-    dateObj = new Date(dueDate.seconds * 1000);
-  } else {
-    dateObj = new Date(dueDate);
+  try {
+    let dateObj: Date;
+    if (dueDate instanceof Date) {
+      dateObj = dueDate;
+    } else if (dueDate && typeof dueDate.toDate === "function") {
+      dateObj = dueDate.toDate();
+    } else if (dueDate && dueDate.seconds !== undefined) {
+      dateObj = new Date(dueDate.seconds * 1000);
+    } else {
+      dateObj = new Date(dueDate);
+    }
+    
+    if (isNaN(dateObj.getTime())) return "";
+    return format(dateObj, "yyyy-MM-dd");
+  } catch (e) {
+    console.error("Error parsing action due date in compile-minutes API:", e, dueDate);
+    return "";
   }
-  
-  if (isNaN(dateObj.getTime())) return "";
-  return format(dateObj, "yyyy-MM-dd");
 };
 
 export async function POST(request: Request) {
