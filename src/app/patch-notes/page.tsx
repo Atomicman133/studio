@@ -12,8 +12,44 @@ import { format } from "date-fns";
 
 const patchNotesData = [
   {
-    version: "0.2.9",
+    version: "0.2.10",
     date: "Current",
+    title: "Date Resiliency, Staff Invites, Email Resending & Direct Minutes Download",
+    sections: [
+      {
+        title: "Robust Date Parsing",
+        items: [
+          "Fixed a critical RangeError: Invalid time value crash on the Conduct Meeting page and minutes compiler API by wrapping date parsing in a resilient try-catch logic with safe fallbacks.",
+        ],
+      },
+      {
+        title: "Meeting Invitee Enhancements",
+        items: [
+          "Added the ability to search and select registered Squadron Staff directly from the meeting agenda page, automatically filtering out members who have already been invited.",
+          "Added support for inviting custom external attendees by manually entering a Name and Email address.",
+          "Added an Invited Attendees list component that displays all invited members as badges on the agenda page.",
+        ],
+      },
+      {
+        title: "Email Dispatch & Resend Capabilities",
+        items: [
+          "Added options to resend meeting invitations (Draft), finalized agendas (Agenda Finalised/Completed), and meeting minutes (Completed) depending on the current status of the meeting.",
+          "Fixed incorrect email URLs in production by detecting NODE_ENV and forcing the public hosted.app domain.",
+        ],
+      },
+      {
+        title: "Completed Minutes Viewer & Direct Download",
+        items: [
+          "Added a 'View Minutes' option in the meetings list dropdown for Completed meetings.",
+          "Created a premium, built-in Markdown minutes viewer modal that renders discussions and action items with responsive layout styles.",
+          "Added a 'Download PDF' button in the minutes viewer modal that generates and downloads the finalised PDF report client-side instantly.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.2.9",
+    date: "Previous Update",
     title: "Adult Behaviour Policy Deprecation & First Aid Booking Updates",
     sections: [
       {
